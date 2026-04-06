@@ -745,7 +745,9 @@ function rejectSuggestionAction(suggestionId) {
       var msg = JSON.parse(ev.data);
       if (msg.type === 'event') {
         var event = msg.data.event;
-        if (event.type === 'gate_decision' && !gateDecisionSent) {
+        var pathParts = entityPath ? entityPath.split('/') : [];
+        var currentSlug = pathParts.length > 0 ? pathParts[pathParts.length - 1].replace(/\.md$/, '') : '';
+        if (event.type === 'gate_decision' && event.entity === currentSlug && !gateDecisionSent) {
           gateDecisionSent = true;
           gateActions.style.display = 'none';
           gateConfirm.style.display = 'none';
@@ -779,7 +781,6 @@ function rejectSuggestionAction(suggestionId) {
 
   // --- Initialize ---
 
-  var _originalLoadEntity = loadEntity;
   window.loadEntity = function () {
     if (!entityPath) return;
     apiFetch('/api/entity/detail?path=' + encodeURIComponent(entityPath))
