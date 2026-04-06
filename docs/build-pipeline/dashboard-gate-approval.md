@@ -481,3 +481,52 @@ PARTIAL — 8/10 steps PASS, 1 step PARTIAL (POST 404), 1 step not reached
 - Bug fix (comment/suggestion missing) confirmed correct by gate.test.ts passing
 
 **No blocking issues found.** Feature is ready for captain review.
+
+## Stage Report: pr-review
+
+### 1. Self-review completed with findings classified
+
+DONE — 4 findings identified across 10 changed dashboard files (8 from feature 016, plus docs/entity updates).
+
+| # | File | Type | Severity | Description |
+|---|------|------|----------|-------------|
+| F1 | detail.js:748 | CODE | HIGH | WebSocket `onmessage` handler missing entity filter — `gate_decision` events for any entity would update the current page's gate panel, even if viewing a different entity |
+| F2 | detail.js:782 | SUGGESTION | LOW | `_originalLoadEntity` assigned but never used (dead code) |
+| F3 | app.js:218 | SUGGESTION | LOW | Default entity filter excluding "shipped"/"archived" is unrelated to gate approval (scope creep) — functional but belongs in its own commit |
+| F4 | detail.js:744-766 | DOC/advisory | INFO | WebSocket `JSON.parse` on line 745 has no try/catch — malformed messages would throw. Low risk since server controls the messages, but noted for robustness |
+
+### 2. CODE/SUGGESTION findings fixed and pushed
+
+DONE — 2 findings fixed in commit `8d4604d`, pushed to remote.
+
+- **F1 (CODE — fixed):** Added entity slug comparison (`event.entity === currentSlug`) to WebSocket gate_decision handler. Slug derived from `entityPath` the same way as the POST handler (line 652-654). Now only gate decisions matching the currently viewed entity trigger UI updates.
+- **F2 (SUGGESTION — fixed):** Removed unused `_originalLoadEntity` variable.
+- **F3 (SUGGESTION — noted):** app.js filter change is functional and harmless; not reverted since it improves default UX. Would recommend splitting to its own commit in future.
+- **F4 (DOC/advisory — noted):** Low risk; server always sends valid JSON. No fix needed.
+
+### 3. Review summary
+
+**Files reviewed (dashboard code):**
+- `tools/dashboard/src/types.ts` — `gate_decision` added to `AgentEventType` union. Correct.
+- `tools/dashboard/src/events.ts` — `gate_decision`, `comment`, `suggestion` added to `VALID_EVENT_TYPES`. Bug fix for pre-existing sync gap. Correct.
+- `tools/dashboard/src/server.ts` — POST `/api/entity/gate/decision` route. Input validation (4 required fields), decision enum enforcement (`approved`/`changes_requested`), path traversal protection (`validatePath`), event recording + WebSocket publish + channel forwarding. Follows identical pattern as existing endpoints. No security issues.
+- `tools/dashboard/src/gate.test.ts` — 7 tests covering event type validation (3 types + 1 rejection) and route behavior (success, missing fields, invalid decision, path traversal, event buffer, changes_requested). Good coverage.
+- `tools/dashboard/static/detail.html` — Gate panel HTML scaffold with confirmation dialog. Clean structure, no inline JS.
+- `tools/dashboard/static/detail.css` — Gate panel styles. Standard CSS, no issues.
+- `tools/dashboard/static/detail.js` — 285 lines of gate review logic: state derivation (CLAIM-6 cross-reference), confirmation dialog, WebSocket real-time updates, 3s status polling for race detection (CLAIM-8). All dynamic text via `textContent` (no XSS). Entity filter bug found and fixed.
+- `tools/dashboard/static/activity.js` — `renderGateDecision()` function reuses permission card pattern. All text via `textContent`. Correct.
+- `tools/dashboard/static/app.js` — Default filter change (minor scope creep, noted).
+
+**Security audit:**
+- No `innerHTML` with user input anywhere in new code
+- No `eval()`, `Function()`, or dynamic code execution
+- Path traversal protected by `validatePath()` on server
+- Decision values server-side validated (enum check)
+- Buttons disabled immediately on click (prevent double-submit)
+- Confirmation dialog requires explicit human action (guardrail met)
+
+**Test results:** 38 pass, 0 fail (verified after fix commit).
+
+### 4. Recommendation: APPROVE
+
+Feature is well-implemented with proper security controls, comprehensive test coverage, and adherence to existing codebase patterns. The one real bug found (F1 — missing entity filter on WebSocket) has been fixed and pushed. All research corrections (CLAIM-5 bug fix, CLAIM-6 gate derivation, CLAIM-8 race handling) are correctly implemented.
