@@ -44,7 +44,7 @@ def test_first_officer_skill_reads_references_directly():
     text = read_text("skills/first-officer/SKILL.md")
     assert "@references/first-officer-shared-core.md" in text
     assert "@references/code-project-guardrails.md" in text
-    assert "claude-first-officer-runtime.md" in text
+    assert "claude-first-officer-runtime-core.md" in text
     assert "codex-first-officer-runtime.md" in text
     assert "CLAUDECODE" in text
     assert "CODEX_HOME" in text
@@ -325,11 +325,15 @@ def test_assembled_claude_first_officer_has_teamcreate_failure_recovery():
 
     # "Already leading team" stays as a narrow startup-only recovery case.
     assert "Already leading team" in assembled
-    # Fail-early ladder: fresh-suffixed TeamCreate as tier 1.
+    # Core file references fresh-suffixed recovery and points to recovery file.
     assert re.search(r"fresh[-\s]?suffixed", assembled, re.IGNORECASE), (
-        "Recovery ladder must call for a fresh-suffixed TeamCreate."
+        "Core must reference fresh-suffixed TeamCreate recovery."
     )
-    assert "Retry to the same team name is banned" in assembled
+
+    # Recovery-specific content lives in the on-demand recovery file.
+    recovery_path = Path(__file__).resolve().parent.parent / "skills" / "first-officer" / "references" / "claude-first-officer-runtime-recovery.md"
+    recovery_text = recovery_path.read_text()
+    assert "Retry to the same team name is banned" in recovery_text
 
     # Block Agent dispatch while team state is uncertain.
     assert re.search(r"Block all Agent dispatch", assembled)
@@ -366,9 +370,11 @@ def test_assembled_claude_first_officer_has_no_predispatch_health_check():
         "must be gone."
     )
 
-    # Degraded Mode must be declared as a first-class section.
-    assert "## Degraded Mode" in assembled, (
-        "Assembled contract must declare the `## Degraded Mode` section."
+    # Degraded Mode must be declared as a first-class section in the recovery file.
+    recovery_path = Path(__file__).resolve().parent.parent / "skills" / "first-officer" / "references" / "claude-first-officer-runtime-recovery.md"
+    recovery_text = recovery_path.read_text()
+    assert "## Degraded Mode" in recovery_text, (
+        "Recovery file must declare the `## Degraded Mode` section."
     )
 
 
@@ -401,12 +407,12 @@ def test_assembled_claude_first_officer_dispatch_template_has_team_mode_completi
     t = TestRunner("agent content", keep_test_dir=False)
     text = assembled_agent_content(t, "first-officer")
 
-    runtime_path = Path(__file__).resolve().parent.parent / "skills" / "first-officer" / "references" / "claude-first-officer-runtime.md"
-    runtime_text = runtime_path.read_text()
+    core_path = Path(__file__).resolve().parent.parent / "skills" / "first-officer" / "references" / "claude-first-officer-runtime-core.md"
+    core_text = core_path.read_text()
 
-    dispatch_section = section_text(runtime_text, "## Dispatch Adapter", (r"^## ",))
+    dispatch_section = section_text(core_text, "## Dispatch Adapter", (r"^## ",))
 
-    # The break-glass Agent() template includes an explicit SendMessage completion
+    # The structured helper output template includes an explicit SendMessage completion
     # instruction for team-mode dispatch.
     assert re.search(
         r'SendMessage\(to=\\?"team-lead\\?"',
@@ -471,7 +477,7 @@ def test_ensign_stage_report_uses_append_mode():
 
 
 def test_dispatch_template_uses_targeted_read_instruction():
-    text = read_text("skills/first-officer/references/claude-first-officer-runtime.md")
+    text = read_text("skills/first-officer/references/claude-first-officer-runtime-core.md")
     dispatch_section = section_text(text, "## Dispatch Adapter", (r"^## ",))
     assert "for full context" not in dispatch_section, (
         "Dispatch template must not unconditionally instruct reading 'for full context'"
@@ -488,7 +494,7 @@ def test_fo_completion_reads_last_stage_report():
 
 def test_first_officer_runtime_docs_use_next_id_for_task_creation():
     shared = read_text("skills/first-officer/references/first-officer-shared-core.md")
-    claude_runtime = read_text("skills/first-officer/references/claude-first-officer-runtime.md")
+    claude_runtime = read_text("skills/first-officer/references/claude-first-officer-runtime-core.md")
     codex_runtime = read_text("skills/first-officer/references/codex-first-officer-runtime.md")
 
     assert "status --next-id" in shared
@@ -550,8 +556,8 @@ def test_assembled_claude_first_officer_has_structured_dispatch():
     t = TestRunner("agent content", keep_test_dir=False)
     assembled = assembled_agent_content(t, "first-officer")
 
-    runtime_path = Path(__file__).resolve().parent.parent / "skills" / "first-officer" / "references" / "claude-first-officer-runtime.md"
-    runtime_text = runtime_path.read_text()
+    core_path = Path(__file__).resolve().parent.parent / "skills" / "first-officer" / "references" / "claude-first-officer-runtime-core.md"
+    runtime_text = core_path.read_text()
 
     dispatch_section = section_text(runtime_text, "## Dispatch Adapter", (r"^## ",))
 
@@ -576,32 +582,32 @@ def test_assembled_claude_first_officer_has_structured_dispatch():
 
 def test_assembled_claude_first_officer_has_break_glass_dispatch():
     """AC-12: Runtime adapter contains Break-Glass Manual Dispatch with minimal Agent() template."""
-    runtime_path = Path(__file__).resolve().parent.parent / "skills" / "first-officer" / "references" / "claude-first-officer-runtime.md"
-    runtime_text = runtime_path.read_text()
+    recovery_path = Path(__file__).resolve().parent.parent / "skills" / "first-officer" / "references" / "claude-first-officer-runtime-recovery.md"
+    recovery_text = recovery_path.read_text()
 
-    dispatch_section = section_text(runtime_text, "## Dispatch Adapter", (r"^## ",))
+    breakglass_section = section_text(recovery_text, "## Break-Glass Manual Dispatch", (r"^## ",))
 
     # Break-glass section exists
-    assert "Break-Glass Manual Dispatch" in dispatch_section, (
-        "Dispatch Adapter must contain Break-Glass Manual Dispatch section"
+    assert breakglass_section, (
+        "Recovery file must contain Break-Glass Manual Dispatch section"
     )
 
     # The break-glass template includes the essential Agent() fields
-    assert 'subagent_type="{dispatch_agent_id}"' in dispatch_section
-    assert 'name="{worker_key}-{slug}-{stage}"' in dispatch_section
-    assert 'team_name="{team_name}"' in dispatch_section
+    assert 'subagent_type="{dispatch_agent_id}"' in breakglass_section
+    assert 'name="{worker_key}-{slug}-{stage}"' in breakglass_section
+    assert 'team_name="{team_name}"' in breakglass_section
 
     # It has the SendMessage completion signal
     assert re.search(
         r'SendMessage\(to=\\?"team-lead\\?"',
-        dispatch_section,
+        breakglass_section,
     )
 
 
 def test_assembled_claude_first_officer_has_bare_mode_guardrail():
     """Implementation Note 6: bare_mode guardrail sentence is present in dispatch prose."""
-    runtime_path = Path(__file__).resolve().parent.parent / "skills" / "first-officer" / "references" / "claude-first-officer-runtime.md"
-    runtime_text = runtime_path.read_text()
+    core_path = Path(__file__).resolve().parent.parent / "skills" / "first-officer" / "references" / "claude-first-officer-runtime-core.md"
+    runtime_text = core_path.read_text()
 
     dispatch_section = section_text(runtime_text, "## Dispatch Adapter", (r"^## ",))
 
@@ -640,7 +646,7 @@ def test_shared_core_grep_over_read_discipline_for_entity_body():
 
 def test_claude_runtime_points_to_shared_core_entity_body_inspection_rule():
     """AC-2 (#159): the Claude runtime adapter carries a short pointer to the shared-core rule."""
-    text = read_text("skills/first-officer/references/claude-first-officer-runtime.md")
+    text = read_text("skills/first-officer/references/claude-first-officer-runtime-core.md")
     assert "## Probe and Ideation Discipline" in text, (
         "Claude runtime must point to the shared-core `## Probe and Ideation Discipline` section"
     )

@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-CLAUDE_RUNTIME = REPO_ROOT / "skills" / "first-officer" / "references" / "claude-first-officer-runtime.md"
+CLAUDE_RUNTIME = REPO_ROOT / "skills" / "first-officer" / "references" / "claude-first-officer-runtime-core.md"
 SHARED_CORE = REPO_ROOT / "skills" / "first-officer" / "references" / "first-officer-shared-core.md"
 COMM_OFFICER_MOD = REPO_ROOT / "docs" / "plans" / "_mods" / "comm-officer.md"
 

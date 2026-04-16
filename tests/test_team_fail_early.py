@@ -18,7 +18,8 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-ADAPTER_PATH = REPO_ROOT / "skills" / "first-officer" / "references" / "claude-first-officer-runtime.md"
+ADAPTER_CORE_PATH = REPO_ROOT / "skills" / "first-officer" / "references" / "claude-first-officer-runtime-core.md"
+ADAPTER_RECOVERY_PATH = REPO_ROOT / "skills" / "first-officer" / "references" / "claude-first-officer-runtime-recovery.md"
 
 
 def parse_sections(text: str) -> dict[str, str]:
@@ -49,7 +50,7 @@ def parse_sections(text: str) -> dict[str, str]:
 
 @pytest.fixture(scope="module")
 def adapter_text() -> str:
-    return ADAPTER_PATH.read_text()
+    return ADAPTER_CORE_PATH.read_text() + "\n" + ADAPTER_RECOVERY_PATH.read_text()
 
 
 @pytest.fixture(scope="module")
@@ -106,14 +107,14 @@ def test_ac2_retry_same_name_banned_and_no_same_name_teamdelete_teamcreate(
     """AC-2: The failure recovery prose bans retry-to-same-name and specifies
     a fresh-suffixed TeamCreate. The old `TeamDelete -> TeamCreate` same-name
     recovery sequence must not appear as a recovery path."""
-    team_creation = sections["## Team Creation"]
+    recovery = sections["## TeamCreate Failure Recovery (priority-ordered ladder)"]
     # Positive: retry-to-same-name ban exact phrase.
-    assert "Retry to the same team name is banned" in team_creation, (
+    assert "Retry to the same team name is banned" in recovery, (
         "Recovery prose must include the exact phrase "
         "'Retry to the same team name is banned'."
     )
     # Positive: fresh-suffixed phrasing.
-    assert "fresh-suffixed" in team_creation.lower() or "Fresh-suffixed" in team_creation, (
+    assert "fresh-suffixed" in recovery.lower() or "Fresh-suffixed" in recovery, (
         "Recovery prose must describe the ladder's first tier as fresh-suffixed."
     )
     # Negative: the old prescriptive "Call TeamDelete ... then call TeamCreate"
@@ -123,12 +124,12 @@ def test_ac2_retry_same_name_banned_and_no_same_name_teamdelete_teamcreate(
     # scoped to the prescriptive instruction shape.
     assert not re.search(
         r"Call\s+TeamDelete[^\.]*(?:then|Then)\s+call\s+TeamCreate",
-        team_creation,
+        recovery,
     ), "Old prescriptive 'Call TeamDelete ... then call TeamCreate' recovery must be gone."
     # Positive: the prose must forbid TeamDelete as a response to registry-desync.
     assert re.search(
         r"Do NOT\s+call\s+`?TeamDelete`?",
-        team_creation,
+        recovery,
     ), "Recovery prose must explicitly forbid calling TeamDelete on registry-desync."
 
 
@@ -137,11 +138,11 @@ def test_ac2b_prior_agents_presumed_zombified_and_redispatch_from_frontmatter(
 ) -> None:
     """AC-2b: The recovery prose presumes all prior agent names zombified and
     prescribes re-dispatch from entity frontmatter."""
-    team_creation = sections["## Team Creation"]
-    assert "presumed zombified" in team_creation, (
+    recovery = sections["## TeamCreate Failure Recovery (priority-ordered ladder)"]
+    assert "presumed zombified" in recovery, (
         "Recovery prose must state prior agent names are 'presumed zombified'."
     )
-    assert "re-dispatch from entity frontmatter" in team_creation, (
+    assert "re-dispatch from entity frontmatter" in recovery, (
         "Recovery prose must instruct 're-dispatch from entity frontmatter'."
     )
 

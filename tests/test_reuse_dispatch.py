@@ -145,7 +145,7 @@ def test_reuse_dispatch(test_project, model, effort):
     print()
     print("[Static Template Checks]")
     core = (REPO_ROOT / "skills" / "first-officer" / "references" / "first-officer-shared-core.md").read_text()
-    runtime_ref = (REPO_ROOT / "skills" / "first-officer" / "references" / "claude-first-officer-runtime.md").read_text()
+    runtime_ref = (REPO_ROOT / "skills" / "first-officer" / "references" / "claude-first-officer-runtime-core.md").read_text()
     assembled = assembled_agent_content(t, "first-officer")
 
     t.check("reuse conditions documented in shared-core",

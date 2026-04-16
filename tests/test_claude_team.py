@@ -1178,7 +1178,9 @@ class TestBuildBreakGlassFallback:
     def test_break_glass_template_is_parseable(self):
         """The break-glass Agent() template in the runtime adapter is valid Python syntax."""
         import ast
-        runtime_path = REPO_ROOT / "skills" / "first-officer" / "references" / "claude-first-officer-runtime.md"
+        recovery_path = REPO_ROOT / "skills" / "first-officer" / "references" / "claude-first-officer-runtime-recovery.md"
+        legacy_path = REPO_ROOT / "skills" / "first-officer" / "references" / "claude-first-officer-runtime.md"
+        runtime_path = recovery_path if recovery_path.exists() else legacy_path
         text = runtime_path.read_text()
 
         # Extract the break-glass code block
@@ -1439,7 +1441,9 @@ class TestRuntimeAdapterModelProse:
     """AC-adapter-prose + AC-break-glass: Claude runtime adapter forwards model."""
 
     def test_claude_runtime_adapter_forwards_model(self):
-        runtime_path = REPO_ROOT / "skills" / "first-officer" / "references" / "claude-first-officer-runtime.md"
+        core_path = REPO_ROOT / "skills" / "first-officer" / "references" / "claude-first-officer-runtime-core.md"
+        legacy_path = REPO_ROOT / "skills" / "first-officer" / "references" / "claude-first-officer-runtime.md"
+        runtime_path = core_path if core_path.exists() else legacy_path
         text = runtime_path.read_text()
         # Emitted-fields enumeration includes `model`.
         assert "`model`" in text
@@ -1448,7 +1452,9 @@ class TestRuntimeAdapterModelProse:
         assert "model=" in text
 
     def test_break_glass_template_has_conditional_model_slot(self):
-        runtime_path = REPO_ROOT / "skills" / "first-officer" / "references" / "claude-first-officer-runtime.md"
+        recovery_path = REPO_ROOT / "skills" / "first-officer" / "references" / "claude-first-officer-runtime-recovery.md"
+        legacy_path = REPO_ROOT / "skills" / "first-officer" / "references" / "claude-first-officer-runtime.md"
+        runtime_path = recovery_path if recovery_path.exists() else legacy_path
         text = runtime_path.read_text()
         # Locate the break-glass code block and assert the model= slot appears inside.
         marker = "Break-Glass Manual Dispatch"

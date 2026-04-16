@@ -636,7 +636,9 @@ def assembled_agent_content(runner: TestRunner, agent_name: str, runtime: str = 
     skill_root = runner.repo_root / "skills"
     if agent_name == "first-officer":
         skill_path = skill_root / "first-officer" / "SKILL.md"
-        runtime_path = skill_root / "first-officer" / "references" / f"{runtime}-first-officer-runtime.md"
+        core_path = skill_root / "first-officer" / "references" / f"{runtime}-first-officer-runtime-core.md"
+        legacy_path = skill_root / "first-officer" / "references" / f"{runtime}-first-officer-runtime.md"
+        runtime_path = core_path if core_path.exists() else legacy_path
     elif agent_name == "ensign":
         skill_path = skill_root / "ensign" / "SKILL.md"
         runtime_path = skill_root / "ensign" / "references" / f"{runtime}-ensign-runtime.md"

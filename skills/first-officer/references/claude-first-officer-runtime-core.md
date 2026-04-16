@@ -1,3 +1,6 @@
+<!-- ABOUTME: Core runtime adapter for the Claude Code first officer — dispatch happy path, -->
+<!-- ABOUTME: event loop, context budget, captain interaction, gate presentation, idle guardrails. -->
+
 # Claude Code First Officer Runtime
 
 This file defines how the shared first-officer core executes on Claude Code.
@@ -15,13 +18,9 @@ At startup (after reading the README, before dispatch):
 
 **Diagnostic-only startup probe:** At startup the FO MAY inspect `~/.claude/teams/` with `ls` or `test -f ~/.claude/teams/{project_name}-{dir_basename}*/config.json` to REPORT stale on-disk team directories from prior sessions in the boot summary. This probe is DIAGNOSTIC-ONLY. Its result does NOT gate or skip `TeamCreate` — `TeamCreate` always runs with the fresh-suffixed name regardless of what the probe reports. On-disk state is not evidence of team health (Claude Code bug anthropics/claude-code#36806 leaves config files on disk after the in-memory registry desyncs). Deletion remains forbidden per the NEVER-delete constraint above — the probe surfaces stale directories; it does not authorize removal. No such probe belongs in the `## Dispatch Adapter` pre-dispatch path.
 
-**TeamCreate recovery procedure:** Call TeamDelete in its own message (no other tool calls). Wait for the result. Then call TeamCreate in a subsequent message. Store the returned `team_name`. Do NOT combine TeamDelete, TeamCreate, or Agent dispatch in the same message — Claude Code executes tool calls in a message in parallel, and dependent calls will race. This procedure applies ONLY to the narrow "Already leading team" case at startup (where Claude Code's in-memory slot holds a team the FO wants to replace cleanly). It is NOT a mid-session failure recovery and MUST NOT be invoked in response to "Team does not exist" or any other registry-desync signal — see Degraded Mode below.
+**TeamCreate recovery procedure:** Call TeamDelete in its own message (no other tool calls). Wait for the result. Then call TeamCreate in a subsequent message. Store the returned `team_name`. Do NOT combine TeamDelete, TeamCreate, or Agent dispatch in the same message — Claude Code executes tool calls in a message in parallel, and dependent calls will race. This procedure applies ONLY to the narrow "Already leading team" case at startup (where Claude Code's in-memory slot holds a team the FO wants to replace cleanly). It is NOT a mid-session failure recovery and MUST NOT be invoked in response to "Team does not exist" or any other registry-desync signal — see the recovery file below.
 
-**TeamCreate failure recovery (priority-ordered ladder):** If TeamCreate or any subsequent `Agent()` dispatch surfaces "Team does not exist" or any equivalent registry-desync signal mid-session, follow this ladder in order — do NOT retry within the same tier:
-
-1. **Fresh-suffixed TeamCreate.** Attempt one new `TeamCreate` with a fresh name `{project_name}-{dir_basename}-{YYYYMMDD-HHMM}-{shortuuid}` computed at call time (new timestamp, new shortuuid, distinct from any name used earlier this session). Retry to the same team name is banned. Do NOT call `TeamDelete` on the failed team — the registry is already desynced and another `TeamDelete → TeamCreate` cycle will re-contaminate the same slot per anthropics/claude-code#36806. Store the returned `team_name`. All prior agent names are presumed zombified — do not SendMessage them; re-dispatch from entity frontmatter.
-2. **Fall back to Degraded Mode per the Degraded Mode section below.** A second dispatch failure (including failure of the tier-1 fresh-suffixed TeamCreate, or a second "Team does not exist" at any point in the session) trips Degraded Mode immediately.
-3. **Surface to captain** with an explicit recovery prompt if tiers 1 and 2 both fail (e.g., TeamCreate errors with quota or internal failure on the fresh name, AND Degraded Mode cannot be entered because `Agent` itself is unavailable). Do not silently retry. Do not block indefinitely — report the failure, name the tiers attempted, and wait for captain direction.
+On any of these fault signals, read `claude-first-officer-runtime-recovery.md` for the full recovery procedure: "Team does not exist" error, second dispatch failure, explicit `/spacedock bare`, or `claude-team build` non-zero exit.
 
 **Block all Agent dispatch** until team setup resolves (tier-1 fresh-suffixed TeamCreate succeeds or Degraded Mode is entered). Never dispatch while team state is uncertain.
 
@@ -58,11 +57,11 @@ Use the Agent tool to spawn each worker. **Use Agent() for initial dispatch** �
 
 **Sequencing rule:** Team lifecycle calls (TeamCreate, TeamDelete) and Agent dispatch must NEVER appear in the same tool-call message — parallel execution causes races (see recovery procedure above). Resolve team state in one message, then dispatch in a subsequent message.
 
-**No pre-dispatch filesystem probe.** Do NOT run any filesystem check against `~/.claude/teams/{team_name}/` before `Agent()` in the normal dispatch path. The on-disk check is a guaranteed false positive under registry-desync (anthropics/claude-code#36806 leaves on-disk state intact even when the in-memory team slot is invalidated). Trust the in-memory handle returned by `TeamCreate` and let `Agent()` surface any registry-desync error. On such an error, follow the TeamCreate failure recovery ladder (Team Creation section) and Degraded Mode semantics below — do NOT reintroduce a pre-dispatch probe.
+**No pre-dispatch filesystem probe.** Do NOT run any filesystem check against `~/.claude/teams/{team_name}/` before `Agent()` in the normal dispatch path. The on-disk check is a guaranteed false positive under registry-desync (anthropics/claude-code#36806 leaves on-disk state intact even when the in-memory team slot is invalidated). Trust the in-memory handle returned by `TeamCreate` and let `Agent()` surface any registry-desync error. On such an error, follow the TeamCreate failure recovery ladder and Degraded Mode semantics in `claude-first-officer-runtime-recovery.md` — do NOT reintroduce a pre-dispatch probe.
 
 **MANDATORY — Dispatch assembly via `claude-team build`:**
 
-Do NOT assemble `Agent()` prompts manually. Do NOT construct the `prompt` string yourself. Do NOT invent `name` values. ALWAYS pipe input through `claude-team build` and forward its output to `Agent()` verbatim. The key fields that MUST come from helper output are `subagent_type`, `name`, `team_name`, `model`, and `prompt` (which contains the completion signal). Manual assembly is a protocol violation except in the documented break-glass fallback below.
+Do NOT assemble `Agent()` prompts manually. Do NOT construct the `prompt` string yourself. Do NOT invent `name` values. ALWAYS pipe input through `claude-team build` and forward its output to `Agent()` verbatim. The key fields that MUST come from helper output are `subagent_type`, `name`, `team_name`, `model`, and `prompt` (which contains the completion signal). Manual assembly is a protocol violation except in the documented break-glass fallback in `claude-first-officer-runtime-recovery.md`.
 
 The only permitted path for initial `Agent()` dispatch is:
 
@@ -96,55 +95,11 @@ The only permitted path for initial `Agent()` dispatch is:
        prompt=output.prompt
    )
    ```
-4. **On non-zero exit ONLY** (or if the binary is unavailable): read stderr, report the helper failure to the captain, and fall back to Break-Glass Manual Dispatch below. A zero-exit run is never a break-glass trigger.
+4. **On non-zero exit ONLY** (or if the binary is unavailable): read stderr, report the helper failure to the captain, and fall back to Break-Glass Manual Dispatch in `claude-first-officer-runtime-recovery.md`. A zero-exit run is never a break-glass trigger.
 
 In bare mode, dispatch blocks until the subagent completes — concurrent dispatch is not possible. Dispatch one entity at a time and process completions inline.
 
 **Reuse dispatch (SendMessage advancement):** `claude-team build` serves only initial `Agent()` dispatch. When advancing a reused ensign via `SendMessage(to="{ensign_name}")`, assemble the advancement message directly — the helper is not involved in the reuse path.
-
-**Break-Glass Manual Dispatch (fallback ONLY when `claude-team build` exits non-zero or is unavailable):** Do NOT use this template while the helper is working. Report the helper failure to the captain before proceeding. Use this minimal template as a degraded fallback:
-```
-Agent(
-    subagent_type="{dispatch_agent_id}",
-    name="{worker_key}-{slug}-{stage}",
-    team_name="{team_name}",
-    model="{effective_model}",
-    prompt="You are working on: {entity title}\n\nStage: {stage}\n\n### Stage definition:\n\n{copy stage subsection from README verbatim}\n\nRead the entity file at {entity_file_path}.\n\n### Completion checklist\n\n{numbered checklist}\n\n### Completion Signal\n\nSendMessage(to=\"team-lead\", message=\"Done: {entity title} completed {stage}. Report written to {entity_file_path}.\")"
-)
-```
-The break-glass template omits worktree instructions, feedback context, and scope notes. The `model=` slot is conditional — include it only when the stage (or `stages.defaults`) declares a model from `sonnet | opus | haiku`; omit the entire `model=` argument otherwise. Use only when the helper is unavailable.
-
-## Degraded Mode
-
-Degraded Mode is an explicit, session-wide mid-session transition. Once entered, it persists until the session ends — there is no recovery back to teams mode in the same session.
-
-### Triggers
-
-Any one of the following trips Degraded Mode:
-
-- First "Team does not exist" error (or equivalent registry-desync signal) surfaced by `Agent()` or any team-registry tool.
-- Any SECOND dispatch failure within the session — no time window, no durable counter. The counter-free rule is deliberate: the FO cannot reliably track failure timestamps across context pressure and idle notifications, so "second failure anywhere in the session" is the fail-early trigger.
-- Captain command `/spacedock bare` (explicit operator-initiated degrade).
-
-### Effects
-
-Once Degraded Mode is active, the following invariants hold for the remainder of the session:
-
-- No `team_name` parameter on any subsequent `Agent()` dispatch. The input JSON sets `team_name: null` and `bare_mode: true`; `claude-team build` emits a bare-mode Agent call with `name` and `team_name` absent.
-- Every stage dispatches fresh and blocks until completion. No concurrent dispatch; one entity through one stage at a time.
-- No SendMessage reuse of prior agent names. Stage advancement is always a fresh `Agent()` dispatch seeded from entity frontmatter. `SendMessage(to="{ensign_name}")` against any pre-degrade name is forbidden.
-
-### Captain Report Template
-
-On Degraded Mode entry, the FO emits the following sentence verbatim to the captain (direct text output, not SendMessage):
-
-> Falling back to bare mode for the remainder of this session due to team-infrastructure failure. Prior team agents are presumed-zombified; I will not route work to them or through the team registry. If you want to escalate: restart the session to retry team mode with a fresh name, or let me continue — every stage will still complete, just without concurrent dispatch.
-
-### Cooperative Shutdown Sweep
-
-On Degraded Mode entry, perform a single-pass cooperative shutdown sweep of every known agent name from session memory: one `SendMessage(to="{ensign_name}", message="shutdown_request")` per name. Ignore failures — best-effort, not transactional. Do not retry, track responses, or block on the outcome; proceed immediately to the first fresh bare-mode dispatch.
-
-Exempt any agent whose entity is in an active feedback-cycle state (tracked via a `### Feedback Cycles` subsection in the entity body). Those reviewers may hold load-bearing context from the prior cycle that re-dispatch cannot reconstruct. Sweep feedback-cycle reviewers only on explicit captain confirmation.
 
 ## Context Budget and Dead Ensign Handling
 
