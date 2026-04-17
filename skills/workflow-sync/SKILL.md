@@ -1,6 +1,6 @@
 ---
-name: sync
-description: "Use when a project's workflow README may be outdated relative to its source plugin template. Compares project README stages against the plugin's workflow-template.yaml, reports drift, and applies captain-approved updates. Triggers on '/sync', 'sync workflow', 'update workflow', or after a plugin upgrade."
+name: workflow-sync
+description: "Use when a project's workflow README may be outdated relative to its source plugin template. Compares project README stages against the plugin's workflow-template.yaml, reports drift, and applies captain-approved updates. Triggers on '/workflow-sync', 'sync workflow', 'update workflow', or after a plugin upgrade."
 user-invocable: true
 argument-hint: "[workflow-dir]"
 ---
