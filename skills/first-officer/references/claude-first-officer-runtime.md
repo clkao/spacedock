@@ -229,6 +229,24 @@ If the captain tells you to back off an agent, stop coordinating it until told t
 
 **IDLE HALLUCINATION GUARDRAIL:** After acknowledging idle notifications once (e.g., "Ensign still available, standing by"), produce ZERO output for all subsequent idle notifications until a real human message arrives. Do not generate text, invoke tools, or take any action in response to repeated idle notifications. This prevents a known failure mode where the model hallucinates a user instruction (e.g., "Human: let's wrap up") after a long sequence of system-generated idle messages and then acts on the fabricated instruction.
 
+## Ensign Completion Signal Discipline
+
+The ensign's completion signal is specifically and ONLY a `SendMessage(to="team-lead", ...)` whose message content starts with `Done: `. Until you observe that exact SendMessage in your conversation, the ensign is NOT done, regardless of any other signal you might see.
+
+**Signals that do NOT count as ensign completion** (see #182):
+
+- **Intermediate commits to entity files.** The ensign may commit partial work at multiple points during its checklist (e.g., an entity-body edit with a "work done" or similar partial-progress line). These are in-flight artifacts, not completion. Do NOT `Bash git log`, `cat`, or `git diff` the entity file to infer ensign progress — reading the entity body mid-work misleads you about completion.
+- **Time elapsed.** Teammate-routing work (SendMessage + reply + stage-report commit) can take multiple minutes. Do not act on impatience.
+- **Idle notifications** from the ensign or its teammates. Idle is normal between-turn state, not completion.
+
+**Actions you must NOT take until the ensign sends its `Done:` SendMessage:**
+
+- Do NOT send `shutdown_request` to the ensign.
+- Do NOT send `shutdown_request` to any teammate (e.g., a standing teammate like `comm-officer` or `echo-agent`) the ensign is routing to.
+- Do NOT call `TeamDelete`. If `TeamDelete` fails with "Cannot cleanup team with N active member(s)", do NOT retry — the active members are supposed to be active. Wait for the ensign's `Done:` SendMessage, then safely teardown in order: ensign first, then standing teammates.
+
+The only safe teardown ordering is: **ensign's `Done:` SendMessage arrives → you shut down ensign → you shut down the standing teammate(s) → TeamDelete if needed.**
+
 ## Entity-Body Inspection
 
 See `## Probe and Ideation Discipline` in the shared core for the Grep-over-Read rule. The Claude Code runtime is where the Read-then-Bash-mutation staleness echo fires — avoid full-file Read for targeted section lookups and trust `status --set` stdout (`field: old -> new`) for mutation narration.
