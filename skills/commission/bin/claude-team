@@ -354,17 +354,75 @@ THRESHOLD_PCT = 60
 def find_subagent_jsonl(name: str) -> str | None:
     """Find the most recently modified subagent jsonl matching the given name.
 
-    Scans ~/.claude/projects/*/subagents/agent-*.meta.json for agentType matching name.
-    Also scans with session subdirectory: ~/.claude/projects/*/*/subagents/agent-*.meta.json.
+    Looks up the team config containing a member named `name`, reads its
+    `leadSessionId`, and globs only that session's subagents directory:
+    ~/.claude/projects/*/{leadSessionId}/subagents/agent-*.meta.json. On a
+    populated machine this narrows the haystack from thousands of files
+    (every project's subagents) to dozens (one session's subagents).
+
+    Falls back to the broad scan if no team config is found, no
+    leadSessionId is set, or the narrowed scan returns nothing — the broad
+    scan stays correct, just slow. A warning is emitted to stderr in the
+    fallback case.
+
+    Scans agent-*.meta.json for agentType matching name.
     Returns the sibling .jsonl path, or None.
     """
     home = os.path.expanduser("~")
-    patterns = [
+    broad_patterns = [
         os.path.join(home, ".claude", "projects", "*", "subagents", "agent-*.meta.json"),
         os.path.join(home, ".claude", "projects", "*", "*", "subagents", "agent-*.meta.json"),
     ]
 
-    matches = []
+    narrowed = _narrowed_subagent_patterns(home, name)
+    if narrowed is not None:
+        matches = _scan_subagent_meta(narrowed, name)
+        if not matches:
+            print(
+                f"warning: narrowed subagent scan for {name!r} found nothing; "
+                f"falling back to broad ~/.claude/projects scan",
+                file=sys.stderr,
+            )
+            matches = _scan_subagent_meta(broad_patterns, name)
+    else:
+        matches = _scan_subagent_meta(broad_patterns, name)
+
+    if not matches:
+        return None
+
+    matches.sort(key=lambda x: x[0], reverse=True)
+    return matches[0][1]
+
+
+def _narrowed_subagent_patterns(home: str, name: str) -> list[str] | None:
+    """Return narrowed glob patterns for a subagent jsonl scoped to one team session.
+
+    Returns None when no team config containing `name` declares a leadSessionId.
+    """
+    teams_pattern = os.path.join(home, ".claude", "teams", "*", "config.json")
+    for config_path in glob.glob(teams_pattern):
+        try:
+            with open(config_path, "r") as f:
+                config = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            continue
+        member_names = {m.get("name") for m in config.get("members", []) if isinstance(m, dict)}
+        if name not in member_names:
+            continue
+        lead_session_id = config.get("leadSessionId")
+        if not lead_session_id:
+            continue
+        return [
+            os.path.join(
+                home, ".claude", "projects", "*", lead_session_id, "subagents",
+                "agent-*.meta.json",
+            ),
+        ]
+    return None
+
+
+def _scan_subagent_meta(patterns: list[str], name: str) -> list[tuple[float, str]]:
+    matches: list[tuple[float, str]] = []
     for pattern in patterns:
         for meta_path in glob.glob(pattern):
             try:
@@ -377,12 +435,7 @@ def find_subagent_jsonl(name: str) -> str | None:
                         matches.append((mtime, jsonl_path))
             except (json.JSONDecodeError, OSError):
                 continue
-
-    if not matches:
-        return None
-
-    matches.sort(key=lambda x: x[0], reverse=True)
-    return matches[0][1]
+    return matches
 
 
 def extract_resident_tokens(jsonl_path: str) -> int | None:
