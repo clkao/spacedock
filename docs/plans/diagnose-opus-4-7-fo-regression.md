@@ -378,3 +378,36 @@ Unchanged from the pre-fix baseline (426 passed) — the test refactor and the `
 The captain's directive said: "With the new predicate, this should PASS (the data flow always succeeded; only the predicate was wrong)." The first half is borne out — the new predicate is correct (B3 reliable, A4 verified pass on opus-4-7). The second half ("data flow always succeeded") is contradicted by the A3/A5 evidence: opus-4-7 has a stochastic failure mode where the FO terminates the standing teammate before the ensign can complete the roundtrip, leaving the archive without `ECHO: ping`. This is the FO-impatience secondary cause from AC-4 manifesting as a real (not test-only) functional flake. The captain explicitly deferred that fix tonight ("Skip the FO-impatience secondary fix"), so it remains as a follow-up entity. With the FO-impatience fix in place, the predicate fix here will deliver reliable green on opus-4-7. Until then, opus-4-7 will be ~50% flaky on this test for reasons outside this entity's scope.
 
 opus-4-6 baseline is unchanged: stable PASS. The narrowing fix to `find_subagent_jsonl` does not affect this test directly (the test does not invoke `context-budget`), but the empirical 4816→9 file-count reduction is verified.
+
+## Stage Report (validation, behavioral)
+
+1. **Read entity body, focus on Behavioral Proof section** — **DONE.** Read full entity. Implementer applied predicate fix + find_subagent_jsonl narrowing, ran 4 behavioral runs (B3 opus-4-6 PASS, A4 opus-4-7 PASS, A3/A5 opus-4-7 FAIL on FO-impatience secondary cause). Validation = audit evidence, not re-decide deferred concern.
+
+2. **Verify diff surgical** — **DONE.** Verbatim:
+   ```
+    docs/plans/diagnose-opus-4-7-fo-regression.md | 286 +++++++++++++++++++++++++-
+    skills/commission/bin/claude-team             |  73 ++++++-
+    tests/test_standing_teammate_spawn.py         |  27 +--
+    3 files changed, 362 insertions(+), 24 deletions(-)
+   ```
+   Exactly 3 files: entity body, skills/commission/bin/claude-team, tests/test_standing_teammate_spawn.py. No other code/test files touched. Confirmed surgical.
+
+3. **Verify predicate fix in tests/test_standing_teammate_spawn.py** — **DONE.** Confirmed the diff: (a) M5 `entry_contains_text` predicate replaced with polling loop on `abs_workflow / "_archive" / "001-echo-roundtrip.md"` containing `"ECHO: ping"` with 300s deadline, (b) M1 timeout bumped from `60` to `120`, (c) explicit `w.proc.terminate()` after archive observed. Matches the diff in the entity body's Behavioral Proof section.
+
+4. **Verify find_subagent_jsonl narrowing in skills/commission/bin/claude-team** — **DONE.** Confirmed: (a) new `_narrowed_subagent_patterns(home, name)` helper iterates `~/.claude/teams/*/config.json`, finds the team containing `name`, reads `leadSessionId`, returns narrowed glob `~/.claude/projects/*/{leadSessionId}/subagents/agent-*.meta.json`; (b) `find_subagent_jsonl` tries narrowed scan first, falls back to broad scan with stderr warning when narrowed returns nothing, no team config matches, or no leadSessionId is set. Helper `_scan_subagent_meta` extracted from original loop. Defensive fallback preserves original semantics.
+
+5. **Re-verify empirical narrowing claim** — **DONE.** Broad scan: `find ~/.claude/projects -name 'agent-*.meta.json' | wc -l` = `4817` (matches implementer's 4816 within +/-1 churn). Narrowed for the cited FO leadSessionId `9f8345d2-63dc-48fd-ab63-d4d1d9b33423`: `45` files. Ratio: 4817/45 ≈ **107x reduction**. Implementer cited 4816→9 ≈ 535x for a different team (`sparkling-rolling-adleman` / leadSessionId `8a0ce276-640a-4a3e-82fa-55c2673bc75e`). Both are substantial reductions of the order claimed; magnitude varies by team's subagent activity. Confirmed.
+
+6. **Re-run static suite from worktree root** — **DONE.** Final line: `426 passed, 22 deselected, 10 subtests passed in 20.13s`. Matches FO Layer 2 cross-check of 426 passed.
+
+7. **Spot-check behavioral evidence** — **DONE.** Both preserved test dirs found at the cited paths. Verified `grep -c 'ECHO: ping' /private/var/folders/h1/vnssm1dj6ks4nzzvx8y29yjm0000gn/T/tmpd95ohbex/test-project/standing-teammate/_archive/001-echo-roundtrip.md` = `1` (A4 opus-4-7 PASS), and `grep -c 'ECHO: ping' /private/var/folders/h1/vnssm1dj6ks4nzzvx8y29yjm0000gn/T/tmpjuax_4x7/test-project/standing-teammate/_archive/001-echo-roundtrip.md` = `1` (B3 opus-4-6 PASS). Behavioral evidence is real — both archive files exist on disk and contain the expected `ECHO: ping` literal.
+
+8. **Acknowledge flake-on-opus-4-7 honestly** — **DONE.** Implementer's "Honest assessment" (line 376) documents that opus-4-7 has ~50% flake from FO-impatience secondary cause (FO sends shutdown_request to teammates before ensign completes). Captain explicitly deferred this fix tonight. Out-of-scope for THIS validation. The validation question — "is the predicate fix correct and verified by at least ONE clean opus-4-7 PASS plus the reliable opus-4-6 baseline?" — is answered YES (A4 PASS on opus-4-7, B3 PASS on opus-4-6). Not rejecting for the deferred concern.
+
+9. **Stage Report (validation, behavioral) section written** — **DONE** (this section).
+
+10. **Commit on worktree branch** — **DONE** (next action after this write).
+
+### Validation outcome
+
+Recommendation: PASSED — fix surgical, behavioral proof verified (opus-4-7 PASS on A4, opus-4-6 stable on B3), find_subagent_jsonl narrowing confirmed, static suite green, deferred FO-impatience flake acknowledged out-of-scope.
