@@ -23,6 +23,7 @@ If `workflow-dir` not provided, search for it:
 
 ```bash
 find "$(git rev-parse --show-toplevel)" -maxdepth 3 -name "README.md" \
+  -not -path "*/node_modules/*" -not -path "*/.git/*" -not -path "*/vendor/*" \
   -exec grep -l "commissioned-by: spacedock@" {} \; 2>/dev/null
 ```
 
