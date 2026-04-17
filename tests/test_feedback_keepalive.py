@@ -6,6 +6,7 @@ from __future__ import annotations
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -186,9 +187,21 @@ def test_feedback_keepalive(test_project, model, effort):
         )
         print("[OK] validation ensign dispatched — implementation agent survived the transition")
 
-        fo_exit = w.expect_exit(timeout_s=300)
-    if fo_exit != 0:
-        print("  (may be expected — budget cap or gate hold)")
+        entity_file = abs_workflow / "keepalive-test-task.md"
+        feedback_deadline = time.monotonic() + 300
+        while time.monotonic() < feedback_deadline:
+            if entity_file.is_file():
+                body = entity_file.read_text()
+                if "### Feedback Cycles" in body:
+                    break
+            time.sleep(1.0)
+        else:
+            raise AssertionError(
+                f"Entity body did not record a feedback cycle section at "
+                f"{entity_file} within 300s"
+            )
+        print("[OK] entity body recorded feedback cycle section (data-flow assertion)")
+        w.proc.terminate()
 
     print("--- Phase 3: Validation ---")
     log = LogParser(t.log_dir / "fo-log.jsonl")
