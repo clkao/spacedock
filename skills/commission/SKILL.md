@@ -219,6 +219,7 @@ stages:
       {feedback-to: {target_stage} — if this stage has a rejection flow that bounces back to {target_stage}. Infer from the rejection_flow derived in Confirm Design.}
       {gate: true — if this stage is an approval gate}
       {agent: {agent-name} — only if {captain} specifies a non-default agent for this stage. Omit to use the default ensign. The value is the agent file basename without .md.}
+      {skill: {plugin:skill-name} — only if the stage should load a specific skill from an installed plugin. The ensign will invoke Skill("{plugin:skill-name}") before starting stage work. Omit for stages without a plugin-provided skill.}
     - name: {last_stage}
       terminal: true
   transitions:
@@ -262,6 +263,8 @@ Every {entity_label} file has YAML frontmatter. Fields are documented below; see
 {For EACH stage in the ordered list, generate a subsection:}
 
 ### `{stage_name}`
+
+{If this stage has a `skill:` property: "**Load skill:** Invoke `Skill(\"{skill_value}\")` before starting stage work." Otherwise omit this line.}
 
 {A sentence describing who sets this status and what it means for an {entity_label} to be in this stage.}
 
