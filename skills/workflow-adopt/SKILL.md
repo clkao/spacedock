@@ -1,6 +1,6 @@
 ---
-name: adopt
-description: "Use when a project has no workflow yet and an installed workflow plugin provides a template. Discovers workflow-template.yaml from installed plugins, presents options, invokes spacedock:commission in batch mode. Triggers on '/adopt', 'adopt workflow', 'install workflow', or when /build fails because no workflow exists."
+name: workflow-adopt
+description: "Use when a project has no workflow yet and an installed workflow plugin provides a template. Discovers workflow-template.yaml from installed plugins, presents options, invokes spacedock:commission in batch mode. Triggers on '/workflow-adopt', 'adopt workflow', 'install workflow', or when /build fails because no workflow exists."
 user-invocable: true
 argument-hint: "[template-name] [--dir path/to/workflow]"
 ---
@@ -29,7 +29,7 @@ find "$(git rev-parse --show-toplevel)" -maxdepth 3 -name "README.md" \
 **If found → STOP:**
 
 > Workflow already exists at `{workflow_dir}/`.
-> Use `/spacedock:sync` to check for template updates, or the workflow's skills to start working.
+> Use `/spacedock:workflow-sync` to check for template updates, or the workflow's skills to start working.
 
 ## Step 2: Discover templates
 
@@ -95,4 +95,4 @@ Skill("spacedock:commission", args: "<batch payload>\n\nSkip interactive confirm
 > Next steps:
 > - Use the workflow plugin's skills to start working
 > - `claude --agent spacedock:first-officer` to orchestrate
-> - `/spacedock:sync` later to check for template updates
+> - `/spacedock:workflow-sync` later to check for template updates
