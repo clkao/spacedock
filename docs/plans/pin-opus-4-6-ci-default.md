@@ -97,3 +97,74 @@ The `model_override` plumbing into `claude -p` already works end-to-end (verifie
 ### Summary
 
 Pinned the `claude-live-opus` job's default model from `opus` (which now resolves to `claude-opus-4-7` under Claude Code 2.1.111+) to explicit `claude-opus-4-6` by changing two literal defaults in the job's shell steps; `model_override` workflow input is preserved and remains the only escape hatch. Inline comments link to #177 / #181 with a reversibility note. Static suite at 426 passed (≥ 422 baseline). Validator should exercise AC-4 via a dispatch with `test_selector` set, since the no-selector path delegates to `make test-live-claude-opus` whose own hardcoded `--model opus` is intentionally out of scope per AC #1.
+
+## Stage Report (validation)
+
+### Checklist
+
+1. **Read entity body in full** — DONE. Reviewed `## The change`, `## Acceptance criteria`, and the implementer's `## Stage Report (implementation)` end-to-end.
+2. **Verify diff is surgical and only touches the claude-live-opus job's MODEL_OVERRIDE-fallback expressions** — DONE.
+
+   Verbatim diff from `git diff main..HEAD -- .github/workflows/runtime-live-e2e.yml`:
+   ```diff
+   diff --git a/.github/workflows/runtime-live-e2e.yml b/.github/workflows/runtime-live-e2e.yml
+   index 3e82d81f..2791e0eb 100644
+   --- a/.github/workflows/runtime-live-e2e.yml
+   +++ b/.github/workflows/runtime-live-e2e.yml
+   @@ -485,7 +485,8 @@ jobs:
+              if [ -n "$MODEL_OVERRIDE" ]; then
+                EFFECTIVE_MODEL="$MODEL_OVERRIDE"
+              else
+   -            EFFECTIVE_MODEL="opus"
+   +            # Pinned to claude-opus-4-6 due to opus-4-7 ensign hallucination regression at low/medium effort; see #177 / #181. Reversible — restore default to opus once upstream resolves.
+   +            EFFECTIVE_MODEL="claude-opus-4-6"
+              fi
+              {
+                echo "### Tool versions"
+   @@ -515,7 +516,8 @@ jobs:
+                if [ -n "$MODEL_OVERRIDE" ]; then
+                  MODEL_FLAG="$MODEL_OVERRIDE"
+                else
+   -              MODEL_FLAG="opus"
+   +              # Pinned to claude-opus-4-6 due to opus-4-7 ensign hallucination regression at low/medium effort; see #177 / #181. Reversible — restore default to opus once upstream resolves.
+   +              MODEL_FLAG="claude-opus-4-6"
+                fi
+                echo "Opus effort: $EFFORT_FLAG"
+                echo "Opus model: $MODEL_FLAG"
+   ```
+
+   Confirmed:
+   - (a) Only `.github/workflows/runtime-live-e2e.yml` is touched in our two commits (`ca21f49f` workflow change + `bd3762dd` entity body). `git log main..HEAD --stat` shows the workflow commit modifies only this file (4 insertions, 2 deletions).
+   - (b) Both changed lines are inside the `claude-live-opus` job's MODEL_OVERRIDE-fallback `else` branches (lines 488 and 518 in the original).
+   - (c) The `if [ -n "$MODEL_OVERRIDE" ]; then ...; else ...; fi` structure is preserved verbatim — `model_override` workflow input still takes precedence.
+   - (d) Each inline comment cites `#177 / #181` and includes the reversibility note (`Reversible — restore default to opus once upstream resolves`).
+
+3. **Re-run static suite** — DONE. Ran `unset CLAUDECODE && make test-static` from the worktree root.
+
+   Final line verbatim:
+   ```
+   426 passed, 22 deselected, 10 subtests passed in 20.02s
+   ```
+   Zero failures. Matches the implementer's run (426/426). AC #2 (≥ 422) satisfied.
+
+4. **Verify no other files/jobs touched** — DONE. `git diff --name-only main..HEAD` shows three paths:
+   - `.github/workflows/runtime-live-e2e.yml` — our workflow change.
+   - `docs/plans/pin-opus-4-6-ci-default.md` — the entity body (allowed).
+   - `docs/plans/opus-4-7-ensign-hallucination-scope.md` — NOT from our commits; provenance is commit `59a0db41` (`advance: #177 entering implementation …`), present in the worktree base but absent from local `main` ref. Verified by `git log main..HEAD -- docs/plans/opus-4-7-ensign-hallucination-scope.md` returning empty for our two-commit range. Out of scope; not introduced by #181.
+
+   Within `.github/workflows/runtime-live-e2e.yml`, only the `claude-live-opus` job is touched. Other jobs (`claude-live`, `claude-live-bare`, `codex-live`, `static-offline`) untouched.
+
+5. **AC-1, AC-2, AC-3 confirmation** — DONE.
+   - **AC-1 (workflow YAML edit is surgical):** PASS — see step 2 evidence; only the `claude-live-opus` job's two fallback defaults change.
+   - **AC-2 (static suite passes, ≥ 422):** PASS — 426 passed (see step 3).
+   - **AC-3 (inline comment present, links #177 + #181, reversibility note):** PASS — both inserted comments include `see #177 / #181` and `Reversible — restore default to opus once upstream resolves` (see step 2 diff).
+
+6. **AC-4 (live CI dispatch verification)** — DEFERRED-TO-MERGE-HOOK. AC-4 requires pushing the branch and dispatching a live CI run, which needs captain approval per the pr-merge mod's PR APPROVAL GUARDRAIL. The push will happen at the merge hook after captain approves the validation gate; CI will dispatch as part of normal PR flow. Not exercised in this validation; not pushing the branch; not dispatching CI.
+
+   Implementer's flag re-stated for the merge-hook step: the YAML's `--model "$MODEL_FLAG"` path is only exercised when `test_selector` is non-empty. The no-selector path delegates to `make test-live-claude-opus`, whose hardcoded `--model opus` is intentionally out of scope per AC #1. To exercise the new pin via AC-4 the dispatch should set `test_selector` to a representative live-claude opus test path.
+
+7. **Stage report appended** — DONE (this section).
+
+8. **Commit on worktree branch** — pending immediately after this write; not pushed.
+
+Recommendation: PASSED — diff is surgical, static suite 426/426 green, AC-4 deferred to merge hook.
