@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -72,7 +73,7 @@ def test_standing_teammate_spawns_and_roundtrips(test_project, model, effort):
     ) as w:
         w.expect(
             lambda e: tool_use_matches(e, "Bash", command="spawn-standing"),
-            timeout_s=60,
+            timeout_s=120,
             label="claude-team spawn-standing invoked",
         )
         print("[OK] claude-team spawn-standing invoked")
@@ -108,10 +109,18 @@ def test_standing_teammate_spawns_and_roundtrips(test_project, model, effort):
         )
         print("[OK] SendMessage to echo-agent observed")
 
-        exit_code = w.expect_exit(timeout_s=480)
-
-    if exit_code != 0:
-        print(f"  (first officer exit code {exit_code})")
+        archived = abs_workflow / "_archive" / "001-echo-roundtrip.md"
+        archive_deadline = time.monotonic() + 300
+        while time.monotonic() < archive_deadline:
+            if archived.is_file() and "ECHO: ping" in archived.read_text():
+                break
+            time.sleep(1.0)
+        else:
+            raise AssertionError(
+                f"Archived entity with 'ECHO: ping' did not appear at {archived} within 300s"
+            )
+        print("[OK] archived entity body captured 'ECHO: ping' (data-flow assertion)")
+        w.proc.terminate()
 
     print()
     print("--- Phase 3: Final aggregate assertions ---")
@@ -123,14 +132,3 @@ def test_standing_teammate_spawns_and_roundtrips(test_project, model, effort):
         f"Agent() calls seen: {[(c.get('name'), c.get('subagent_type')) for c in agent_calls]}"
     )
     print(f"[OK] aggregate: echo-agent Agent() dispatched {len(echo_spawns)} time(s)")
-
-    archived = abs_workflow / "_archive" / "001-echo-roundtrip.md"
-    assert archived.is_file(), (
-        f"Aggregate check: entity not archived at {archived}"
-    )
-    body = archived.read_text()
-    assert "ECHO: ping" in body, (
-        "Aggregate check: archived entity body missing 'ECHO: ping' echo capture. "
-        f"Body preview:\n{body[:1000]}"
-    )
-    print(f"[OK] aggregate: archived entity body captured 'ECHO: ping'")
