@@ -258,7 +258,7 @@ def parse_stages_block(filepath):
             'terminal': state.get('terminal', 'false').lower() == 'true',
             'initial': state.get('initial', 'false').lower() == 'true',
         }
-        for optional_field in ('feedback-to', 'agent', 'fresh', 'model'):
+        for optional_field in ('feedback-to', 'agent', 'fresh', 'model', 'skill'):
             if optional_field in state:
                 stage[optional_field] = state[optional_field]
         result.append(stage)
