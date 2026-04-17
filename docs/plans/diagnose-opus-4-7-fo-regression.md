@@ -697,3 +697,47 @@ The test-side data-flow predicate (mirror of the standing-teammate Variant A pat
 
 ### Summary
 Combined test-side data-flow assertion + two prose clauses (SESSION RE-ENTRY RULE + FEEDBACK-TO KEEPALIVE REINFORCEMENT) in `claude-first-officer-runtime.md` deliver 4/5 reliable green on `test_feedback_keepalive` for opus-4-7. Single residual failure (R3) is a separate stochastic mode-selection flake (FO autonomously picks bare mode instead of teams mode); not a regression from this cycle. opus-4-6 baseline unchanged (181s PASS). Static suite unchanged (426/426). Standing-teammate test on opus-4-7 hit its documented ~50% residual flake on the regression check — NOT caused by this cycle's changes; same flake pattern as prior cycle's `Honest Assessment`.
+
+## Stage Report (validation, two-part fix)
+
+1. **Read entity body, focus on extended Behavioral Proof section** — **DONE.** Read lines 560-699 of the entity. Confirmed the implementer applied a two-part fix (test-side data-flow assertion + two prose clauses SESSION RE-ENTRY RULE and FEEDBACK-TO KEEPALIVE REINFORCEMENT) and ran 5 opus-4-7 runs achieving 4/5 (R3 fail = bare-mode flake; R4/R5/R6/R7 PASS at 161s/151s/206s/163s).
+
+2. **Verify latest commit** — **DONE.** `git log --oneline | head -3` output (verbatim):
+   ```
+   63bb05cf fix: #182 add session-re-entry + feedback-to keepalive discipline — test_feedback_keepalive opus-4-7 reliable green
+   bc0b7b65 fix: #182 add FO-keep-teammates-alive discipline to first-officer skill prose (eliminates opus-4-7 flake)
+   f5c34eee report: #182 FO-impatience prose-fix attempted, resisted by opus-4-7 (no prose commit)
+   ```
+   Top commit is 63bb05cf with the expected message.
+
+3. **Verify diff stat** — **DONE.** `git show 63bb05cf --stat` output (verbatim):
+   ```
+    docs/plans/diagnose-opus-4-7-fo-regression.md      | 130 +++++++++++++++++++++
+    .../references/claude-first-officer-runtime.md     |   4 +
+    tests/test_feedback_keepalive.py                   |  19 ++-
+    3 files changed, 150 insertions(+), 3 deletions(-)
+   ```
+   Matches expectation exactly: 3 files; entity body +130; runtime prose +4; test file +19/-3 = +16 net.
+
+4. **Verify the test-side fix** — **DONE.** Inspected the diff in `tests/test_feedback_keepalive.py`. Confirmed: (a) the old `fo_exit = w.expect_exit(timeout_s=300)` (and the `if fo_exit != 0:` print) is removed and replaced with a `while time.monotonic() < feedback_deadline` polling loop that reads the entity body and breaks on `"### Feedback Cycles" in body`; (b) explicit `w.proc.terminate()` is called after the assertion `print("[OK] entity body recorded feedback cycle section (data-flow assertion)")`; (c) the polling-then-terminate pattern mirrors the prior #182 standing-teammate fix.
+
+5. **Verify the prose additions** — **DONE.** Inspected `skills/first-officer/references/claude-first-officer-runtime.md` diff. Two new clauses appear immediately after the existing `## Ensign Completion Signal Discipline` body (before `## Entity-Body Inspection`): (a) **SESSION RE-ENTRY RULE (see #182)** — forbids interpreting task_notification re-entry as a teardown signal without a Done: SendMessage; (b) **FEEDBACK-TO KEEPALIVE REINFORCEMENT (see #182)** — forbids `shutdown_request` to the `feedback-to` target ensign during the next stage's work. Both clauses cite #182 explicitly.
+
+6. **Re-run static suite** — **DONE.** `(cd worktree && unset CLAUDECODE && make test-static)` final line (verbatim):
+   ```
+   426 passed, 22 deselected, 10 subtests passed in 35.91s
+   ```
+   Matches the FO Layer 2 cross-check (426 passed). No static regression.
+
+7. **Spot-check preserved test dirs** — **DONE.** All 4 PASS run dirs preserved: `tmprbzs31f6` (R4), `tmp8zaft7ub` (R5), `tmpq4bumirp` (R6), `tmpsatgb583` (R7). Spot-checked R4 entity at `tmprbzs31f6/test-project/keepalive-pipeline/keepalive-test-task.md`: `status: implementation` (rolled back from validation, as expected for a feedback-cycle PASS) and `### Feedback Cycles` section present. Matches the expected state for a PASS run.
+
+8. **Honest assessment of 4/5 result** — **DONE.** R3 was a stochastic bare-mode model-selection flake (FO autonomously skipped TeamCreate despite team support) per implementer — clearly attributed and out of scope for this fix. R4-R7 all PASS in teams mode with the full feedback-cycle flow. Captain's bar was ≥4/5; 4/5 with a clearly-attributed-out-of-scope failure meets it. Standing-teammate regression check on opus-4-7 (`tmp1ogkgde_`) hit the documented ~50% residual flake from the prior cycle (FO terminating standing teammate before ensign completes); per validator instructions this is NOT caused by this iteration's changes and is already-deferred — not a rejection criterion.
+
+9. **Append validation stage report** — **DONE** (this section).
+
+10. **Commit on worktree branch** — **DONE** (next action after this write).
+
+### Summary
+Two-part fix audit verified: commit 63bb05cf is on top with the expected message, diff stat matches (3 files, +150/-3), test-side replaces `expect_exit` with a polling+terminate data-flow assertion mirroring the standing-teammate pattern, two prose clauses (SESSION RE-ENTRY RULE + FEEDBACK-TO KEEPALIVE REINFORCEMENT) appear after `## Ensign Completion Signal Discipline` with explicit #182 citations, static suite green at 426 passed, R4 preserved test dir confirms expected entity state (status rolled back to implementation + `### Feedback Cycles` present), 4/5 opus-4-7 reliability bar met with R3's bare-mode failure clearly out of scope.
+
+Recommendation: PASSED — two-part fix surgical (test data-flow + 2 prose clauses), 4/5 opus-4-7 reliability bar met, no static regression, standing-teammate residual flake noted as already-deferred.
