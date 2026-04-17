@@ -411,3 +411,81 @@ opus-4-6 baseline is unchanged: stable PASS. The narrowing fix to `find_subagent
 ### Validation outcome
 
 Recommendation: PASSED — fix surgical, behavioral proof verified (opus-4-7 PASS on A4, opus-4-6 stable on B3), find_subagent_jsonl narrowing confirmed, static suite green, deferred FO-impatience flake acknowledged out-of-scope.
+
+## Behavioral Proof (extended, FO-impatience fix) — STOPPED, prose resistance confirmed
+
+Captain re-scope extension attempted: add surgical keep-alive-during-teammate-routing clause to the first-officer skill prose to discipline opus-4-7's observed premature-shutdown pattern. Fix drafted, loaded into FO context, and tested across two opus-4-7 runs. Both FAILED with the exact same pattern the prose was meant to prevent. Per checklist item #11 ("If 5 opus-4-7 runs still show >1 failure, STOP — DO NOT commit"), stopping after run 2/5 with two consecutive failures. No commit applied; prose reverted.
+
+### Diff of attempted prose change (reverted)
+
+Added after the existing `DISPATCH IDLE GUARDRAIL` in `skills/first-officer/references/claude-first-officer-runtime.md`:
+
+```diff
+ **DISPATCH IDLE GUARDRAIL:** After dispatching an agent, wait for an explicit completion message. ...
+
++**KEEP TEAMMATES ALIVE DURING ACTIVE ROUTING (see #182):** Do NOT send `shutdown_request` to any teammate — ensign or standing teammate — while the ensign is actively routing work through it. A dispatched ensign that has not yet sent its completion message is still working, even if the parent stream looks quiet; the ensign's SendMessage traffic to standing teammates (prose polishers, echo agents, reviewers) is invisible in the parent fo-log and takes minutes on long drafts. Shutting down a standing teammate mid-routing strands the ensign's in-flight request. Absence of parent-stream narration is not a signal to tear down. Wait for the ensign's explicit completion message before initiating any teardown of the ensign OR of any standing teammate the ensign is currently routing to.
++
++**DO NOT RETRY TeamDelete ON ACTIVE-MEMBER ERRORS (see #182):** If `TeamDelete` fails with `Cannot cleanup team with N active member(s)`, that is a signal those members are still working — wait for them to complete. Do NOT loop on `TeamDelete` and do NOT send follow-up `shutdown_request` calls to coerce them out. Retry-on-active-members is the observed failure mode that burns the budget after the ensign's roundtrip has effectively finished; the correct response is to wait for the ensign's completion message, then call `TeamDelete` once.
++
+ **IDLE HALLUCINATION GUARDRAIL:** ...
+```
+
+### Per-run results on opus-4-7 (with the new prose loaded)
+
+| Run | Result | Wall | Test dir | Shutdowns | TeamDeletes | KEEP-TEAMMATES prose present in FO stream |
+|---|---|---|---|---|---|---|
+| R1 | FAILED | 407.56s | `tmp95mnr0u3` | 3 | 2 | YES (`grep 'KEEP TEAMMATES ALIVE' fo-log.jsonl` = 1) |
+| R2 | FAILED | 401.71s | `tmpguas7hd5` | 5 | 12 | YES (`grep 'KEEP TEAMMATES ALIVE' fo-log.jsonl` = 1) |
+| R3–R5 | not run — stopped after R2 per checklist #11 | — | — | — | — | — |
+
+### Failure pattern (identical across R1 and R2)
+
+FO dispatches echo-agent (Agent), then ensign (Agent). Sees `Spawned successfully` tool_result. Narrates "Waiting for ensign completion." Then Bashes `git log` + `cat` on the entity body, sees `status: work` + the already-appended "work done" line, and — without waiting for the ensign's completion message — immediately fires `SendMessage(shutdown_request)` at BOTH the ensign AND echo-agent in parallel. Then enters the TeamDelete-fails-on-active-members retry loop.
+
+Verbatim from R1 `fo-log.jsonl`:
+- L48: Agent dispatch ensign
+- L50: tool_result `Spawned successfully. agent_id: spacedock-ensign-001-echo-roundtrip-work@...`
+- L51: text "Waiting for ensign completion."
+- L58: Bash `git log + cat entity body` (observes body already contains "work done" from the ensign's commit)
+- L61: **SendMessage shutdown_request → spacedock-ensign-001-echo-roundtrip-work** (PREMATURE)
+- L62: **SendMessage shutdown_request → echo-agent** (PREMATURE)
+
+Verbatim from R2 entity body (ensign's stage report, ping never got its reply before FO shutdown):
+```
+3. Capture reply starting with 'ECHO: ': FAILED — no reply received from echo-agent
+   before team-lead issued shutdown_request at 2026-04-17T15:04:04Z.
+```
+
+### Why the prose didn't stick
+
+The FO reads the entity body, sees the ensign's intermediate commit ("work done" already appended), and infers "ensign has finished" from **file state** rather than from the **completion message**. The added clauses explicitly forbid teardown-before-completion-message, but opus-4-7 does not apply the rule when it has file-state evidence it interprets as equivalent. The addressable failure mode is narrower than "parent stream looks quiet" — it's "FO confuses entity-body state with completion signal."
+
+The diff is written only to the Claude runtime reference (where the regression manifests); no change to shared-core. Revert is clean.
+
+### Recommendation to the FO
+
+Prose discipline alone is insufficient against opus-4-7's file-state-as-completion-signal inference. Two stronger options for a follow-up cycle:
+
+1. **Prose variant targeting the specific inference**: add a clause that says "an ensign's commit to the entity body is NOT a completion signal; only an explicit `Done: ...` SendMessage from the ensign counts. Continue waiting." This is a different addressable pattern than what was attempted in this cycle.
+2. **Mechanism-level fix**: instead of trusting the FO's discipline, have `claude-team` or a wrapper refuse to proxy `SendMessage(shutdown_request)` to a member while that member has an in-flight routing path (requires instrumentation of inbox activity). This removes the degree of freedom from prose entirely.
+
+Either path is a captain decision; out-of-scope for this cycle per the STOP protocol.
+
+### No commit, no opus-4-6 re-run, no static-suite re-run
+
+Per checklist item #11 this cycle STOPs without committing. Therefore opus-4-6 re-verification (item #6) and `make test-static` re-run (item #7) were SKIPPED — there's no change to validate. The prior cycle's static-suite green (426 passed) remains the last verified state on this branch.
+
+## Stage Report (implementation, FO-impatience extension)
+
+1. **Read entity body, focus on Diagnosis Outcome / AC-4 secondary cause / AC-5 secondary recommendation / Behavioral Proof** — **DONE.** Full entity read. Confirmed the secondary cause from AC-4 (premature teardown) is the opus-4-7 flake to address; confirmed AC-5's secondary recommendation (prose discipline to wait for completion-signal) is the attempted fix.
+2. **Verify branch state preserves prior fix commits** — **DONE.** `git log main..HEAD` shows prior commits present: `4ce71811` (validation), `8e16c1ba` (behavioral proof), `0a3cdf4f` (predicate polling), `e0761d37` (find_subagent_jsonl narrowing), `3d77b631` (predicate fix), `2acde736` (diagnostic-audit validation), `6b20270f` (diagnosis). Prior work intact.
+3. **Implement the FO-impatience prose fix** — **DONE (then reverted).** Added two focused clauses (`KEEP TEAMMATES ALIVE DURING ACTIVE ROUTING`, `DO NOT RETRY TeamDelete ON ACTIVE-MEMBER ERRORS`) to `skills/first-officer/references/claude-first-officer-runtime.md` immediately after `DISPATCH IDLE GUARDRAIL`. Each clause cites #182 cross-reference and addresses a specific observed opus-4-7 pattern: premature shutdown_request at ~19s, TeamDelete-retry loop on active members.
+4. **Run opus-4-7 test multiple times** — **DONE (partial, stopped per checklist #11).** Ran R1 (FAIL in 407.56s) and R2 (FAIL in 401.71s). Did NOT run R3–R5 because two consecutive failures already exceed the ">1 failure" STOP threshold.
+5. **Re-run on opus-4-6 to confirm no regression** — **SKIPPED.** No commit applied; nothing to validate against baseline. Last opus-4-6 verification is the prior-cycle B3 PASS recorded in `## Behavioral Proof`.
+6. **`make test-static` stays green** — **SKIPPED.** No commit applied; prior-cycle static suite green (426 passed) remains the last verified state.
+7. **Append `## Behavioral Proof (extended, FO-impatience fix)` section with diff + per-run table + skipped-item notes** — **DONE** (section above).
+8. **Commit on worktree branch** — **SKIPPED per checklist #11.** Prose reverted; working tree clean; no commit to make.
+9. **Send failure report to team-lead (checklist #11 path)** — **DONE** (next action).
+
+### Summary
+Attempted surgical FO-impatience prose fix: added two focused keep-alive-during-routing clauses to the Claude FO runtime reference. Fix loaded into FO context (confirmed by grep on the FO stream). Both opus-4-7 runs FAILED with the exact same failure mode the prose was written to prevent: FO infers ensign completion from entity-body state instead of waiting for the completion message, then fires shutdown_request before the ensign's ECHO reply lands. Per checklist item #11 stopped after 2/5, did not commit. Prose reverted. Recommendation: a different prose variant targeting the "file-state-as-completion-signal" inference, or a mechanism-level fix in `claude-team`, either of which is a captain decision for a follow-up cycle.
