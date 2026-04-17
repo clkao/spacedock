@@ -11,7 +11,6 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 from test_lib import (  # noqa: E402
     LogParser,
-    entry_contains_text,
     git_add_commit,
     install_agents,
     run_first_officer_streaming,
@@ -109,14 +108,7 @@ def test_standing_teammate_spawns_and_roundtrips(test_project, model, effort):
         )
         print("[OK] SendMessage to echo-agent observed")
 
-        w.expect(
-            lambda e: entry_contains_text(e, r"ECHO:\s*ping"),
-            timeout_s=240,
-            label="ECHO: ping reply received",
-        )
-        print("[OK] ECHO: ping reply observed")
-
-        exit_code = w.expect_exit(timeout_s=240)
+        exit_code = w.expect_exit(timeout_s=480)
 
     if exit_code != 0:
         print(f"  (first officer exit code {exit_code})")
@@ -131,3 +123,14 @@ def test_standing_teammate_spawns_and_roundtrips(test_project, model, effort):
         f"Agent() calls seen: {[(c.get('name'), c.get('subagent_type')) for c in agent_calls]}"
     )
     print(f"[OK] aggregate: echo-agent Agent() dispatched {len(echo_spawns)} time(s)")
+
+    archived = abs_workflow / "_archive" / "001-echo-roundtrip.md"
+    assert archived.is_file(), (
+        f"Aggregate check: entity not archived at {archived}"
+    )
+    body = archived.read_text()
+    assert "ECHO: ping" in body, (
+        "Aggregate check: archived entity body missing 'ECHO: ping' echo capture. "
+        f"Body preview:\n{body[:1000]}"
+    )
+    print(f"[OK] aggregate: archived entity body captured 'ECHO: ping'")
