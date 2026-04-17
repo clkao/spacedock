@@ -506,6 +506,12 @@ jobs:
           EFFORT_OVERRIDE: ${{ inputs.effort_override }}
           MODEL_OVERRIDE: ${{ inputs.model_override }}
         run: |
+          if [ -n "$MODEL_OVERRIDE" ]; then
+            MODEL_FLAG="$MODEL_OVERRIDE"
+          else
+            # Pinned to claude-opus-4-6 due to opus-4-7 ensign hallucination regression at low/medium effort; see #177 / #181. Reversible — restore default to opus once upstream resolves.
+            MODEL_FLAG="claude-opus-4-6"
+          fi
           if [ -n "$TEST_SELECTOR" ]; then
             echo "Running selector: $TEST_SELECTOR"
             if [ -n "$EFFORT_OVERRIDE" ]; then
@@ -513,18 +519,14 @@ jobs:
             else
               EFFORT_FLAG="low"
             fi
-            if [ -n "$MODEL_OVERRIDE" ]; then
-              MODEL_FLAG="$MODEL_OVERRIDE"
-            else
-              # Pinned to claude-opus-4-6 due to opus-4-7 ensign hallucination regression at low/medium effort; see #177 / #181. Reversible — restore default to opus once upstream resolves.
-              MODEL_FLAG="claude-opus-4-6"
-            fi
             echo "Opus effort: $EFFORT_FLAG"
             echo "Opus model: $MODEL_FLAG"
             unset CLAUDECODE
             uv run pytest "$TEST_SELECTOR" --runtime claude --model "$MODEL_FLAG" --effort "$EFFORT_FLAG" -v
           else
-            make test-live-claude-opus
+            # Propagate the pinned/overridden model to the make target's OPUS_MODEL var so the no-selector path also picks up claude-opus-4-6 (or the override). See #177 / #181.
+            echo "Opus model: $MODEL_FLAG"
+            make test-live-claude-opus OPUS_MODEL="$MODEL_FLAG"
           fi
 
       - name: Upload Claude live opus artifacts

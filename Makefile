@@ -6,6 +6,8 @@ TEST ?= tests/
 RUNTIME ?= claude
 LIVE_CLAUDE_WORKERS ?= 4
 LIVE_CODEX_WORKERS ?= 4
+# Pinned to claude-opus-4-6 due to opus-4-7 ensign hallucination regression at low/medium effort; see #177 / #181. Reversible — override with `make test-live-claude-opus OPUS_MODEL=opus` to re-test on opus-4-7.
+OPUS_MODEL ?= claude-opus-4-6
 
 test-static:
 	unset CLAUDECODE && uv run pytest tests/ --ignore=tests/fixtures \
@@ -32,9 +34,9 @@ test-live-claude:
 test-live-claude-opus:
 	unset CLAUDECODE && { \
 	  uv run pytest tests/ --ignore=tests/fixtures \
-	    -m "live_claude and serial" --runtime claude --model opus --effort low -x -v ; SEQ=$$? ; \
+	    -m "live_claude and serial" --runtime claude --model $(OPUS_MODEL) --effort low -x -v ; SEQ=$$? ; \
 	  uv run pytest tests/ --ignore=tests/fixtures \
-	    -m "live_claude and not serial" --runtime claude --model opus --effort low \
+	    -m "live_claude and not serial" --runtime claude --model $(OPUS_MODEL) --effort low \
 	    -n $(LIVE_CLAUDE_WORKERS) -v ; PAR=$$? ; \
 	  test $$SEQ -eq 0 -a $$PAR -eq 0 ; \
 	}
