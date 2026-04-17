@@ -314,3 +314,150 @@ Captain-directed scope expansion: the original narrow-scope work (commits `ca21f
 ### Summary
 
 Pinned the `make test-live-claude-opus` target's default model to `claude-opus-4-6` via a new `OPUS_MODEL ?= claude-opus-4-6` Makefile variable (overridable as `make test-live-claude-opus OPUS_MODEL=opus`); hoisted the workflow's `MODEL_OVERRIDE`-fallback above the `TEST_SELECTOR` branch and propagated the resolved MODEL_FLAG to make as `OPUS_MODEL="$MODEL_FLAG"`, so the no-selector PR-trigger path (which delegates to `make test-live-claude-opus`) also picks up claude-opus-4-6 by default. Static suite at 426 passed; `make -n` confirms default expands to `--model claude-opus-4-6` and `OPUS_MODEL=foo` override expands to `--model foo`. Validator should re-verify both YAML-direct and make-target paths now.
+
+## Stage Report (validation, scope expansion)
+
+This is the second validation pass for #181. The first validation PASSED the original narrow scope (YAML claude-live-opus MODEL_OVERRIDE-fallback only). Captain re-scoped the work to also cover the no-selector make-target path; this validation re-verifies BOTH paths post-expansion.
+
+### Checklist
+
+1. **Read entity body in full (incl. prior implementation, validation, and scope-expansion reports)** — DONE. All four prior sections reviewed end-to-end. Original narrow-scope work (commits `8112e5a3` workflow + `fba7265d` entity body) confirmed shipped; first-validation PASSED at commit `3e3bd2b4`; scope-expansion shipped at commit `a7fdf48a` (Makefile + workflow YAML + entity body in a single commit).
+
+2. **Verify diff is surgical and covers BOTH paths** — DONE.
+
+   `git diff main..HEAD --stat`:
+   ```
+    .github/workflows/runtime-live-e2e.yml            |  18 +-
+    Makefile                                          |   6 +-
+    docs/plans/opus-4-7-ensign-hallucination-scope.md |   2 +-
+    docs/plans/pin-opus-4-6-ci-default.md             | 263 +++++++++++++++++++++-
+    4 files changed, 277 insertions(+), 12 deletions(-)
+   ```
+
+   Provenance check: `docs/plans/opus-4-7-ensign-hallucination-scope.md` is from commit `59a0db41` (`advance: #177 entering implementation …`, present in the worktree base; unrelated to #181 — same observation as the first validation). Our scope-expansion commit `a7fdf48a` touches exactly three files: `Makefile`, `.github/workflows/runtime-live-e2e.yml`, and the entity body — confirmed via `git show --stat a7fdf48a`.
+
+   **Makefile diff vs main (verbatim):**
+   ```diff
+   diff --git a/Makefile b/Makefile
+   index e97bf747..1e981d3a 100644
+   --- a/Makefile
+   +++ b/Makefile
+   @@ -6,6 +6,8 @@ TEST ?= tests/
+    RUNTIME ?= claude
+    LIVE_CLAUDE_WORKERS ?= 4
+    LIVE_CODEX_WORKERS ?= 4
+   +# Pinned to claude-opus-4-6 due to opus-4-7 ensign hallucination regression at low/medium effort; see #177 / #181. Reversible — override with `make test-live-claude-opus OPUS_MODEL=opus` to re-test on opus-4-7.
+   +OPUS_MODEL ?= claude-opus-4-6
+
+    test-static:
+    	unset CLAUDECODE && uv run pytest tests/ --ignore=tests/fixtures \
+   @@ -32,9 +34,9 @@ test-live-claude:
+    test-live-claude-opus:
+    	unset CLAUDECODE && { \
+    	  uv run pytest tests/ --ignore=tests/fixtures \
+   -	    -m "live_claude and serial" --runtime claude --model opus --effort low -x -v ; SEQ=$$? ; \
+   +	    -m "live_claude and serial" --runtime claude --model $(OPUS_MODEL) --effort low -x -v ; SEQ=$$? ; \
+    	  uv run pytest tests/ --ignore=tests/fixtures \
+   -	    -m "live_claude and not serial" --runtime claude --model opus --effort low \
+   +	    -m "live_claude and not serial" --runtime claude --model $(OPUS_MODEL) --effort low \
+    	    -n $(LIVE_CLAUDE_WORKERS) -v ; PAR=$$? ; \
+    	  test $$SEQ -eq 0 -a $$PAR -eq 0 ; \
+    	}
+   ```
+
+   **Workflow YAML diff vs main (verbatim):**
+   ```diff
+   diff --git a/.github/workflows/runtime-live-e2e.yml b/.github/workflows/runtime-live-e2e.yml
+   index 3e82d81f..03b574ac 100644
+   --- a/.github/workflows/runtime-live-e2e.yml
+   +++ b/.github/workflows/runtime-live-e2e.yml
+   @@ -485,7 +485,8 @@ jobs:
+              if [ -n "$MODEL_OVERRIDE" ]; then
+                EFFECTIVE_MODEL="$MODEL_OVERRIDE"
+              else
+   -            EFFECTIVE_MODEL="opus"
+   +            # Pinned to claude-opus-4-6 due to opus-4-7 ensign hallucination regression at low/medium effort; see #177 / #181. Reversible — restore default to opus once upstream resolves.
+   +            EFFECTIVE_MODEL="claude-opus-4-6"
+              fi
+              {
+                echo "### Tool versions"
+   @@ -505,6 +506,12 @@ jobs:
+              EFFORT_OVERRIDE: ${{ inputs.effort_override }}
+              MODEL_OVERRIDE: ${{ inputs.model_override }}
+            run: |
+   +          if [ -n "$MODEL_OVERRIDE" ]; then
+   +            MODEL_FLAG="$MODEL_OVERRIDE"
+   +          else
+   +            # Pinned to claude-opus-4-6 due to opus-4-7 ensign hallucination regression at low/medium effort; see #177 / #181. Reversible — restore default to opus once upstream resolves.
+   +            MODEL_FLAG="claude-opus-4-6"
+   +          fi
+              if [ -n "$TEST_SELECTOR" ]; then
+                echo "Running selector: $TEST_SELECTOR"
+                if [ -n "$EFFORT_OVERRIDE" ]; then
+   @@ -512,17 +519,14 @@ jobs:
+                else
+                  EFFORT_FLAG="low"
+                fi
+   -            if [ -n "$MODEL_OVERRIDE" ]; then
+   -              MODEL_FLAG="$MODEL_OVERRIDE"
+   -            else
+   -              MODEL_FLAG="opus"
+   -            fi
+                echo "Opus effort: $EFFORT_FLAG"
+                echo "Opus model: $MODEL_FLAG"
+                unset CLAUDECODE
+                uv run pytest "$TEST_SELECTOR" --runtime claude --model "$MODEL_FLAG" --effort "$EFFORT_FLAG" -v
+              else
+   -            make test-live-claude-opus
+   +            # Propagate the pinned/overridden model to the make target's OPUS_MODEL var so the no-selector path also picks up claude-opus-4-6 (or the override). See #177 / #181.
+   +            echo "Opus model: $MODEL_FLAG"
+   +            make test-live-claude-opus OPUS_MODEL="$MODEL_FLAG"
+              fi
+
+          - name: Upload Claude live opus artifacts
+   ```
+
+   Confirmed: the YAML hoists the `MODEL_OVERRIDE`-fallback above the `TEST_SELECTOR` branch (so MODEL_FLAG is computed once and used by both branches), the selector path's `--model "$MODEL_FLAG"` invocation is preserved byte-equivalent, and the no-selector path now propagates `OPUS_MODEL="$MODEL_FLAG"` to the make target. Display string in the "Show tool versions" step (line 488) remains pinned to `claude-opus-4-6`.
+
+3. **Verify Makefile change introduces `OPUS_MODEL ?= claude-opus-4-6` (NOT the broken `opus` alias) and substitutes both pytest invocations** — DONE.
+   - New variable line: `OPUS_MODEL ?= claude-opus-4-6` — defaults to the explicit version, not the `opus` alias.
+   - Serial pytest invocation (`-m "live_claude and serial"`): `--model opus` → `--model $(OPUS_MODEL)`.
+   - Parallel pytest invocation (`-m "live_claude and not serial"`): `--model opus` → `--model $(OPUS_MODEL)`.
+   - Other Makefile targets (`test-static`, `test-live-claude`, `test-live-codex`, `test-live-claude-bare`, `test-e2e`, etc.) NOT touched — confirmed by the Makefile diff scope (only lines 6-8 and 32-40 modified).
+
+4. **Verify make-target effective resolution via `make -n`** — DONE.
+
+   Default (`make -n test-live-claude-opus 2>&1 | grep -- '--model'`):
+   ```
+   	    -m "live_claude and serial" --runtime claude --model claude-opus-4-6 --effort low -x -v ; SEQ=$? ; \
+   	    -m "live_claude and not serial" --runtime claude --model claude-opus-4-6 --effort low \
+   ```
+   Both pytest invocations expand to `--model claude-opus-4-6`. PASS.
+
+   Override (`make -n test-live-claude-opus OPUS_MODEL=opus 2>&1 | grep -- '--model'`):
+   ```
+   	    -m "live_claude and serial" --runtime claude --model opus --effort low -x -v ; SEQ=$? ; \
+   	    -m "live_claude and not serial" --runtime claude --model opus --effort low \
+   ```
+   Both pytest invocations expand to `--model opus` when override is supplied. Override mechanism preserved. PASS.
+
+5. **Verify workflow YAML covers no-selector path** — DONE. From the YAML diff in step 2:
+   - The no-selector branch (`else` after `if [ -n "$TEST_SELECTOR" ]`) now invokes `make test-live-claude-opus OPUS_MODEL="$MODEL_FLAG"`. The pin propagates as `--model claude-opus-4-6` into the make target's pytest invocations.
+   - The MODEL_FLAG computation is hoisted ABOVE the `if [ -n "$TEST_SELECTOR" ]` branch (was previously inside the selector branch only). It is no longer duplicated; one resolution serves both branches.
+   - The selector branch's `--model "$MODEL_FLAG"` path is preserved verbatim (the inner `if [ -n "$MODEL_OVERRIDE" ]` block was removed since MODEL_FLAG is now hoisted above; the `pytest "$TEST_SELECTOR" --runtime claude --model "$MODEL_FLAG"` invocation is unchanged). Effective behavior on the selector path is byte-equivalent.
+
+6. **Re-run static suite** — DONE. Ran `unset CLAUDECODE && make test-static` from worktree root.
+
+   Final line verbatim:
+   ```
+   426 passed, 22 deselected, 10 subtests passed in 19.61s
+   ```
+   Zero failures. Matches both prior runs (426/426). AC #2 (≥ 422) satisfied.
+
+7. **AC-4 (live CI dispatch verification) status** — DEFERRED-TO-MERGE-HOOK. The previous PR push + CI dispatch (PR #116, runs 24547231090 + 24547243582) was made under the OLD narrow scope. The scope-expansion commits (`a7fdf48a`) need to be pushed before CI re-runs can verify the make-target path. Push happens at the merge hook, not validation. Not pushing the branch; not dispatching CI here.
+
+8. **Stage report appended** — DONE (this section).
+
+9. **Commit on worktree branch** — pending immediately after this write; not pushed.
+
+Recommendation: PASSED — both paths now correctly pinned, static suite N/N green, override mechanism verified, AC-4 deferred to merge hook re-push.
