@@ -485,7 +485,8 @@ jobs:
           if [ -n "$MODEL_OVERRIDE" ]; then
             EFFECTIVE_MODEL="$MODEL_OVERRIDE"
           else
-            EFFECTIVE_MODEL="opus"
+            # Pinned to claude-opus-4-6 due to opus-4-7 ensign hallucination regression at low/medium effort; see #177 / #181. Reversible — restore default to opus once upstream resolves.
+            EFFECTIVE_MODEL="claude-opus-4-6"
           fi
           {
             echo "### Tool versions"
@@ -515,7 +516,8 @@ jobs:
             if [ -n "$MODEL_OVERRIDE" ]; then
               MODEL_FLAG="$MODEL_OVERRIDE"
             else
-              MODEL_FLAG="opus"
+              # Pinned to claude-opus-4-6 due to opus-4-7 ensign hallucination regression at low/medium effort; see #177 / #181. Reversible — restore default to opus once upstream resolves.
+              MODEL_FLAG="claude-opus-4-6"
             fi
             echo "Opus effort: $EFFORT_FLAG"
             echo "Opus model: $MODEL_FLAG"
