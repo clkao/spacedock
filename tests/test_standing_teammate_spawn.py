@@ -11,7 +11,6 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 from test_lib import (  # noqa: E402
     LogParser,
-    entry_contains_text,
     git_add_commit,
     install_agents,
     run_first_officer_streaming,
@@ -123,8 +122,6 @@ def test_standing_teammate_spawns_and_roundtrips(test_project, model, effort):
                 ):
                     return True
             if tool_use_matches(e, "Bash", command="ECHO: ping"):
-                return True
-            if entry_contains_text(e, r"ECHO: ping"):
                 return True
             return False
 
