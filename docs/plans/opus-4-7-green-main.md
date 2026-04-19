@@ -514,3 +514,69 @@ The #204 validation stage reported N=1 post-fix local results: feedback_keepaliv
 
 Post-#204 N=2 at `--effort low`: 0/6 aggregate (feedback_keepalive 0/2, merge_hook 0/2, standing_teammate 0/2). Side-by-side with cycle-2 pre-#204 (3/5, 0/5, 0/5), feedback_keepalive shows a 3/5 → 0/2 apparent regression that could be either genuine or N=2 sampling variance; merge_hook and standing_teammate are unchanged at 0/N. #204's Skill-invoke directive confirmed landing in all 8 fo-logs. Ensign shutdown-response fix `a898216a` landed on branch mid-run and visibly changed standing_teammate-run2 (3-turn clean $1.71 exit vs cycle-2's budget-cap at $2), but ECHO roundtrip still absent — the #194-class root cause is ensign's write discipline, not FO cleanup or dispatch-prompt contents. Captain branch (a) #204-alone insufficient; (b) effort bump still untested post-fix; (c) needed for standing_teammate regardless.
 
+## Stage Report: implementation (cycle 3 — fix dispatch post-#204, merge_hook + standing_teammate)
+
+### Context
+
+Cycle-3-fix dispatch under team-lead. #204 is live on main (claude-team cmd_build emits `Skill(skill="spacedock:ensign")` natively); sanity-checked end-to-end — this ensign's own first tool call was the Skill invocation, confirming the dispatch-prompt directive lands through the natural flow (no FO manual prepend). Branch head at dispatch: `b4935201` (cycle-2 matrix-fill report). Worktree clean.
+
+### Root-cause diagnosis
+
+1. **test_merge_hook_guardrail.** CI probe #137's fo-log (opus-live-opus, post-#204) shows the FO completed all work (merge hook fired, entity archived verdict=passed) then burned $2 of budget waiting for an ensign `shutdown_response` that never arrived — FO's terminating assistant text literally reads "Ensign is not approving shutdown; team cleanup blocked by unresponsive member. Budget exhausted." The `SendMessage` tool spec documents a `shutdown_request` / `shutdown_response` JSON protocol (echo `request_id`, set `approve: true/false`), but `skills/ensign/references/ensign-shared-core.md` did not mention it. Ensigns received shutdown_request and proceeded to normal completion without echoing the structured response.
+
+2. **test_standing_teammate_spawn.** Cycle-2 + cycle-3 evidence shows the `SendMessage → echo-agent` arrives fine, but the echo reply never lands in the ensign's captured stream / entity body. Four of five watcher steps PASS (spawn, Agent dispatch, ensign Agent, SendMessage-to-echo-agent); the final `ECHO: ping` capture step is the one that times out at 300s, with a `error_max_budget_usd` signature consistent with the ensign never writing the reply to disk. This defect is structurally the same as #194 ("Investigate opus-4-7 FO flakiness on test_standing_teammate_spawn ECHO roundtrip"), which already tracks ensign/FO-side reply routing. Per task instructions ("If this test's defect is the same as #194's tracked issue, route to #194"), routing rather than fixing here.
+
+### Fix
+
+Commit `a898216a` adds a `## Shutdown Response Protocol` section to `skills/ensign/references/ensign-shared-core.md` (scaffolding — in-scope per dispatch brief). Section instructs ensigns to, on observing a `SendMessage` whose body is `{"type": "shutdown_request", ...}`, immediately reply with `{to: "<sender>", message: {type: "shutdown_response", request_id: <echoed>, approve: true}}`. Mirrors the SendMessage tool's own protocol spec.
+
+### Local verification (opus-low, N=3 per test)
+
+Commands: `unset CLAUDECODE && KEEP_TEST_DIR=1 uv run pytest <path>::<name> --runtime claude --model opus --effort low -v`. All runs against HEAD = `a898216a` (fix commit). Host `claude --version` = 2.1.112 (same as cycle-2; NOT 2.1.114 pin — local drift).
+
+| Test | Result | Per-run detail |
+|------|-------:|-----------------|
+| `test_merge_hook_guardrail::test_merge_hook_guardrail` | **2/3 PASS** | run1 PASS 184s (Phase-1 FO $0.89, clean `subtype:success`, no budget hit, 4× shutdown_request observed → FO exited cleanly). run2 FAIL 372s — `StepTimeout` on "merge hook wrote _merge-hook-fired.txt" at 300s wallclock on Phase-2 FO (hook-expected path). Phase-1 FO succeeded $0.72 in-range; Phase-2 FO hit the 300s subprocess wall before the hook-fired Bash was observed. NOT a budget-cap failure — wallclock. run3 PASS 221s (Phase-1 FO $1.35, Phase-2 FO $1.58; both under budget; both phases clean). |
+| `test_standing_teammate_spawn::test_standing_teammate_spawns_and_roundtrips` | **ROUTED to #194** | Not run this cycle. Defect is structurally #194's tracked issue (ensign/FO reply-routing for standing teammate ECHO roundtrip) per cycle-2 diagnosis + ideation §Failure-inventory row #3. Per dispatch brief routing clause, deferred rather than fixed here. |
+| `test_feedback_keepalive::test_feedback_keepalive` (regression check) | **3/3 PASS** | run1 PASS 151s. run2 PASS 214s. run3 PASS 155s. No regression from shared-core addition. |
+
+Composite vs cycle-2 pre-fix baselines:
+- merge_hook: cycle-2 0/5 low (dominant budget-red) → cycle-3-fix 2/3 low (1 wallclock timeout, no budget-reds). The shutdown-response fix converted the budget-cap failure mode into clean exits. The remaining 1/3 fail is wallclock-timeout, distinct class.
+- feedback_keepalive: cycle-2 3/5 low → cycle-3-fix 3/3 low. No regression; plausibly marginal improvement or sampling.
+- standing_teammate: 0/5 low pre-fix, 0/2 in cycle-3-no-fix — still a #194-class defect; shared-core changes should not be expected to fix this class.
+
+Fo-log evidence preserved at `/tmp/203-cycle3-evidence/{test}-run{n}-fo-log.jsonl` (merge_hook runs 1+3 fo-logs saved; run2 too). Pytest logs at `{test}-run{n}.log`.
+
+### Deferred
+
+| Test path | Reason | Tracker ID |
+|-----------|--------|------------|
+| `tests/test_standing_teammate_spawn.py::test_standing_teammate_spawns_and_roundtrips` | #194-class defect: ensign receives SendMessage reply from echo-agent but does not write `ECHO: ping` to entity body; 4/5 watcher steps PASS but final capture step times out. Structurally the issue #194 was filed to investigate. Per dispatch brief routing clause. | #194 |
+| `tests/test_merge_hook_guardrail.py` Phase-2 300s-wallclock cap | Run2 failed by wallclock, not budget. Distinct class from the shutdown-response fix; would need a timeout bump or effort bump. Shared-core fix brought merge_hook from 0/5 → 2/3, satisfying this cycle's ≥2/3 target; remaining 1/3 needs separate investigation. | no tracker yet — captain to file if ≤2/3 recurs on CI |
+
+### Anti-pattern follow-ups
+
+| Test path | Line | Proposed label | Proposed fix |
+|-----------|------|----------------|---------------|
+| `tests/test_feedback_keepalive.py` | 443-451 | tautology-adjacent softener (latent) | Unchanged this cycle. No regression observed in 3/3 local runs. |
+| `tests/test_standing_teammate_spawn.py` | 127 | anti-pattern (latent) narration-match fallback | Unchanged this cycle. Not addressable without first resolving the underlying #194-class defect; untangling the arm on top of a defect the arm is currently hiding would create a worse red. |
+
+### AC-3 grep discipline
+
+Worktree diff vs main contains only the shared-core change plus stage reports. No test-file edits:
+
+    $ git diff main...HEAD -- tests/ | grep -E '^\+.*entry_contains_text'   → empty
+    $ git diff main...HEAD -- tests/ | grep -E '^\+.*may not match pattern'  → empty
+
+(vacuous PASS — no test diff vs main this cycle either.)
+
+### Checklist
+
+1. Fix `test_merge_hook_guardrail` — **DONE.** Root cause identified (ensign missing shutdown-response protocol); fix committed `a898216a`; local verification 2/3 PASS at opus-low (target ≥2/3 MET).
+2. Fix `test_standing_teammate_spawn` — **ROUTED to #194** per dispatch brief routing clause. Defect is structurally #194's tracked issue; no fix attempted here.
+3. Regression check on `test_feedback_keepalive` at opus-low N=3 — **DONE**, 3/3 PASS (target ≥2/3 MET, no regression).
+
+### Summary
+
+Diagnosed the `test_merge_hook_guardrail` CI red as a missing ensign shutdown-response protocol (FO completes all work, then burns $2 budget waiting on an unresponsive ensign echo of the SendMessage tool's documented structured response). Fix landed as a scaffolding addition to `skills/ensign/references/ensign-shared-core.md` (commit `a898216a`). Local verification at opus-low N=3: merge_hook 2/3 PASS (target met; remaining 1/3 fail is wallclock-timeout on Phase-2, distinct class), feedback_keepalive 3/3 PASS (no regression from shared-core addition). `test_standing_teammate_spawn` routed to #194 per dispatch brief — its defect is structurally #194's tracked ensign/FO reply-routing issue, not a shutdown-protocol problem.
+
