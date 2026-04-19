@@ -671,3 +671,302 @@ Evidence preserved at `/tmp/203-cycle5-211114-evidence/feedback_keepalive-run{1,
 ### Addendum: move shutdown-response prose to claude-ensign-runtime
 
 Team-lead scope extension during cycle-5: CI probe on branch HEAD failed `tests/test_agent_content.py::test_assembled_codex_ensign_has_completion_summary_contract` with `assert 'SendMessage' not in ...`. Root cause: `a898216a` added the `## Shutdown Response Protocol` section to `skills/ensign/references/ensign-shared-core.md`, which gets assembled into both claude and codex ensigns — codex ensigns don't use SendMessage/teams, so the assertion broke. Fix: move the section verbatim to `skills/ensign/references/claude-ensign-runtime.md` (the claude-runtime adapter), leaving `ensign-shared-core.md` restored to its pre-`a898216a` state. Prose unchanged; only location moved. Commit `9074f52d`. Local `make test-static` verification: **454 passed, 22 deselected, 10 subtests passed in 21.62s** — including `test_assembled_codex_ensign_has_completion_summary_contract`. Unblocks captain's CI probe re-run.
+
+## Cycle-7 design: per-ensign soft/hard + grand-total + prompt cleanup
+
+**Scope:** design-only (option c — all three items). No code changes in this cycle; no Edits to `scripts/test_lib.py` or `tests/`. This section is the design deliverable for captain review. Terminology kept general ("timeout discipline", "dispatch budget", "grand-total ceiling") so it slots cleanly into #202's FO-behavior-spec RTM when that lands.
+
+### Motivation and framing
+
+Current harness (`scripts/test_lib.py:741-823`, `run_first_officer_streaming`) has exactly one timer: the subprocess wallclock `hard_cap_s` (default 600s in the helper; callers pass `timeout_s=300` on specific per-step waits but there is no single per-dispatch budget). CI evidence from #203 cycle-5 (lines 655-665 above) shows both live reds resolving to the same undiagnosed signature: "FO subprocess SIGTERM at ~300s/~116s wall, last assistant activity was an ensign dispatch or a wait on shutdown-response." The 300s cliff masks where the slowness actually lives — we cannot tell from a timeout stack trace whether a single ensign dispatch took 200s, or whether ten FO turns at 30s each added up.
+
+Fix: instrument each Agent() dispatch with its own soft/hard budgets plus a grand-total ceiling on the FO subprocess. Soft warnings give us a structured signal ("ensign X exceeded 15s") long before the process dies; hard kills catch genuine runaways without taking the whole test down. Grand-total (600s default, up from 300s) provides a safety net while letting a slow-but-progressing test finish.
+
+### Item 1 — Per-ensign-dispatch soft/hard timeouts
+
+**Objective.** For every ensign dispatch inside an FO stream, track elapsed time from tool_use emission to the ensign's `Done:` completion signal. Emit a structured warning at the soft budget (default 15s, no test failure). At the hard budget (default 60s), attempt cooperative shutdown via `SendMessage(shutdown_request)` and, if the ensign does not respond with shutdown_response within 10s, kill the FO subprocess and fail the test with a clear dispatch-budget-exceeded error.
+
+**Detection rule.**
+- **Start:** assistant `tool_use` entry where `name == "Agent"` and `input.subagent_type == "spacedock:ensign"`. Record `(dispatch_id, ensign_name, start_monotonic)`. `dispatch_id` is the tool_use `id`; `ensign_name` is `input.description` or a derived stable label (see "nested/concurrent" below).
+- **Stop:** assistant `tool_use` entry where `name == "SendMessage"` AND `input.to == "team-lead"` AND `input.message` (or `input.message.startswith` if message is string) begins with `"Done:"`, matched against the most recently opened un-stopped dispatch. Compute elapsed.
+
+The FO-side signal we rely on — `Agent(subagent_type="spacedock:ensign")` — is already stable; the ensign-side completion — `SendMessage(to="team-lead", message="Done: …")` — is already authoritative per `skills/ensign/references/claude-ensign-runtime.md` Completion Signal contract. Those are the two anchors in the existing stream-json log; no new instrumentation is needed in the runtime under test.
+
+**API sketch (on top of `run_first_officer_streaming` signature at test_lib.py:741).**
+
+```python
+@dataclass
+class DispatchBudget:
+    soft_s: float = 15.0
+    hard_s: float = 60.0
+    shutdown_grace_s: float = 10.0
+
+def run_first_officer_streaming(
+    runner: TestRunner,
+    prompt: str,
+    agent_id: str = "spacedock:first-officer",
+    extra_args: list[str] | None = None,
+    log_name: str = "fo-log.jsonl",
+    grand_total_ceiling: int = 600,
+    dispatch_budget: DispatchBudget | None = None,
+) -> Iterator[FOStreamWatcher]:
+    ...
+```
+
+Default `dispatch_budget = DispatchBudget()` (15/60/10). Per-test callers override e.g. `dispatch_budget=DispatchBudget(soft_s=30, hard_s=120)` for legitimately long ensign work.
+
+**FOStreamWatcher extension.** Add a background monitor that runs in the same thread as `expect()` / `_drain_entries()`. Each call to `_drain_entries()` after parsing new JSON lines also:
+1. Updates an `_open_dispatches: dict[dispatch_id, OpenDispatch]` registry from Agent tool_use entries.
+2. Drops matching entries from the registry when a `Done:` SendMessage is observed, logging elapsed and (if over soft) the structured warning.
+3. Walks the registry for any open dispatch whose `monotonic() - start > soft_s` and not yet warned: emit warning, mark `warned=True`.
+4. Walks the registry for any open dispatch whose `monotonic() - start > hard_s` and not yet shutdown-requested: transition to `shutdown_requesting`, record `shutdown_requested_at`.
+5. Walks the registry for any open dispatch in `shutdown_requesting` whose `monotonic() - shutdown_requested_at > shutdown_grace_s`: kill FO subprocess, raise `DispatchHardTimeout`.
+
+**Pseudocode for the watcher loop (drop into FOStreamWatcher around test_lib.py:1140).**
+
+```python
+class DispatchState(Enum):
+    OPEN = "open"
+    SHUTDOWN_REQUESTING = "shutdown_requesting"
+
+@dataclass
+class OpenDispatch:
+    dispatch_id: str
+    ensign_name: str
+    start: float
+    state: DispatchState = DispatchState.OPEN
+    warned: bool = False
+    shutdown_requested_at: float | None = None
+
+def _update_dispatch_budgets(self, entries: list[dict]) -> None:
+    now = time.monotonic()
+
+    # 1. Register new dispatches.
+    for e in entries:
+        block = _tool_use_block(e)
+        if block is None:
+            continue
+        if block.get("name") == "Agent":
+            inp = block.get("input", {}) or {}
+            if inp.get("subagent_type") == "spacedock:ensign":
+                did = str(block.get("id") or "")
+                name = str(inp.get("description") or inp.get("prompt", "")[:40])
+                self._open_dispatches[did] = OpenDispatch(
+                    dispatch_id=did, ensign_name=name, start=now,
+                )
+                self._log_warning(f"dispatch_open name={name} id={did}")
+        elif block.get("name") == "SendMessage":
+            inp = block.get("input", {}) or {}
+            if inp.get("to") == "team-lead":
+                msg = inp.get("message", "")
+                msg_text = msg if isinstance(msg, str) else ""
+                if msg_text.startswith("Done:"):
+                    # Match to oldest still-open dispatch. FO only runs one
+                    # ensign at a time per current FO-contract; if/when that
+                    # changes, refine to parse ensign name from Done: body.
+                    for did, disp in list(self._open_dispatches.items()):
+                        elapsed = now - disp.start
+                        if disp.warned or elapsed > self.dispatch_budget.soft_s:
+                            self._log_warning(
+                                f"dispatch_close name={disp.ensign_name} "
+                                f"id={did} elapsed={elapsed:.1f}s "
+                                f"soft={self.dispatch_budget.soft_s}s"
+                            )
+                        del self._open_dispatches[did]
+                        break  # oldest-match semantics
+
+    # 2. Soft budget warnings.
+    for disp in self._open_dispatches.values():
+        elapsed = now - disp.start
+        if (not disp.warned) and elapsed > self.dispatch_budget.soft_s:
+            msg = (
+                f"ensign dispatch {disp.ensign_name} exceeded "
+                f"{self.dispatch_budget.soft_s}s soft budget, "
+                f"elapsed {elapsed:.1f}s, "
+                f"hard {self.dispatch_budget.hard_s}s"
+            )
+            print(f"  WARN: {msg}")
+            self._log_warning(msg)
+            disp.warned = True
+
+    # 3. Hard budget — initiate cooperative shutdown.
+    for disp in self._open_dispatches.values():
+        if disp.state == DispatchState.OPEN:
+            elapsed = now - disp.start
+            if elapsed > self.dispatch_budget.hard_s:
+                self._log_warning(
+                    f"dispatch_hard name={disp.ensign_name} "
+                    f"elapsed={elapsed:.1f}s — attempting cooperative shutdown"
+                )
+                disp.state = DispatchState.SHUTDOWN_REQUESTING
+                disp.shutdown_requested_at = now
+                # Cooperative-shutdown mechanism: the harness cannot itself
+                # emit SendMessage to the ensign (that's the FO's domain).
+                # Record the state + hard-trip timestamp; the kill fires
+                # if the dispatch does not close within shutdown_grace_s.
+                # (Rationale: dispatch loops on opus-4-7 where the ensign
+                # has already emitted its Done: will close naturally during
+                # the grace; genuinely hung ensigns will trip the kill.)
+
+    # 4. Kill after grace expired.
+    for disp in self._open_dispatches.values():
+        if (
+            disp.state == DispatchState.SHUTDOWN_REQUESTING
+            and disp.shutdown_requested_at is not None
+            and now - disp.shutdown_requested_at
+                > self.dispatch_budget.shutdown_grace_s
+        ):
+            elapsed = now - disp.start
+            self._log_warning(
+                f"dispatch_kill name={disp.ensign_name} "
+                f"elapsed={elapsed:.1f}s — killing FO subprocess"
+            )
+            try:
+                self.proc.terminate()
+                self.proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self.proc.kill()
+                self.proc.wait()
+            raise DispatchHardTimeout(
+                f"ensign dispatch {disp.ensign_name} exceeded "
+                f"{self.dispatch_budget.hard_s}s hard budget "
+                f"(elapsed {elapsed:.1f}s, no close after "
+                f"{self.dispatch_budget.shutdown_grace_s}s grace)",
+                ensign_name=disp.ensign_name,
+                elapsed=elapsed,
+            )
+```
+
+Call site: the tail of `_drain_entries()` (test_lib.py:1103-1128) invokes `self._update_dispatch_budgets(entries)` before returning. This piggybacks on the existing 0.2s `POLL_INTERVAL_S`, which is fine-grained enough for 15s-soft / 60s-hard budgets. No new thread.
+
+**Nested/concurrent dispatches.** Current FO discipline (per `skills/first-officer/references/first-officer-shared-core.md`) dispatches at most one ensign per stage transition, and keeps-alive only one implementation agent at a time during feedback-rejection. Concurrent ensign dispatches are not part of the contract today. Design decision: oldest-match semantics on `Done:` close (pseudocode above). If the FO contract later allows concurrent ensigns, refine the matcher to parse the ensign's name from the `Done:` body (the contract already requires ensign names start messages like `"Done: {entity title} completed {stage}"`). Out of scope this cycle — document as a future refinement.
+
+**Log sink.** `_log_warning()` appends to the fo-log jsonl with a harness-owned entry type (e.g. `{"type": "harness_warning", "ts": ..., "message": ...}`) AND prints to stdout. The jsonl entries survive test-run packaging (the existing `extract_stats` walk at test_lib.py:818 already copies the full log); stdout gives the developer running `uv run pytest -v` immediate signal. Using the same log_path keeps evidence in one place for debrief/artifact upload.
+
+**New exception type.** `DispatchHardTimeout(AssertionError)` mirroring `StepTimeout` / `StepFailure` at test_lib.py:974-988, carrying `ensign_name: str` and `elapsed: float` so failing tests surface the signal in the pytest header.
+
+### Item 2 — Per-test grand-total ceiling
+
+**Objective.** Replace the implicit `timeout_s=300` per-step caller convention + `hard_cap_s=600` helper default with a single named parameter `grand_total_ceiling` on `run_first_officer_streaming`. When the grand-total ceiling trips, the FO subprocess is killed and the test fails with a clear error. This is the safety net; the expectation is that soft-warnings (item 1) fire long before the grand-total ceiling.
+
+**Signature migration.**
+
+Before (test_lib.py:741-747):
+
+```python
+def run_first_officer_streaming(
+    runner: TestRunner,
+    prompt: str,
+    agent_id: str = "spacedock:first-officer",
+    extra_args: list[str] | None = None,
+    log_name: str = "fo-log.jsonl",
+    hard_cap_s: int = 600,
+) -> Iterator[FOStreamWatcher]:
+```
+
+After:
+
+```python
+def run_first_officer_streaming(
+    runner: TestRunner,
+    prompt: str,
+    agent_id: str = "spacedock:first-officer",
+    extra_args: list[str] | None = None,
+    log_name: str = "fo-log.jsonl",
+    grand_total_ceiling: int = 600,
+    dispatch_budget: DispatchBudget | None = None,
+) -> Iterator[FOStreamWatcher]:
+```
+
+Default ceiling raised from the de-facto 300 (via `w.expect_exit(timeout_s=300)` call-site convention) to 600 at the helper level. The existing 300s that shows up in test bodies (e.g. `tests/test_merge_hook_guardrail.py:68` `timeout_s=300` passed to `expect_exit`) stays on `expect_exit` — that is the per-step budget for a final-exit wait, orthogonal to the grand-total ceiling on the subprocess as a whole.
+
+**Enforcement.** Two points:
+1. The `run_first_officer_streaming` `finally:` block (test_lib.py:793-823) already enforces a wall-clock wait against `hard_cap_s`. Rename the local variable and keep the same logic: `grace_s = max(grand_total_ceiling - elapsed, 1)`.
+2. Additionally, the new `_update_dispatch_budgets()` poll checks `time.monotonic() - start_of_fo_subprocess > grand_total_ceiling` and, if true, kills the subprocess and raises `GrandTotalCeilingExceeded(AssertionError)` with message `f"test exceeded {grand_total_ceiling}s grand-total ceiling"`. This makes the ceiling actively enforced during the `with` block (the current `hard_cap_s` only fires at `finally:` exit, which means a genuinely stuck FO could spin for the full ceiling without the caller noticing until context exit).
+
+**Backward compatibility — migration strategy.**
+- The rename `hard_cap_s` → `grand_total_ceiling` is source-breaking for any existing call site passing `hard_cap_s=` as a keyword. Grep evidence: `hard_cap_s` appears only in `scripts/test_lib.py` itself (definition at line 747, use at lines 803-804). No test or other helper passes it by name. Safe to rename without a compat shim.
+- The 300s that tests pass to `expect_exit(timeout_s=300)` is a DIFFERENT parameter — `FOStreamWatcher.expect_exit()` at test_lib.py:1182. That stays as-is. No migration needed.
+- Tests that want a tighter grand-total (e.g. explicit 300s for historical parity) pass `grand_total_ceiling=300`. Tests that want to opt into the raised ceiling pass nothing (get the 600s default).
+
+**Orthogonality.** Grand-total is an OR with per-ensign-dispatch hard. A test can consume the full 600s grand-total via ten FO turns at 50s each — no single ensign dispatch trips its 60s hard, but the grand-total kicks in. Conversely, a single hung ensign trips the 60s hard long before grand-total. The two tiers give us structured data: "grand-total tripped" means FO-side slowness (many turns adding up); "dispatch hard tripped" means ensign-side hang.
+
+**New exception type.** `GrandTotalCeilingExceeded(AssertionError)` sibling to `DispatchHardTimeout`, `StepTimeout`, `StepFailure`.
+
+### Item 3 — `test_feedback_keepalive` prompt cleanup
+
+**Objective.** The current prompt (test_feedback_keepalive.py:272-281) includes two FO-discipline hints that duplicate shared-core prose:
+
+```
+"The validation stage has feedback-to: implementation, so you must keep the implementation "
+"agent alive when dispatching validation. "
+"When you encounter a gate review where the reviewer recommends REJECTED, "
+"auto-bounce into the feedback rejection flow and route findings to the implementation agent "
+"via SendMessage."
+```
+
+These disciplines are already in `skills/first-officer/references/first-officer-shared-core.md`:
+- `## Completion and Gates` documents the `feedback-to:` stage flag and the keep-alive requirement.
+- `## Feedback Rejection Flow` documents the auto-bounce on REJECTED + SendMessage routing.
+
+The hints in the prompt are therefore duplicative. Removing them tests whether the FO has actually internalized shared-core, which is the point of the test.
+
+**Target clean prompt** (matching the `tests/test_merge_hook_guardrail.py:44` pattern `f"Process all tasks through the workflow at {abs_workflow}/ to completion."`):
+
+```python
+prompt = f"Process the entity `keepalive-test-task` through the workflow at {abs_workflow}/."
+```
+
+**Specific diff** (test_feedback_keepalive.py:271-281):
+
+```diff
+     abs_workflow = t.test_project_dir / "keepalive-pipeline"
+-    prompt = (
+-        f"Process the entity `keepalive-test-task` through the workflow at {abs_workflow}/. "
+-        "Drive it from backlog through implementation and validation. "
+-        "The implementation task is trivial (create a text file). "
+-        "The validation stage has feedback-to: implementation, so you must keep the implementation "
+-        "agent alive when dispatching validation. "
+-        "When you encounter a gate review where the reviewer recommends REJECTED, "
+-        "auto-bounce into the feedback rejection flow and route findings to the implementation agent "
+-        "via SendMessage."
+-    )
++    prompt = f"Process the entity `keepalive-test-task` through the workflow at {abs_workflow}/."
+```
+
+Reduction: 10 lines → 1 line. Drops 5 FO-discipline hints (backlog→validation drive, trivial description, keep-alive, REJECTED auto-bounce, SendMessage routing). Keeps the one authoritative fact the prompt must carry (entity name + workflow path).
+
+**Risk.** Removing the hints may expose a separate FO-contract-loading bug — the FO-side analog of #204 (which addressed the ensign-side skill-invocation directive). If the FO does not natively load `first-officer-shared-core.md` at dispatch time (e.g., because the Skill tool is not being invoked at FO startup, mirroring the pre-#204 ensign issue), the clean prompt will fail where the hint-laden prompt succeeded — not because the behavior is wrong but because the discipline text was never in-context.
+
+This would be a **good kind of bug to uncover** (it's a real FO-contract gap that masquerades as a test flake), but fixing it is out-of-scope for #203. The FO-side loading fix would be its own task, parallel to #204, with its own ideation → implementation cycle.
+
+**Recommendation.** Proceed with the cleanup. If a new red surfaces post-cleanup that was not present pre-cleanup, report it as a narrow follow-up finding with the signature (FO stream shows no Skill() call to `spacedock:first-officer` before first Agent() dispatch, or equivalent evidence) and file against a new entity — do NOT revert the prompt cleanup to make the test green, because reverting re-couples the test to prompt-hint scaffolding that defeats the purpose.
+
+### Acceptance criteria for this cycle's follow-on implementation
+
+When captain approves this design and implementation proceeds (likely cycle-8):
+
+1. `scripts/test_lib.py` gains `DispatchBudget` dataclass, `DispatchHardTimeout`, `GrandTotalCeilingExceeded`; `run_first_officer_streaming` signature updated (`hard_cap_s` → `grand_total_ceiling`, add `dispatch_budget`); `FOStreamWatcher` gains `_open_dispatches` registry + `_update_dispatch_budgets()` called from `_drain_entries()`.
+2. No test body changes required for item 1/2 opt-in — defaults (15s soft, 60s hard, 600s grand-total) apply to all existing callers.
+3. `tests/test_feedback_keepalive.py` prompt diff applied per the exact patch above.
+4. Structured warnings surface in fo-log jsonl as `harness_warning` entries and to stdout at soft-budget crossings.
+5. Local N=3 at opus-low on the two live reds (`test_feedback_keepalive` and `test_merge_hook_guardrail`) to confirm: (a) warnings fire, (b) failure messages now point to the real bottleneck, (c) pass rate does not regress. Captain to decide whether PR merges on the improved signal even if the tests stay flaky — better diagnostics is itself the cycle-7 deliverable.
+
+### Consistency with #202 (FO behavior spec + RTM)
+
+Terminology choices in this design:
+- "dispatch budget" (soft/hard) rather than "ensign timeout" — hedges for possible future non-ensign Agent() dispatch types.
+- "grand-total ceiling" rather than "subprocess timeout" — decouples from the OS-level wall concept since we own the kill.
+- "cooperative shutdown" rather than "shutdown_request" — matches the a898216a/9074f52d shutdown-response protocol language already in `claude-ensign-runtime.md`.
+
+These slot into #202's RTM rows as:
+- FR: "harness MUST emit a structured warning when an ensign dispatch exceeds its soft budget"
+- FR: "harness MUST kill the FO subprocess when an ensign dispatch exceeds its hard budget and does not close within the shutdown grace"
+- FR: "harness MUST kill the FO subprocess when grand-total ceiling is exceeded"
+- Coverage: all three FRs covered by the cycle-8 N=3 retest on `test_feedback_keepalive` + `test_merge_hook_guardrail`.
+
+No contradictions with existing #202 content (which is still in ideation).
+
+### Summary
+
+First-pass design covers all three scope items: (1) per-ensign-dispatch soft (15s default, warning only) + hard (60s default, cooperative-shutdown + kill on grace expiry) timeouts on `FOStreamWatcher`, detected via tool_use Agent-start / SendMessage-Done-stop anchors already in the stream-json log; (2) `hard_cap_s` → `grand_total_ceiling` rename with default raised 300 → 600 and active-enforcement during the watcher poll instead of only at context-finally; (3) 10-line → 1-line prompt diff on `test_feedback_keepalive.py:272-281`, removing 5 shared-core-duplicate FO-discipline hints, with the documented risk that it may uncover an FO-side contract-loading bug as a good-kind follow-up. Ready for captain dialogue.
