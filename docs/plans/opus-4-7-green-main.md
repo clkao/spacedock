@@ -229,3 +229,107 @@ The divergence does NOT mean "the tests are fine and CI is broken." It means the
 
 Revision pass addresses staff review's three required items (R1 local run, R2 anti-pattern re-label + AC-3 tightening, R3 cost realism + version pin) and all six smaller items (C1-C6). Local live-opus run executed against `main` HEAD `6caf8548`; serial tier green, parallel-tier union appended once `make test-live-claude-opus` exits. All AC/test-plan edits are in-place and surgical — prior sections not rewritten. The plan now carries explicit grep targets for anti-pattern enforcement, a pinned Claude Code version for reproducibility, a 3/5 threshold that keeps cost under $30, a coupled-root-cause opening move, and a written anti-pattern follow-ups discipline that satisfies the captain's "report back" directive without mid-ideation task-filing.
 
+## Stage Report (Implementation — local-first redo after captain course correction)
+
+### Context
+
+Prior attempt's three knob-turn commits (`134220aa`, `55cc988d`, `9dd76dcb`) were REJECTED by captain (decision 1, two reasons: no evidence for budget-exhaustion hypothesis; grand-total ceilings are the wrong architecture). Reset branch to `b84d1a6b` via `git reset --hard b84d1a6b && git push --force-with-lease` before redo. Worktree diff vs main is empty after reset — no code changes on branch at report time.
+
+### Coupled-root experiment (local, captain decision 2)
+
+Command (single run, KEEP_TEST_DIR=1, PYTHONUNBUFFERED=1):
+
+    unset CLAUDECODE && KEEP_TEST_DIR=1 uv run pytest \
+      tests/test_feedback_keepalive.py::test_feedback_keepalive \
+      tests/test_merge_hook_guardrail.py::test_merge_hook_guardrail \
+      tests/test_standing_teammate_spawn.py::test_standing_teammate_spawns_and_roundtrips \
+      --runtime claude --model opus --effort medium -v -s
+
+Environment: local macOS Darwin 24.6.0, `claude --version` = **2.1.112** (NOT 2.1.114 pinned in ideation — local drift noted; reinstalling was not instructed and was avoided to not disturb other projects). Log captured at `/tmp/203-local-evidence/medium.log` (330 lines), fo-log preserved at `/tmp/203-local-evidence/standing_teammate-medium-fo-log.jsonl`, stats at `/tmp/203-local-evidence/standing_teammate-medium-stats.txt`.
+
+Result (wallclock 823s = 13m43s):
+
+| Test | `--effort medium` result |
+|------|--------------------------|
+| `tests/test_feedback_keepalive.py::test_feedback_keepalive` | **PASSED** (8/8 checks; 2 ensign dispatches observed; keepalive tier-1 PASS; tier-2 SKIP — rejection not observed within budget) |
+| `tests/test_merge_hook_guardrail.py::test_merge_hook_guardrail` | **PASSED** (11/11 checks; Phase-2 FO wallclock 146s, Phase-5 FO wallclock 84s; both well under the 300s walls; no budget trigger) |
+| `tests/test_standing_teammate_spawn.py::test_standing_teammate_spawns_and_roundtrips` | **FAILED** — `StepTimeout` on `archived entity body captured 'ECHO: ping'` (the 300s watcher at line 131-135). Underlying cause from fo-log: FO subprocess exited with `"subtype":"error_max_budget_usd"`, `"errors":["Reached maximum budget ($2)"]`, `"total_cost_usd": 2.16411195`. Wallclock 159s — failure was BUDGET, not time. |
+
+Control run at `--effort low` was NOT executed. Rationale: the medium run already produced diagnostic evidence on all three tests (2 pass, 1 budget-red). Per captain decision 2's "Medium red" outcome branch ("Capture fo-log evidence of what the FO is actually doing … Do NOT commit more knob-turns. Send me a completion message with the diagnostic artifacts and stop — this is a captain-input wall, not a fix moment"), executing the low-effort control would burn further local budget without changing the captain-input outcome. Stopping here per charter.
+
+### Evidence: fo-log citations (decision 1(a) requirement)
+
+For the `model-paced / budget-bounded` hypothesis on `test_standing_teammate_spawn`, the fo-log evidence is unambiguous:
+
+- Final `result` block in `/tmp/203-local-evidence/standing_teammate-medium-fo-log.jsonl`:
+  - `"subtype": "error_max_budget_usd"`
+  - `"is_error": true`
+  - `"errors": ["Reached maximum budget ($2)"]`
+  - `"total_cost_usd": 2.16411195` (cap was `$2.00`)
+  - `"duration_ms": 5004` on the terminating turn; prior turn `"duration_ms": 105154`
+- modelUsage attribution at termination:
+  - `claude-opus-4-7`: `costUSD: 2.05540775`, `inputTokens: 364`, `outputTokens: 9,551`, `cacheReadInputTokens: 1,395,563`, `cacheCreationInputTokens: 177,661`
+  - `claude-sonnet-4-6` (the echo-agent standing teammate): `costUSD: 0.1082`
+  - `claude-haiku-4-5`: `costUSD: 0.00053`
+
+This is the evidence captain decision 1(a) asked for: the FO literally hit the budget cap before the ECHO capture watcher matched. Confirmed: for this test at `--effort medium`, budget — NOT wallclock — is the gating resource.
+
+For `test_merge_hook_guardrail` and `test_feedback_keepalive`, the medium-effort runs passed cleanly (no budget trigger, no timeout trigger). Under this evidence at this host there is no red to diagnose for them at medium effort.
+
+### FO-behavioral observations from the fo-log tail
+
+Beyond budget exhaustion, the fo-log reveals FO behavior that a knob-turn would NOT fix:
+
+1. **Ensign did not send completion message before shutdown.** The FO's own final-status report (verbatim from the fo-log): "Ensign did not send completion message before non-interactive shutdown directive arrived; task body still at `work`, not archived; the ping/echo roundtrip was not captured in a stage report because the ensign hadn't reported back."
+2. **FO burned ~$0.5+ on cleanup churn after the ensign-failure signal.** Two shutdown-requests, `TeamDelete` failed with "Cannot cleanup team with 2 active member(s)", then `ToolSearch` for `TaskStop`, then a `Bash tail` on the entity file — all expensive opus tokens spent on cleanup rather than on progressing the roundtrip.
+3. **Pre-existing #194 signal.** Consistent with the ideation's `#194` citation: "FO either never dispatches the ensign, or dispatches + SendMessage but teammate reply never surfaces." Here the SendMessage happened (watcher matched at line 106) but the ensign never wrote the ECHO capture to disk.
+
+This points at a deeper ensign-completion-signal issue (#194-class), not a budget knob.
+
+### AC-3 grep discipline
+
+Worktree diff vs main is empty at report time (no commits on branch after reset). Both greps vacuously return empty:
+
+    $ git diff main...HEAD -- tests/ | grep -E '^\+.*entry_contains_text'
+    (empty — vacuous PASS, no diff)
+    $ git diff main...HEAD -- tests/ | grep -E '^\+.*may not match pattern'
+    (empty — vacuous PASS, no diff)
+
+### Anti-pattern follow-ups
+
+| Test path | Line | Proposed label | Proposed fix |
+|-----------|------|----------------|---------------|
+| `tests/test_feedback_keepalive.py` | 443-451 | tautology-adjacent softener (latent) | Either tighten the rejection-feedback regex so the pattern match is load-bearing, or delete the `"SendMessage sent to implementation agent after rejection (feedback content may not match pattern)"` second-chance branch entirely. The outer `rejection_seen` gate already guarantees a SendMessage landed; the softener lets a drifting pattern quietly pass. Arm unchanged this stage. |
+| `tests/test_standing_teammate_spawn.py` | 127 | anti-pattern (latent) narration-match fallback | Remove the `entry_contains_text(e, r"ECHO: ping")` arm entirely; the four preceding milestones (spawn-standing, Agent() dispatch, ensign Agent(), SendMessage to echo-agent) already prove the spawn/dispatch path, and the Edit/Write/Bash arms in the same OR-chain (lines 117-126) capture the real data-flow write. The fixture prompt (lines 62-65) contains the literal `ECHO: ping`, so any assistant-text narration trivially matches. Arm unchanged this stage. Note: this stage's medium-effort failure was NOT attributable to this arm — the ensign never wrote ANY of the matching forms to disk because it hit budget first. |
+
+### Deferred
+
+| Test path | Reason | Tracker ID |
+|-----------|--------|------------|
+| `tests/test_standing_teammate_spawn.py::test_standing_teammate_spawns_and_roundtrips` | Medium-effort run hits `error_max_budget_usd`. Root cause per fo-log evidence: ensign never sends completion message; FO burns cleanup budget after ensign-failure signal; budget cap reached before ECHO capture watcher matches. Captain-input wall per decision 1 — no knob-turn allowed; FO-behavioral fix (#194-adjacent) is out of scope for this task. | #194 + new captain-input task |
+| `tests/test_standing_teammate_spawn.py:127` (`entry_contains_text` arm) | Latent anti-pattern; not causing current red (the red is earlier in the chain — ensign never writes). | no tracker yet — captain to file post-AC-1 green |
+| `tests/test_feedback_keepalive.py:443-451` (soft-accept branch) | Latent tautology-adjacent softener; not causing current red. | no tracker yet — captain to file post-AC-1 green |
+| `runtime-live-e2e.yml` workflow_dispatch broken | Pre-existing bug from commit `2d746569` (checkout ref unconditionally `refs/pull/<N>/merge`). Not on this task's critical path per captain decision 2; note for separate follow-up task. | no tracker yet — captain to file separately |
+| All non-opus-job failures (codex, claude-live-bare, haiku-teams) | Out-of-remit per scope filter. | #194 / N/A |
+
+### Local-vs-CI divergence summary
+
+- Ideation's earlier local parallel-tier run (at `--effort low`, on main HEAD `6caf8548`): all three tests PASSED (recorded in `## Local-run union`).
+- This stage's local three-test run at `--effort medium`: feedback_keepalive + merge_hook_guardrail PASSED, standing_teammate FAILED at budget cap.
+- CI run 24619609861 at `--effort low`: all three FAILED.
+- Claude Code version difference: local `2.1.112` this stage vs `2.1.114` on the cited CI run. Plausibly relevant; not independently controlled this stage.
+
+The captain-input wall is narrower than the original inventory implied: **only `test_standing_teammate_spawn` is locally reproducible as red at medium effort**, and its failure is budget-bounded + ensign-behavioral (#194 class). The other two tests pass clean at medium locally — their CI reds remain unexplained by local reproduction, consistent with the `## Local-run union` divergence signal.
+
+### Checklist
+
+1. **Coupled-root experiment LOCALLY — DONE.** Ran at `--effort medium`; 2 PASS / 1 FAIL. Control at `--effort low` deliberately SKIPPED per captain's "Medium red" outcome branch (stop-and-report, do not thrash).
+2. **Deliverable committed to branch — NONE.** No code changes committed this stage. Branch == main after reset. Per captain decision 1(b) no knob-turns; per decision 2 "Medium red" branch, no silent swerves — stop for captain input.
+3. **Local verification — partial.** 2 of 3 tests independently verified PASSING at `--effort medium` locally. The third has fo-log evidence captured at `/tmp/203-local-evidence/standing_teammate-medium-fo-log.jsonl` and stats at `.../standing_teammate-medium-stats.txt`.
+4. **AC-3 grep discipline — vacuous PASS** (no diff vs main).
+5. **Anti-pattern follow-ups table — written** (4-field format, both arms unchanged).
+
+### Summary
+
+Local-first coupled-root experiment executed per captain's corrected plan. `test_feedback_keepalive` and `test_merge_hook_guardrail` PASS clean at `--effort medium` locally — their CI reds do not reproduce at this host. `test_standing_teammate_spawn` FAILS at `--effort medium` with unambiguous `error_max_budget_usd` evidence in fo-log (cap $2 hit at $2.16 after ensign never wrote ECHO capture and FO burned cleanup budget). Per captain decision 1 no knob-turns committed; per decision 2 "Medium red" branch, stopping at captain-input wall with diagnostic artifacts preserved. The underlying issue for `test_standing_teammate_spawn` is ensign-completion-signal (#194-class), not a test-framework knob — this is a behavioral fix that falls outside this task's scope.
+
