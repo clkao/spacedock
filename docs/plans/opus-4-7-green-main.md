@@ -649,3 +649,21 @@ Cycle-3-fix closed checklist items 1-3, then folded in team-lead's scope extensi
 ### Summary
 
 Cycle-4-cleanup closed the loop on #203. On dispatch I discovered cycle-3-fix's addendum (`d575eb9e`) had already landed both Arm A (`1ad36292`) and Arm B (`1465ef9e`) tightenings — conflicting with cycle-4's "xfail Arm B, don't tighten" presumption. Escalated to team-lead; captain confirmed path (b): keep the Arm B tightening in place and layer xfail on top. Added the xfail decorator (`strict=False`) to `test_standing_teammate_spawns_and_roundtrips` with reason citing #194 (commit `8ea0dc2d`). Local N=1 verification: XFAIL in 392s — test is now green regardless of underlying #194-class defect. When #194's ensign-side echo-capture fix lands, the xfail decorator comes off and the stricter Edit/Write/Bash capture arms become canonical.
+
+## Stage Report: implementation (cycle 5 — 2.1.114 pinned retest)
+
+Host `claude --version` = `2.1.114` (CI pin, upgrade from 2.1.112). Branch HEAD at `c4ce1e52` (cycle-4 stage report + xfail). Test: `tests/test_feedback_keepalive.py::test_feedback_keepalive` at `--runtime claude --model opus --effort low`, N=3.
+
+| Run | Result | Wallclock | Fo-log signature |
+|-----|--------|----------:|-------------------|
+| run1 | FAIL | 308s | `AssertionError: Neither Path-A ... nor Path-B ... observed within 240s` at `test_feedback_keepalive.py:133`. FO subprocess exit code 143 (SIGTERM) after 301s wall with `Long wait for ensign shutdown approval` + `Long sleep` task_started at fo-log tail; no `result`/`subtype:success` line. Classic subprocess wall-kill, matches cycle-3-fix run1/run3 class. |
+| run2 | **PASS** | 192s | Three `subtype:success` result lines at `$1.16`, `$1.55`, `$1.60` total_cost_usd; FO turns through "Waiting for ensign shutdown approval" → "Waiting for validation completion" → "Implementation ensign exited (shutdown earlier). Will fresh-dispatch implementation on rejection." Clean feedback-rejection flow. |
+| run3 | FAIL | 127s | `test_lib.StepTimeout: Step 'implementation data-flow signal' did not match within 120s` at `scripts/test_lib.py:1175`. FO subprocess exit code 143 after 116s wall with 20 assistant messages and no `result` line. Early wall-kill — fastest failure of the three, before data-flow signal could emit. |
+
+**Aggregate: 1/3 PASS.**
+
+Evidence preserved at `/tmp/203-cycle5-211114-evidence/feedback_keepalive-run{1,2,3}.log` + `-fo-log.jsonl`.
+
+### Conclusion
+
+2.1.114 N=3 at opus-low = **1/3 PASS**, vs cycle-3-fix N=3 at 2.1.112 = 0/3 PASS, and cycle-2 N=5 at 2.1.112 pre-tightening = 3/5 PASS. The 2.1.114 bump did not eliminate the flake; both failure classes (subprocess wall-kill mid Path-A/B wait, subprocess wall-kill mid step-watcher) persist. 1/3 at N=3 vs 3/5 at N=5 pre-tightening is borderline-plausible within sampling variance but leaves the test well below any ≥2/3 green target on small N. Captain decision point: the regression is version-independent enough that further investigation (is `a898216a` over-correcting? is it an FO-discipline issue with the feedback-then-shutdown sequence surfaced by the shutdown-response protocol?) may be warranted before #203 ships. No code changes; stage report only.
