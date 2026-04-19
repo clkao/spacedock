@@ -703,6 +703,103 @@ class TestBuildBareMode:
         assert "Completion Signal" not in out["prompt"]
 
 
+class TestBuildSkillInvokeDirective:
+    """#204 ACs: prepended Skill-invoke directive, AC3 duplicative-prose removals, AC5 stage-report heading."""
+
+    def test_build_prepends_skill_invoke_directive(self, tmp_path):
+        """AC1: Skill(skill="spacedock:ensign") substring appears before "You are working on:"."""
+        wf_dir, entity = _make_workflow_fixture(tmp_path)
+        inp = {
+            "schema_version": 1,
+            "entity_path": str(entity),
+            "workflow_dir": str(wf_dir),
+            "stage": "ideation",
+            "checklist": ["1. Item"],
+            "team_name": "t",
+            "bare_mode": False,
+        }
+        result = run_build(wf_dir, inp)
+        assert result.returncode == 0, f"stderr: {result.stderr}"
+        prompt = json.loads(result.stdout)["prompt"]
+        skill_idx = prompt.find('Skill(skill="spacedock:ensign")')
+        header_idx = prompt.find("You are working on:")
+        assert skill_idx != -1, "directive missing from prompt"
+        assert header_idx != -1
+        assert skill_idx < header_idx, "Skill directive must precede the header"
+
+    def test_build_prepends_skill_invoke_directive_bare_mode(self, tmp_path):
+        """AC1 (bare): directive still emitted in bare mode."""
+        wf_dir, entity = _make_workflow_fixture(tmp_path)
+        inp = {
+            "schema_version": 1,
+            "entity_path": str(entity),
+            "workflow_dir": str(wf_dir),
+            "stage": "ideation",
+            "checklist": ["1. Item"],
+            "bare_mode": True,
+        }
+        result = run_build(wf_dir, inp)
+        assert result.returncode == 0, f"stderr: {result.stderr}"
+        prompt = json.loads(result.stdout)["prompt"]
+        assert 'Skill(skill="spacedock:ensign")' in prompt
+        assert prompt.find('Skill(skill="spacedock:ensign")') < prompt.find("You are working on:")
+
+    def test_build_omits_duplicative_shared_core_prose(self, tmp_path):
+        """AC3: four duplicative substrings absent from assembled prompt."""
+        wf_dir, entity = _make_workflow_fixture(tmp_path)
+        inp = {
+            "schema_version": 1,
+            "entity_path": str(entity),
+            "workflow_dir": str(wf_dir),
+            "stage": "ideation",
+            "checklist": ["1. Item"],
+            "team_name": "t",
+            "bare_mode": False,
+        }
+        result = run_build(wf_dir, inp)
+        assert result.returncode == 0, f"stderr: {result.stderr}"
+        prompt = json.loads(result.stdout)["prompt"]
+        assert "Do NOT modify YAML frontmatter in entity files." not in prompt
+        assert "Do NOT modify files under agents/ or references/" not in prompt
+        assert "Every checklist item must appear in your report. Do not omit items." not in prompt
+        assert "Mark each: DONE, SKIPPED (with rationale), or FAILED (with details)." not in prompt
+
+    def test_build_omits_stage_report_heading(self, tmp_path):
+        """AC5: "## Stage Report" heading absent from spawner prompt (shared-core owns it)."""
+        wf_dir, entity = _make_workflow_fixture(tmp_path)
+        inp = {
+            "schema_version": 1,
+            "entity_path": str(entity),
+            "workflow_dir": str(wf_dir),
+            "stage": "ideation",
+            "checklist": ["1. Item"],
+            "team_name": "t",
+            "bare_mode": False,
+        }
+        result = run_build(wf_dir, inp)
+        assert result.returncode == 0, f"stderr: {result.stderr}"
+        prompt = json.loads(result.stdout)["prompt"]
+        assert "## Stage Report" not in prompt
+
+    def test_build_directive_uses_plain_language_safety_phrasing(self, tmp_path):
+        """AC6: directive contains plain-language "safe to call more than once" and does not use "idempotent"."""
+        wf_dir, entity = _make_workflow_fixture(tmp_path)
+        inp = {
+            "schema_version": 1,
+            "entity_path": str(entity),
+            "workflow_dir": str(wf_dir),
+            "stage": "ideation",
+            "checklist": ["1. Item"],
+            "team_name": "t",
+            "bare_mode": False,
+        }
+        result = run_build(wf_dir, inp)
+        assert result.returncode == 0, f"stderr: {result.stderr}"
+        prompt = json.loads(result.stdout)["prompt"]
+        assert "safe to call more than once" in prompt
+        assert "idempotent" not in prompt
+
+
 class TestBuildWorktreeStage:
     """AC-5: Worktree-stage dispatch includes worktree instructions."""
 

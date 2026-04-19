@@ -269,6 +269,21 @@ def cmd_build(args):
     # --- Prompt Assembly (9 components) ---
     prompt_parts = []
 
+    # 0. Operating-contract first-action directive
+    prompt_parts.append(
+        '## First action\n'
+        '\n'
+        'Before anything else, invoke your operating contract:\n'
+        '\n'
+        '    Skill(skill="spacedock:ensign")\n'
+        '\n'
+        'This loads the shared ensign discipline (stage-report format, BashOutput '
+        'polling, worktree ownership, completion signal protocol). The call is safe '
+        'to call more than once; if the agent-definition preload ever starts '
+        'working, calling it again is a no-op (the skill content is re-loaded but '
+        'has no behavioral effect). Do not paraphrase; call the tool.\n'
+    )
+
     # 1. Header
     prompt_parts.append(f'You are working on: {entity_title}\n\nStage: {stage}\n')
 
@@ -298,12 +313,6 @@ def cmd_build(args):
             f'Read the entity file at {entity_path} for the current spec.\n'
         )
 
-    # 5. Do-not-modify block (always)
-    prompt_parts.append(
-        'Do NOT modify YAML frontmatter in entity files.\n'
-        'Do NOT modify files under agents/ or references/ — these are plugin scaffolding.\n'
-    )
-
     # 6. Feedback context (conditional)
     if feedback_context:
         prompt_parts.append(f'### Feedback from prior review\n\n{feedback_context}\n')
@@ -316,12 +325,9 @@ def cmd_build(args):
     checklist_text = '\n'.join(checklist)
     prompt_parts.append(
         '### Completion checklist\n\n'
-        'Write a ## Stage Report section into the entity file when done.\n'
-        'Mark each: DONE, SKIPPED (with rationale), or FAILED (with details).\n\n'
         f'{checklist_text}\n\n'
         '### Summary\n'
-        '{brief description of what was accomplished}\n\n'
-        'Every checklist item must appear in your report. Do not omit items.'
+        '{brief description of what was accomplished}\n'
     )
 
     # 9. Standing teammates available (conditional: team mode, alive members found)
