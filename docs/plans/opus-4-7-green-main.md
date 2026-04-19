@@ -551,7 +551,7 @@ Fo-log evidence preserved at `/tmp/203-cycle3-evidence/{test}-run{n}-fo-log.json
 
 | Test path | Reason | Tracker ID |
 |-----------|--------|------------|
-| `tests/test_standing_teammate_spawn.py::test_standing_teammate_spawns_and_roundtrips` | #194-class defect: ensign receives SendMessage reply from echo-agent but does not write `ECHO: ping` to entity body; 4/5 watcher steps PASS but final capture step times out. Structurally the issue #194 was filed to investigate. Per dispatch brief routing clause. | #194 |
+| `tests/test_standing_teammate_spawn.py::test_standing_teammate_spawns_and_roundtrips` | #194-class defect: ensign receives SendMessage reply from echo-agent but does not write `ECHO: ping` to entity body; 4/5 watcher steps PASS but final capture step times out. Xfailed pending #194 echo-capture fix (decorator commit `8ea0dc2d`, `strict=False`). | #194 |
 | `tests/test_merge_hook_guardrail.py` Phase-2 300s-wallclock cap | Run2 failed by wallclock, not budget. Distinct class from the shutdown-response fix; would need a timeout bump or effort bump. Shared-core fix brought merge_hook from 0/5 → 2/3, satisfying this cycle's ≥2/3 target; remaining 1/3 needs separate investigation. | no tracker yet — captain to file if ≤2/3 recurs on CI |
 
 ### Anti-pattern follow-ups
@@ -616,7 +616,7 @@ Arm B (`test_standing_teammate_spawn`) N=3 NOT RUN. Rationale: per item-2 routin
 | Test path | Line | Label | Commit / status |
 |-----------|------|-------|------------------|
 | `tests/test_feedback_keepalive.py` | 443-451 (deleted) | tautology-adjacent softener (latent) | Tightened — softener branch deleted in `1ad36292`. Post-tightening local 0/3 on opus-low is pre-existing flake-band variance (cycle-2 was 3/5 same tier), not caused by the deletion (failures are upstream of the deleted code path). |
-| `tests/test_standing_teammate_spawn.py` | 127 (deleted) | anti-pattern (latent) narration-match fallback | Tightened — `entry_contains_text` arm deleted from OR-chain in `1465ef9e`; unused import also removed. N=3 verification not run per rationale above (#194-class defect, 0/N regardless of tightening). |
+| `tests/test_standing_teammate_spawn.py` | 127 (deleted) | anti-pattern (latent) narration-match fallback | Tightened in `1465ef9e`; test xfailed pending #194 (decorator commit `8ea0dc2d`, `strict=False`). `entry_contains_text` arm + unused import deleted from OR-chain; capture now relies solely on `Edit`/`Write`/`Bash` tool_use matches. When #194's ensign-side echo-capture fix lands, the xfail comes off and the stricter arms become canonical. |
 
 ### Updated checklist (post-extension)
 
@@ -632,3 +632,20 @@ Arm B (`test_standing_teammate_spawn`) N=3 NOT RUN. Rationale: per item-2 routin
 
 Cycle-3-fix closed checklist items 1-3, then folded in team-lead's scope extension (Arm A + Arm B tightenings). Both arms deleted in discrete commits with the specified messages. AC-3 greps remain empty post-tightening. Post-tightening N=3 verification on `test_feedback_keepalive` regressed to 0/3; diagnosis shows the regression is pre-existing flake-band variance (2 wall-kills, 1 budget + premature-FO-shutdown) in code paths upstream of the Arm A deletion — Arm A change is in a code path never reached in any of the three runs. Softeners NOT re-added per dispatch brief. `test_standing_teammate_spawn` post-tightening N=3 deliberately not run (routed to #194; underlying defect is 0/N regardless of tightening).
 
+## Stage Report: implementation (cycle 4 — cleanup)
+
+- DONE: Tighten Arm A (narration-match softener deletion in `test_feedback_keepalive.py:443-451`).
+  Already landed by cycle-3-fix as commit `1ad36292`. No action this cycle; verified via git log + diff. Dispatch's N=3 regression check also already executed by cycle-3-fix (0/3 PASS, diagnosed as pre-existing flake-band variance upstream of the deleted code path; softener NOT re-added).
+- DONE: xfail `test_standing_teammate_spawns_and_roundtrips` pending #194.
+  Added `@pytest.mark.xfail(reason="#194 — ensign doesn't capture echo-agent reply to entity body on opus-4-7 at low effort", strict=False)` above the test function. Commit `8ea0dc2d`. Local verification opus-low N=1: **XFAIL in 392.47s** (exit 0, green under `strict=False`). Log at `/tmp/203-cycle4-standing-xfail-verify.log`.
+- DONE: Update anti-pattern follow-ups + deferred tables in the entity body.
+  Updated "Updated anti-pattern follow-ups (post-tightening)" Arm B row to reflect the xfail (decorator commit `8ea0dc2d`). Updated Deferred table row for `test_standing_teammate_spawn` from "ROUTED" to "xfailed pending #194 echo-capture fix (decorator commit `8ea0dc2d`, `strict=False`)". Per team-lead's revised scope (path b), Arm B tightening `1465ef9e` is kept in place; xfail layered on top.
+
+### AC-3 grep verification (post cycle-4)
+
+    $ git diff main...HEAD -- tests/ | grep -E '^\+.*entry_contains_text'   → empty (PASS)
+    $ git diff main...HEAD -- tests/ | grep -E '^\+.*may not match pattern'  → empty (PASS)
+
+### Summary
+
+Cycle-4-cleanup closed the loop on #203. On dispatch I discovered cycle-3-fix's addendum (`d575eb9e`) had already landed both Arm A (`1ad36292`) and Arm B (`1465ef9e`) tightenings — conflicting with cycle-4's "xfail Arm B, don't tighten" presumption. Escalated to team-lead; captain confirmed path (b): keep the Arm B tightening in place and layer xfail on top. Added the xfail decorator (`strict=False`) to `test_standing_teammate_spawns_and_roundtrips` with reason citing #194 (commit `8ea0dc2d`). Local N=1 verification: XFAIL in 392s — test is now green regardless of underlying #194-class defect. When #194's ensign-side echo-capture fix lands, the xfail decorator comes off and the stricter Edit/Write/Bash capture arms become canonical.
