@@ -421,3 +421,96 @@ Captain corrected the sample size from N=5 to N=2 after the runs had already com
 
 Aggregate N=2 subset: **1/6 pass**. Fo-logs and pytest logs for runs 1-2 of every test are under `/tmp/203-local-low-evidence/{test}-run{1,2}-fo-log.jsonl` / `.log`. Qualitative conclusion is unchanged from the N=5 reading: `feedback_keepalive` is the only test that passes at all at low effort locally; `merge_hook_guardrail` and `standing_teammate_spawn` are 0/N at this tier with budget-exhaustion the dominant signature.
 
+## Stage Report: implementation (cycle 3 — post-#204 low matrix)
+
+### Context
+
+#204 (Skill-invoke directive in `claude-team` build) merged to main as PR #136 / commit `36a93a76`. Worktree rebased onto new main (prior cycle-2 commits now `131a6265`/`d54b9d28`). This cycle re-runs the same three CI-failing tests at `--effort low` N=2 locally against the post-#204 worktree for a before/after comparison with cycle-2 N=5 pre-#204.
+
+**Important confound — mid-run commit on branch.** Commit `a898216a` ("fix: ensign shutdown-response protocol to close FO cleanup loop") was committed to my branch at 2026-04-19 16:42:33Z — ~23 minutes into the 6-run matrix. That commit adds a Shutdown Response Protocol section to `skills/ensign/references/ensign-shared-core.md`, directly addressing the #194-class FO-cleanup-churn pattern this experiment is measuring. Runs after the commit landed read the post-fix shared-core file from the worktree. Time mapping:
+- feedback_keepalive run1 (16:19:41Z start) — pre-`a898216a`
+- feedback_keepalive run2 (16:24:48Z start) — pre-`a898216a`
+- merge_hook_guardrail run1 (16:30:03Z start) — pre-`a898216a`
+- merge_hook_guardrail run2 (16:38:13Z start, ~16:44:51Z end) — spans the commit landing (16:42:33Z) mid-flight
+- standing_teammate run1 (16:44:51Z start) — post-`a898216a`
+- standing_teammate run2 (16:51:30Z start) — post-`a898216a`
+
+So this matrix is NOT purely "#204-only"; the last two runs also include the ensign shutdown-response fix. Treat the matrix as before/after composite, not a clean apples-to-apples with cycle-2.
+
+### Commands
+
+    unset CLAUDECODE && KEEP_TEST_DIR=1 uv run pytest \
+      tests/test_feedback_keepalive.py::test_feedback_keepalive \
+      --runtime claude --model opus --effort low -v
+    (same shape ×2 for merge_hook_guardrail, standing_teammate_spawns_and_roundtrips)
+
+Environment: local macOS Darwin 24.6.0, `claude --version` = **2.1.112** (unchanged from cycle-2; still NOT the 2.1.114 CI pin). Worktree HEAD at matrix start: `d54b9d28`. Evidence dir: `/tmp/203-postfix-low-evidence/` — 6 pytest logs + 6 Phase-1 fo-logs + 2 merge_hook Phase-2 (nomods) fo-logs + `summary.txt` + `run_matrix.sh`. Wallclock 16:19:41Z → 16:57:52Z = **38m11s** for 6 runs. Under the 12-18 min budget estimate only because I stayed out-of-line of the 5-min-per-run abort cap; actual average was 6.4 min/run — dominated by wallclock-bounded failures.
+
+### Results: side-by-side (cycle-2 pre-#204 vs cycle-3 post-#204)
+
+| Test | Cycle-2 pre-#204 low (N=5) | Cycle-3 post-#204 low (N=2) | Delta-note |
+|------|---------------------------:|-----------------------------:|------------|
+| `test_feedback_keepalive.py::test_feedback_keepalive` | **3/5** | **0/2** | **REGRESSION** — both runs wallclock-FAIL with "neither Path-A nor Path-B observed within 240s"; FO `subtype:success` at $0.82/$0.85 in 15 turns each but Path-A/B signals absent. Cycle-2's same failure mode appeared in 1 of 2 non-passing runs. Cycle-3 shows it in 2/2. N=2 vs N=5 sampling makes a "0/2 vs 3/5" gap plausible even without true regression, but the FO-finished-wrong-outcome signature is reproducing cleanly. |
+| `test_merge_hook_guardrail.py::test_merge_hook_guardrail` | **0/5** | **0/2** | **UNCHANGED** — run1 FAIL @ 490s (Phase-5 `expect_exit` wall; Phase-1 fo-log `subtype:success $0.92, 131s, 18 turns`; Phase-2/nomods fo-log `subtype:success $0.64, 59s, 15 turns` — both FO invocations finished cleanly under budget but the pytest wall triggered downstream). run2 FAIL @ 398s (Phase-1 fo-log `error_max_budget_usd $2.22`). Mixed signatures. Run1 is a different failure mode than any in cycle-2 — FO finished cleanly but something downstream (archive / cleanup) hit the wall. |
+| `test_standing_teammate_spawn.py::test_standing_teammate_spawns_and_roundtrips` | **0/5** | **0/2** | **UNCHANGED** — run1 FAIL @ 399s (fo-log `error_max_budget_usd $2.00`, 7 `result` lines suggesting multiple nested Agent() invocations, final cleanup at budget cap). run2 FAIL @ 382s (fo-log `subtype:success $1.71, 3 turns, 14.5s` — FO exited cleanly but the ECHO capture watcher never matched). Run2 is post-`a898216a`; FO appears to have properly responded to shutdown_request (subtype:success) but the ECHO roundtrip still didn't surface. #194-class confirmed: the shutdown-response fix closes the cleanup-budget leak but does NOT make the ensign actually perform the ECHO roundtrip. |
+
+Aggregate cycle-3: **0/6 pass**.
+
+### #204 directive landing — sanity check
+
+Per dispatch request: grep each fo-log for `First action` (the Skill-invoke directive text injected by #204). Expected ≥1 per log.
+
+| fo-log | "First action" count |
+|--------|----------------------:|
+| feedback_keepalive-run1-fo-log.jsonl | 4 |
+| feedback_keepalive-run2-fo-log.jsonl | 4 |
+| merge_hook_guardrail-run1-fo-log.jsonl | 5 |
+| merge_hook_guardrail-run1-fo-nomods-log.jsonl | 4 |
+| merge_hook_guardrail-run2-fo-log.jsonl | 4 |
+| merge_hook_guardrail-run2-fo-nomods-log.jsonl | 4 |
+| standing_teammate-run1-fo-log.jsonl | 4 |
+| standing_teammate-run2-fo-log.jsonl | 4 |
+
+Sample match text (feedback_keepalive-run1): `"First action\\n\\nBefore anything else, invoke your operating contract:\\n\\n    Skill(skill=..."`. All 8 fo-logs carry multiple occurrences. **#204 Skill-invoke directive is landing in dispatched ensign prompts as intended.** The directive presence does not rescue test outcomes at `--effort low`.
+
+### Per-run fo-log signatures
+
+| Run | Phase-1 subtype | cost | duration_ms | num_turns | Phase-2 (nomods) |
+|-----|-----------------|-----:|------------:|----------:|------------------|
+| feedback_keepalive-run1 | success | $0.82 | 58093 | 15 | n/a |
+| feedback_keepalive-run2 | success | $0.85 | 68642 | 15 | n/a |
+| merge_hook_guardrail-run1 | success | $0.92 | 131494 | 18 | success $0.64, 59195ms, 15 turns |
+| merge_hook_guardrail-run2 | error_max_budget_usd | $2.22 | 2484 | 1 (cleanup) | (not reached) |
+| standing_teammate-run1 | error_max_budget_usd | $2.00 | 1 (final cleanup line) | 1 | n/a |
+| standing_teammate-run2 | success | $1.71 | 14505 | 3 | n/a |
+
+Note: standing_teammate-run1 fo-log has 7 result lines total (spawn-standing creates nested Agent() with per-invocation result records); the terminal line is budget-cap. standing_teammate-run2 shows a dramatically different signature — only 3 FO turns in 14.5s at $1.71, subtype:success — this is the first post-`a898216a` run showing the shutdown-response fix working. FO cleaned up promptly rather than burning cleanup budget. But the ECHO capture still didn't land, confirming the #194-class behavior (the FO-cleanup-budget-leak and the ensign-never-writes-ECHO are separate bugs).
+
+### Comparison to #204 validator's N=1
+
+The #204 validation stage reported N=1 post-fix local results: feedback_keepalive 1/1, merge_hook 0/1, standing_teammate 0/1. Cycle-3 N=2 post-#204: **feedback_keepalive 0/2, merge_hook 0/2, standing_teammate 0/2**. The #204 validator's single feedback_keepalive pass did not hold at N=2 on this host — either "got lucky" or host/timing variance. Cycle-3 does NOT contradict #204's "Skill-invoke directive lands" claim (fo-log grep above confirms); it DOES suggest #204 alone is not sufficient to green the three tests at `--effort low` locally.
+
+### Captain decision branches revisited
+
+- (a) `#204 alone`: **does not rescue any of the three at low effort locally** — cycle-3 0/6. Captain branch (a) is insufficient.
+- (b) `per-test effort bump`: cycle-1 medium N=1 had feedback_keepalive PASS, merge_hook PASS, standing_teammate FAIL (budget). Cycle-3 low N=2 holds those directions. A medium-effort re-run on post-#204 + post-`a898216a` worktree would be the next data point to fill cell (post-fix, medium).
+- (c) `something else` — specifically for standing_teammate: cycle-3 shows `a898216a` (shutdown-response fix) changes FO behavior (standing_teammate-run2 3-turn clean exit at $1.71) but does NOT make ECHO capture happen. The #194-class root cause is ensign-side (ensign never writes ECHO before FO cleanup), which neither #204 (Skill-invoke directive) nor `a898216a` (FO-side shutdown-response) addresses. A third fix targeting the ensign's roundtrip-write discipline is needed for this test specifically.
+
+### Commits / artifacts
+
+- No code changes. This stage report is the only commit this cycle.
+- Evidence under `/tmp/203-postfix-low-evidence/`:
+  - `run_matrix.sh` (run harness)
+  - `summary.txt` (wallclock + failure grep per run)
+  - `{test}-run{1,2}.log` — 6 pytest logs
+  - `{test}-run{1,2}-fo-log.jsonl` — 6 Phase-1 fo-logs (corrected after initial grep picked wrong nested dir for run2's; final copies are from the nested `tmp{outer}/tmp{inner}/fo-log.jsonl` path per run)
+  - `merge_hook_guardrail-run{1,2}-fo-nomods-log.jsonl` — 2 Phase-2 fo-logs
+
+### Checklist
+
+1. Run three CI-failing tests locally at `--effort low`, N=2 each, against post-#204 worktree HEAD — **DONE.** Pass counts: feedback_keepalive **0/2**, merge_hook_guardrail **0/2**, standing_teammate **0/2**. All fo-logs preserved at `/tmp/203-postfix-low-evidence/{test}-run{n}-fo-log.jsonl`. `a898216a` mid-run landing flagged as a confound. "First action" Skill-invoke directive grep PASSED across all 8 fo-logs (≥4 occurrences each). Side-by-side table with cycle-2 pre-#204 included. No code changes; no CI dispatches.
+
+### Summary
+
+Post-#204 N=2 at `--effort low`: 0/6 aggregate (feedback_keepalive 0/2, merge_hook 0/2, standing_teammate 0/2). Side-by-side with cycle-2 pre-#204 (3/5, 0/5, 0/5), feedback_keepalive shows a 3/5 → 0/2 apparent regression that could be either genuine or N=2 sampling variance; merge_hook and standing_teammate are unchanged at 0/N. #204's Skill-invoke directive confirmed landing in all 8 fo-logs. Ensign shutdown-response fix `a898216a` landed on branch mid-run and visibly changed standing_teammate-run2 (3-turn clean $1.71 exit vs cycle-2's budget-cap at $2), but ECHO roundtrip still absent — the #194-class root cause is ensign's write discipline, not FO cleanup or dispatch-prompt contents. Captain branch (a) #204-alone insufficient; (b) effort bump still untested post-fix; (c) needed for standing_teammate regardless.
+
