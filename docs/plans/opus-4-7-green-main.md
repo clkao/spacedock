@@ -333,3 +333,79 @@ The captain-input wall is narrower than the original inventory implied: **only `
 
 Local-first coupled-root experiment executed per captain's corrected plan. `test_feedback_keepalive` and `test_merge_hook_guardrail` PASS clean at `--effort medium` locally — their CI reds do not reproduce at this host. `test_standing_teammate_spawn` FAILS at `--effort medium` with unambiguous `error_max_budget_usd` evidence in fo-log (cap $2 hit at $2.16 after ensign never wrote ECHO capture and FO burned cleanup budget). Per captain decision 1 no knob-turns committed; per decision 2 "Medium red" branch, stopping at captain-input wall with diagnostic artifacts preserved. The underlying issue for `test_standing_teammate_spawn` is ensign-completion-signal (#194-class), not a test-framework knob — this is a behavioral fix that falls outside this task's scope.
 
+## Stage Report: implementation (cycle 2 — low-effort matrix fill)
+
+### Context
+
+Cycle-1 (commit `b7c45757`) filled the `--effort medium` matrix cell against all three tests (2 PASS / 1 budget-red). Captain dispatched this cycle to fill the `--effort low` cell of the same matrix — pure data collection, no code changes, no commits beyond this stage report, local only. Budget: 5 runs × 3 tests = 15 invocations. Branch clean at start (`b7c45757`).
+
+### Experiment
+
+Commands (each invoked 5 times serially, via `/tmp/203-local-low-evidence/run_matrix.sh`):
+
+    unset CLAUDECODE && KEEP_TEST_DIR=1 uv run pytest \
+      tests/test_feedback_keepalive.py::test_feedback_keepalive \
+      --runtime claude --model opus --effort low -v
+    (and same shape for test_merge_hook_guardrail, test_standing_teammate_spawns_and_roundtrips)
+
+Environment: local macOS Darwin 24.6.0, `claude --version` = **2.1.112** (unchanged from cycle-1; still NOT the 2.1.114 CI pin). Wallclock 06:13:48Z → 07:31:07Z = **77m19s** for 15 runs. Evidence dir `/tmp/203-local-low-evidence/`; all 15 fo-logs preserved (`{test}-run{n}-fo-log.jsonl`) plus pytest logs (`{test}-run{n}.log`) and `summary.txt`.
+
+### Results (5-per-cell)
+
+| Test | Pass count | Failure-mode distribution (fo-log `result.subtype` + wallclock bucket) |
+|------|-----------:|--------------------------------------------------------------------------|
+| `tests/test_feedback_keepalive.py::test_feedback_keepalive` | **3/5** | run1 FAIL @ 304s (Path-A/B not observed within 240s; fo-log tail `user tool_use_result`, no `result` line — subprocess wall kill). run2 PASS @ 149s. run3 FAIL @ 94s (FO exited cleanly `subtype:success`, `$1.47`, but neither Path-A nor Path-B signal surfaced — "FO did the wrong thing"). run4 PASS @ 166s. run5 PASS @ 183s. |
+| `tests/test_merge_hook_guardrail.py::test_merge_hook_guardrail` | **0/5** | run1 FAIL @ 379s (`subprocess.TimeoutExpired` 300s wall; fo-log `error_max_budget_usd`, `$2.13`). run2 FAIL @ 376s (same shape, `$2.25`). run3 FAIL @ 378s (same, `$2.15`). run4 FAIL @ 479s (`TimeoutExpired`; fo-log `subtype:success $0.91` on FO but `_merge-hook-fired.txt` never appeared — FO finished but produced wrong outcome). run5 FAIL @ 421s (`StepTimeout` merge-hook file did not match within 300s; fo-log mid-turn `user tool_use_result` — subprocess wall kill mid-run). |
+| `tests/test_standing_teammate_spawn.py::test_standing_teammate_spawns_and_roundtrips` | **0/5** | run1 FAIL @ 101s (`StepTimeout` on `echo-agent Agent() dispatched` at 60s; fo-log 29 lines, mid-turn — FO didn't dispatch echo-agent quickly enough). run2 FAIL @ 390s (`error_max_budget_usd` $2.07). run3 FAIL @ 395s (budget $2.28). run4 FAIL @ 400s (budget $2.07). run5 FAIL @ 423s (budget $2.02). |
+
+Totals: **3/15 overall** (all 3 passes from `feedback_keepalive`). `merge_hook_guardrail` is 0/5 with dominant budget-exhaustion signature (3/5 clean budget-red; 1/5 FO-completed-but-wrong-outcome; 1/5 mid-turn subprocess kill). `standing_teammate` is 0/5 with dominant budget-exhaustion (4/5 budget-red; 1/5 slow-dispatch at 60s step wall).
+
+### Fo-log evidence citations
+
+All 15 preserved under `/tmp/203-local-low-evidence/`:
+- `feedback_keepalive-run{1..5}-fo-log.jsonl`
+- `merge_hook_guardrail-run{1..5}-fo-log.jsonl`
+- `standing_teammate-run{1..5}-fo-log.jsonl`
+
+Key signatures (failing runs only):
+- `feedback_keepalive-run1-fo-log.jsonl` — 76 lines; no `result` line at tail; last entry `user tool_use_result` → subprocess wall-kill before FO terminated.
+- `feedback_keepalive-run3-fo-log.jsonl` — `subtype:success`, `total_cost_usd:1.47`, `errors:[]` → FO finished under budget but produced no Path-A/B signal (real-behavior fail: FO did not do the right thing, not a resource exhaustion).
+- `merge_hook_guardrail-run{1,2,3}-fo-log.jsonl` — `subtype:error_max_budget_usd`, `total_cost_usd` ∈ {$2.13, $2.25, $2.15}, `errors:["Reached maximum budget ($2)"]`.
+- `merge_hook_guardrail-run4-fo-log.jsonl` — `subtype:success`, `total_cost_usd:0.91` → FO finished cleanly under budget but the merge-hook file write was not observed (real-behavior fail similar to feedback_keepalive run3).
+- `merge_hook_guardrail-run5-fo-log.jsonl` — no `result` line at tail; mid-turn subprocess wall-kill at 300s.
+- `standing_teammate-run1-fo-log.jsonl` — 29 lines; no `result` line; failed on 60s `echo-agent Agent() dispatched` step wall — FO did not dispatch echo-agent in time (not a budget issue at this run).
+- `standing_teammate-run{2,3,4,5}-fo-log.jsonl` — `subtype:error_max_budget_usd`, `total_cost_usd` ∈ {$2.07, $2.28, $2.07, $2.02}.
+
+### Low-vs-medium local matrix (composite with cycle-1)
+
+| Test | `--effort low` (this cycle, N=5) | `--effort medium` (cycle-1, N=1) |
+|------|----------------------------------:|----------------------------------:|
+| `test_feedback_keepalive` | **3/5 PASS** (1 subprocess-wall kill, 1 FO-finished-no-signal) | PASS |
+| `test_merge_hook_guardrail` | **0/5 PASS** (3 budget-red, 1 FO-finished-no-signal, 1 mid-turn kill) | PASS |
+| `test_standing_teammate_spawn` | **0/5 PASS** (4 budget-red, 1 60s-step-wall slow-dispatch) | FAIL (budget-red) |
+
+Interpretation hints for captain (NOT a decision — data only):
+- The effort bump from low → medium rescues `merge_hook_guardrail` cleanly (0/5 → 1/1) and rescues `feedback_keepalive` partially (3/5 → 1/1). Consistent with the `model-paced / budget-bounded` re-categorization: at low effort the model takes more turns / more tokens per productive tool call, so the $2 cap bites. The behavioral shape does not differ — the low-effort runs that did finish clean (feedback_keepalive run3, merge_hook run4) produced the same "FO finished but no signal" pattern seen nowhere at medium.
+- `standing_teammate_spawn` is 0/5 at BOTH effort tiers locally (low: 0/5; medium: 0/1). This test is not rescued by an effort bump alone. The 4/5 low-effort runs that hit budget-red and the 1/1 medium-effort run that hit budget-red share the same fo-log signature — `subtype:error_max_budget_usd` after FO burns cleanup budget when the ensign never writes ECHO. Root cause is ensign-completion-signal (#194-class), not effort. An effort bump + a budget bump together might PASS this test, but neither alone appears to.
+- `feedback_keepalive` at low effort shows a mixed failure distribution (1 wall-kill, 1 FO-no-signal, 3 pass). If the CI wall is tighter than local (GitHub-hosted runner wallclock variance), the CI pass rate on this test at low could be worse than the 3/5 seen here. This matches the cycle-1-ideation `## Local-run union` divergence hypothesis.
+
+### Matrix cell interpretation for #203
+
+Captain's three decision branches (from cycle-1 dispatch):
+- (a) `#204 alone` (shared-core load fix): not testable from this experiment — #204 is about ensign's loaded prompt, not effort; this matrix cell neither supports nor refutes it. Would still be useful to run #204-applied locally at low effort for a like-for-like comparison.
+- (b) `per-test effort bump`: supported for `merge_hook_guardrail` (low 0/5 → medium 1/1 clean). Partially supported for `feedback_keepalive` (low 3/5 → medium 1/1 clean). NOT supported for `standing_teammate_spawn` (both tiers 0/N).
+- (c) `something else`: supported for `standing_teammate_spawn` — no effort knob in the range tested makes this test pass locally; the failing signature is ensign-completion-signal (#194) plus budget cap, neither of which an effort bump addresses.
+
+### Commits / artifacts
+
+- No code changes. No commits to branch this cycle (per captain constraint). Branch head remains `b7c45757` before this stage report append, moves forward one commit when this report is committed.
+- Evidence: `/tmp/203-local-low-evidence/` — 15 pytest logs + 15 fo-logs + `summary.txt` + `run_matrix.sh` (the run harness).
+
+### Checklist
+
+1. Run three CI-failing tests locally at `--effort low`, N=5 each, against today's main HEAD without #204 — **DONE.** Pass counts: feedback_keepalive **3/5**, merge_hook_guardrail **0/5**, standing_teammate_spawns_and_roundtrips **0/5**. All 15 fo-logs preserved at `/tmp/203-local-low-evidence/{test}-run{n}-fo-log.jsonl`; all 15 pytest logs at `{test}-run{n}.log`; run harness at `run_matrix.sh`; wallclock summary in `summary.txt`. No code changes. No branch commits beyond this report. No CI dispatches.
+
+### Summary
+
+Low-effort local matrix cell filled. Aggregate 3/15 pass (all from `feedback_keepalive`). `merge_hook_guardrail` is 0/5 dominantly budget-bounded; `standing_teammate_spawn` is 0/5 dominantly budget-bounded + one slow-dispatch. Composite with cycle-1 medium cell: effort bump plausibly rescues `merge_hook` and partially rescues `feedback_keepalive`, but does NOT rescue `standing_teammate_spawn` at either tier — its failing signature is ensign-completion-signal (#194-class) + budget cap, pointing at captain decision branch (c) for that test specifically while branch (b) remains viable for the other two. All three fix-branch hypotheses now have data to weigh against.
+
