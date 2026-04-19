@@ -76,18 +76,3 @@ Rules:
 ## Completion
 
 When done, send a minimal completion signal that points the first officer back to the entity file, then stop. The entity file is the artifact; keep the message itself minimal.
-
-## Shutdown Response Protocol
-
-If the first officer sends you a `SendMessage` whose message body is the JSON object `{"type": "shutdown_request", ...}`, you MUST immediately reply via `SendMessage` to the sender with the matching response:
-
-```json
-{"to": "<sender-name>", "message": {"type": "shutdown_response", "request_id": "<echoed-from-request>", "approve": true}}
-```
-
-Rules:
-- Echo the `request_id` from the request verbatim.
-- Set `approve: true` unless you have load-bearing in-flight work that will be lost; in that case use `approve: false` with a short `reason`.
-- The message body MUST be the structured JSON object above, not plain prose text.
-- Send it as your very next action after observing the shutdown request. The first officer blocks team teardown waiting on this response; a missing or delayed reply burns FO budget on cleanup churn.
-- After sending `approve: true`, stop. The harness terminates you.
