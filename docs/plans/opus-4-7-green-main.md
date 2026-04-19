@@ -580,3 +580,55 @@ Worktree diff vs main contains only the shared-core change plus stage reports. N
 
 Diagnosed the `test_merge_hook_guardrail` CI red as a missing ensign shutdown-response protocol (FO completes all work, then burns $2 budget waiting on an unresponsive ensign echo of the SendMessage tool's documented structured response). Fix landed as a scaffolding addition to `skills/ensign/references/ensign-shared-core.md` (commit `a898216a`). Local verification at opus-low N=3: merge_hook 2/3 PASS (target met; remaining 1/3 fail is wallclock-timeout on Phase-2, distinct class), feedback_keepalive 3/3 PASS (no regression from shared-core addition). `test_standing_teammate_spawn` routed to #194 per dispatch brief — its defect is structurally #194's tracked ensign/FO reply-routing issue, not a shutdown-protocol problem.
 
+### Addendum: cycle-3-fix scope extension (Arm A + Arm B tightenings)
+
+Team-lead scope extension received mid-cycle, after items 1-3 above had landed. Asked to tighten the two narration-match arms from the ideation anti-pattern audit:
+
+**Arm A commit `1ad36292`** — `fix: #203 tighten test_feedback_keepalive rejection-feedback assertion (delete tautology-adjacent softener)`. Deleted the `"SendMessage sent to implementation agent after rejection (feedback content may not match pattern)"` second-chance branch at `tests/test_feedback_keepalive.py:443-451`. Test now relies solely on `events["feedback_via_send_message"]` / `events["feedback_via_fresh_agent"]` checks for routing; no narration fallback.
+
+**Arm B commit `1465ef9e`** — `fix: #203 tighten test_standing_teammate_spawn milestone 5 (delete narration-match fallback)`. Deleted the `entry_contains_text(e, r"ECHO: ping")` arm at `tests/test_standing_teammate_spawn.py:127` from the `_echo_captured_in_event` OR-chain. Test now relies solely on `Edit`/`Write`/`Bash` tool_use matches for the data-flow capture. Also removed the now-unused `entry_contains_text` import.
+
+### AC-3 grep verification (post-tightening)
+
+    $ git diff main...HEAD -- tests/ | grep -E '^\+.*entry_contains_text'   → empty (PASS)
+    $ git diff main...HEAD -- tests/ | grep -E '^\+.*may not match pattern'  → empty (PASS)
+
+### Post-tightening verification (opus-low N=3 on test_feedback_keepalive)
+
+Ran N=3 on `test_feedback_keepalive` against HEAD with both tightenings applied (commit `1465ef9e`). Result: **0/3 PASS** — regression from the 3/3 observed earlier this same cycle.
+
+| Run | Result | Wallclock | Failure mode (fo-log signature) |
+|-----|--------|----------:|----------------------------------|
+| armA-run1 | FAIL | 315s | Path-A/B not observed within 240s (`AssertionError`). Fo-log: no `result` line at tail — subprocess wall-kill mid-turn (no `subtype:success`, no `error_max_budget_usd`). |
+| armA-run2 | FAIL | 201s | `StepFailure: FO subprocess exited (code=0) before step 'feedback-cycle data-flow signal' matched`. Fo-log: two FO subprocesses, both hit budget — `subtype:success total_cost_usd:2.26` then `total_cost_usd:2.35`. FO sent feedback SendMessage then stated "Bounded routed-reuse stop condition satisfied. Shutting down remaining agents." before ensign wrote the Feedback Cycles section. |
+| armA-run3 | FAIL | 324s | Path-A/B not observed within 240s (`AssertionError`). Fo-log: no `result` line — subprocess wall-kill mid-turn. |
+
+Diagnosis: Arm A deletion is NOT the proximate cause. The test failures are at `tests/test_feedback_keepalive.py:133` in the Path-A/B watcher block, which runs BEFORE the Tier-2 Feedback Routing block where Arm A's code lived. Arm A change is structurally in code that only executes after Path-A/B has already succeeded. None of the three armA-runs reached that code path.
+
+Real cause: the 3/3 → 0/3 swing on opus-low N=3 is within the test's established flake band. Cycle-2 measured `test_feedback_keepalive` at 3/5 on opus-low pre-fix. My earlier 3/3 this cycle (post-`a898216a`, pre-Arm A) was optimistic sampling; the 0/3 post-Arm A is pessimistic sampling. Neither arm tightening changed any code path that is reached in these three runs. Two of three runs (run1, run3) are subprocess wall-kills — wallclock exhaustion in the early pipeline stages, nothing to do with feedback routing. Run2 is a budget-cap + premature-shutdown pattern: FO sent feedback and immediately initiated teardown before the ensign could process it, suggesting an FO-discipline issue (send feedback, wait for ensign to act on it, THEN shut down) that the shutdown-response fix alone does not address.
+
+Per dispatch brief ("If the tightened tests go red locally ... Report the failure + fo-log evidence in your stage report; do NOT re-add the softener. Captain will decide whether to adjust the stricter arms or accept the new red"): tightening arms LEFT in place. Fo-log evidence preserved at `/tmp/203-cycle3-evidence/feedback_keepalive-armA-run{1,2,3}-fo-log.jsonl` and pytest logs at `.log`.
+
+Arm B (`test_standing_teammate_spawn`) N=3 NOT RUN. Rationale: per item-2 routing to #194, this test's defect is already characterized as 0/N at opus-low (ensign never writes ECHO reply to disk). Running N=3 on it would produce 0/3 FAIL from the underlying #194-class defect, not from the Arm B tightening (which only removes a permissive fallback — the stricter Edit/Write/Bash arms were already failing). Evidence: cycle-2 N=5 low-effort = 0/5; cycle-3-pre-fix N=2 low-effort = 0/2; all budget-red signatures with no ECHO arm matched at all, tight or loose. Running Arm B N=3 would burn ~$6 local budget to re-confirm the same class of failure this task routes to #194.
+
+### Updated anti-pattern follow-ups (post-tightening)
+
+| Test path | Line | Label | Commit / status |
+|-----------|------|-------|------------------|
+| `tests/test_feedback_keepalive.py` | 443-451 (deleted) | tautology-adjacent softener (latent) | Tightened — softener branch deleted in `1ad36292`. Post-tightening local 0/3 on opus-low is pre-existing flake-band variance (cycle-2 was 3/5 same tier), not caused by the deletion (failures are upstream of the deleted code path). |
+| `tests/test_standing_teammate_spawn.py` | 127 (deleted) | anti-pattern (latent) narration-match fallback | Tightened — `entry_contains_text` arm deleted from OR-chain in `1465ef9e`; unused import also removed. N=3 verification not run per rationale above (#194-class defect, 0/N regardless of tightening). |
+
+### Updated checklist (post-extension)
+
+1. Fix `test_merge_hook_guardrail` — **DONE.** `a898216a`; 2/3 PASS local.
+2. Route `test_standing_teammate_spawn` → #194 — **DONE.**
+3. Regression check on `test_feedback_keepalive` — **DONE.** 3/3 PASS local (pre-Arm-A).
+4. Arm A — delete feedback_keepalive softener — **DONE** `1ad36292`.
+5. Arm B — delete standing_teammate `entry_contains_text` fallback — **DONE** `1465ef9e`.
+6. AC-3 grep verification — **DONE**. Both greps empty post-tightening.
+7. N=3 verification of `test_feedback_keepalive` post-tightening — **DONE with regression reported.** 0/3 PASS. Root cause per fo-log evidence is pre-existing flake-band variance (budget + wallclock), not Arm A. Softeners NOT re-added. Captain to decide whether to widen stricter arms or accept new red on CI.
+
+### Updated summary
+
+Cycle-3-fix closed checklist items 1-3, then folded in team-lead's scope extension (Arm A + Arm B tightenings). Both arms deleted in discrete commits with the specified messages. AC-3 greps remain empty post-tightening. Post-tightening N=3 verification on `test_feedback_keepalive` regressed to 0/3; diagnosis shows the regression is pre-existing flake-band variance (2 wall-kills, 1 budget + premature-FO-shutdown) in code paths upstream of the Arm A deletion — Arm A change is in a code path never reached in any of the three runs. Softeners NOT re-added per dispatch brief. `test_standing_teammate_spawn` post-tightening N=3 deliberately not run (routed to #194; underlying defect is 0/N regardless of tightening).
+
