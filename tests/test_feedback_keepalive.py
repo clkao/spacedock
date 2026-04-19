@@ -440,17 +440,7 @@ def test_feedback_keepalive(test_project, model, effort, request):
         elif events["feedback_via_fresh_agent"]:
             t.fail("feedback routed via fresh Agent() dispatch instead of SendMessage (keepalive failed — agent was killed and re-dispatched)")
         else:
-            tool_calls = log.tool_calls()
-            post_rejection_sms = [
-                c for c in tool_calls
-                if c["name"] == "SendMessage"
-                and isinstance(c.get("input"), dict)
-                and re.search(r"implementation", str(c["input"].get("to", "")), re.IGNORECASE)
-            ]
-            if post_rejection_sms:
-                t.pass_("SendMessage sent to implementation agent after rejection (feedback content may not match pattern)")
-            else:
-                t.fail("no feedback routing observed after rejection (neither SendMessage nor fresh Agent dispatch)")
+            t.fail("no feedback routing observed after rejection (neither SendMessage nor fresh Agent dispatch)")
     else:
         print("  SKIP: rejection not observed — pipeline may not have completed validation within budget")
 
