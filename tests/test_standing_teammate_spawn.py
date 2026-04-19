@@ -30,6 +30,7 @@ def _agent_input(entry: dict) -> dict:
 
 @pytest.mark.live_claude
 @pytest.mark.teams_mode
+@pytest.mark.xfail(reason="#194 — ensign doesn't capture echo-agent reply to entity body on opus-4-7 at low effort", strict=False)
 def test_standing_teammate_spawns_and_roundtrips(test_project, model, effort):
     """AC-12: standing: true mod spawns a teammate the FO can route to.
 
