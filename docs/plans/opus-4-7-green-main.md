@@ -409,3 +409,15 @@ Captain's three decision branches (from cycle-1 dispatch):
 
 Low-effort local matrix cell filled. Aggregate 3/15 pass (all from `feedback_keepalive`). `merge_hook_guardrail` is 0/5 dominantly budget-bounded; `standing_teammate_spawn` is 0/5 dominantly budget-bounded + one slow-dispatch. Composite with cycle-1 medium cell: effort bump plausibly rescues `merge_hook` and partially rescues `feedback_keepalive`, but does NOT rescue `standing_teammate_spawn` at either tier — its failing signature is ensign-completion-signal (#194-class) + budget cap, pointing at captain decision branch (c) for that test specifically while branch (b) remains viable for the other two. All three fix-branch hypotheses now have data to weigh against.
 
+### N=2 subset (per captain correction)
+
+Captain corrected the sample size from N=5 to N=2 after the runs had already completed. Rather than rerun and discard the extra data, reporting the first-two-runs subset here per the corrected spec; the full N=5 data above remains available as strict superset for reference.
+
+| Test | First-2 runs (X/2) | Details |
+|------|--------------------:|---------|
+| `tests/test_feedback_keepalive.py::test_feedback_keepalive` | **1/2** | run1 FAIL (304s, Path-A/B not observed within 240s; fo-log mid-turn subprocess kill). run2 PASS (149s). |
+| `tests/test_merge_hook_guardrail.py::test_merge_hook_guardrail` | **0/2** | run1 FAIL (379s, `subprocess.TimeoutExpired` 300s wall; fo-log `error_max_budget_usd` $2.13). run2 FAIL (376s, same shape, fo-log `error_max_budget_usd` $2.25). |
+| `tests/test_standing_teammate_spawn.py::test_standing_teammate_spawns_and_roundtrips` | **0/2** | run1 FAIL (101s, `StepTimeout` on `echo-agent Agent() dispatched` at 60s step wall; fo-log mid-turn 29 lines). run2 FAIL (390s, fo-log `error_max_budget_usd` $2.07). |
+
+Aggregate N=2 subset: **1/6 pass**. Fo-logs and pytest logs for runs 1-2 of every test are under `/tmp/203-local-low-evidence/{test}-run{1,2}-fo-log.jsonl` / `.log`. Qualitative conclusion is unchanged from the N=5 reading: `feedback_keepalive` is the only test that passes at all at low effort locally; `merge_hook_guardrail` and `standing_teammate_spawn` are 0/N at this tier with budget-exhaustion the dominant signature.
+
