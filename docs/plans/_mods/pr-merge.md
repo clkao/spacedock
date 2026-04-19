@@ -1,7 +1,7 @@
 ---
 name: pr-merge
 description: Push branches and create/track GitHub PRs for workflow entities
-version: 0.9.6
+version: 0.9.7
 ---
 
 # PR Merge
@@ -10,19 +10,25 @@ Manages the PR lifecycle for workflow entities processed in worktree stages. Pus
 
 ## Hook: startup
 
-Scan all entity files (in the workflow directory only, not `_archive/`) for entities with a non-empty `pr` field and a non-terminal status. For each, extract the PR number (strip any `#`, `owner/repo#` prefix) and check: `gh pr view {number} --json state --jq '.state'`.
+**VCS detection**: Before running any PR command, detect VCS provider: `git remote -v | grep -q "github\.com" && echo "vcs=github" || git remote -v | grep -q "gitlab\.com" && echo "vcs=gitlab" || echo "vcs=unknown"`. If github → use `gh` CLI. If gitlab → use `glab` CLI. If unknown → warn captain and skip PR state checks.
 
-If `MERGED`, advance the entity to its terminal stage: set `status` to the terminal stage, `completed` to ISO 8601 now, `verdict: PASSED`, clear `worktree`, archive the file, and clean up any worktree/branch. Report each auto-advanced entity to the captain.
+Scan all entity files (in the workflow directory only, not `_archive/`) for entities with a non-empty `pr` field and a non-terminal status. For each, extract the PR number (strip any `#`, `owner/repo#` prefix) and check:
+- **GitHub**: `gh pr view {number} --json state --jq '.state'`
+- **GitLab**: `glab mr view {number} --output json | jq -r '.state'`
+
+If `MERGED` (GitHub) or `merged` (GitLab), advance the entity to its terminal stage: set `status` to the terminal stage, `completed` to ISO 8601 now, `verdict: PASSED`, clear `worktree`, archive the file, and clean up any worktree/branch. Report each auto-advanced entity to the captain.
 
 If `CLOSED` (closed without merge), report to the captain: "{entity title} has PR {pr number} which was closed without merging. How to proceed? Options: reopen the PR, create a new PR from the same branch, or clear `pr` and fall back to local merge." Wait for the captain's direction before taking action.
 
 If `OPEN`, no action needed — the PR is still in review.
 
-If `gh` is not available, warn the captain and skip PR state checks.
+If the VCS CLI tool (`gh` for GitHub, `glab` for GitLab) is not available, warn the captain and skip PR state checks.
 
 ## Hook: idle
 
-Check PR-pending entities using the same logic as the startup hook: scan entity files for non-empty `pr` and non-terminal status, run `gh pr view` for each, and advance merged PRs. This provides a periodic re-check in case the event loop's built-in PR scan missed a state change (defense in depth). Report any advanced entities to the captain.
+**VCS detection**: Same as startup hook — detect VCS provider before running any PR command.
+
+Check PR-pending entities using the same logic as the startup hook: scan entity files for non-empty `pr` and non-terminal status, run the VCS-detected PR view command for each, and advance merged PRs. This provides a periodic re-check in case the event loop's built-in PR scan missed a state change (defense in depth). Report any advanced entities to the captain.
 
 ## Hook: merge
 
@@ -37,11 +43,23 @@ Wait for the captain's explicit approval before pushing. Do NOT infer approval f
 
 **On approval:** First, push main to ensure the remote is up to date with local state commits: `git push origin main`. Then rebase the worktree branch onto main: `git rebase main` (from the worktree directory). Then push the worktree branch: `git push origin {branch}`. If any step fails (no remote, auth error, rebase conflict), report to the captain and fall back to local merge.
 
-Before constructing the PR body, compute the short SHA for the audit link by running `git rev-parse --short HEAD` in the worktree directory. If the command exits non-zero (no commits, detached HEAD), substitute the literal string `main` into the audit-link template instead and report the fallback to the captain. Resolve the owner/repo via `gh repo view --json nameWithOwner --jq '.nameWithOwner'`.
+Before constructing the PR body, compute the short SHA for the audit link by running `git rev-parse --short HEAD` in the worktree directory. If the command exits non-zero (no commits, detached HEAD), substitute the literal string `main` into the audit-link template instead and report the fallback to the captain. Resolve the owner/repo via:
+- **GitHub**: `gh repo view --json nameWithOwner --jq '.nameWithOwner'`
+- **GitLab**: `glab repo view --output json | jq -r '.path_with_namespace'`
 
-Create a PR. Build the PR body using the template below, then run: `gh pr create --base main --head {branch} --title "{entity title}" --body "{constructed body}"`. If `gh` is not available, warn the captain and fall back to local merge.
+Create a PR using the VCS-detected command:
+- **GitHub**: `gh pr create --base main --head {branch} --title "{entity title}" --body "{constructed body}"`
+- **GitLab**: `glab mr create --source-branch {branch} --target-branch main --title "{entity title}" --description "{constructed body}"`
 
-### PR body template
+If the VCS CLI tool (`gh` for GitHub, `glab` for GitLab) is not available, warn the captain and fall back to local merge. If `vcs=unknown` → warn the captain and fall back to local merge.
+
+### PR body resolution
+
+**Ship stage PR Draft takes priority.** Before applying the generic template below, check the entity file for a `## Ship Output` → `### PR Draft` section. If present, use its `Body:` content verbatim as the PR body — the ship stage already formatted it with workflow-specific UAT tables, DC verification commands, and reviewer reproduction steps. Only append the audit link (`[{entity-id}](...)`), `Closes`, and `Related` lines if they are not already in the draft.
+
+**Fallback to generic template** only when no `### PR Draft` section exists in the entity file (e.g., workflows without a ship stage, or entities that skipped ship).
+
+### PR body template (fallback)
 
 Lead with motivation + end-user value; audit metadata goes at the bottom. The goal is that a reviewer or future debugger sees the "why" first and the audit link last.
 
