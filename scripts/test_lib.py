@@ -1190,6 +1190,71 @@ class FOStreamWatcher:
         return entries
 
     @staticmethod
+    def _tool_result_text(content_val: object) -> str:
+        """Flatten a tool_result content payload into a single string for pattern-matching."""
+        if isinstance(content_val, str):
+            return content_val
+        if isinstance(content_val, list):
+            parts: list[str] = []
+            for b in content_val:
+                if isinstance(b, dict):
+                    t = b.get("text")
+                    if isinstance(t, str):
+                        parts.append(t)
+            return "\n".join(parts)
+        return ""
+
+    @staticmethod
+    def _parse_inbox_done_sender(text: str) -> str | None:
+        """Return the `from:` sender when text is a fo_inbox_poll.py Done: entry.
+
+        The polling script emits entries shaped as::
+
+            team: {team_name}
+            from: spacedock-ensign-{entity}-{stage}
+            timestamp: ...
+            summary: ...
+            text: Done: ...
+
+        We match the combined `from:` + `text: Done:` signature so plain
+        agent names or unrelated Bash output don't accidentally close a
+        dispatch.
+        """
+        if "Done:" not in text or "from:" not in text:
+            return None
+        sender: str | None = None
+        saw_done = False
+        for line in text.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("from:"):
+                sender = stripped[len("from:"):].strip() or None
+            elif stripped.startswith("text:") and "Done:" in stripped:
+                saw_done = True
+                break
+        if sender and saw_done:
+            return sender
+        return None
+
+    def _find_open_dispatch_for_sender(self, sender: str) -> str | None:
+        """Return the open dispatch_id whose ensign_name is implicated by ``sender``.
+
+        ``sender`` looks like ``spacedock-ensign-{entity-slug}-{stage}`` (e.g.
+        ``spacedock-ensign-keepalive-test-task-implementation``). We match on
+        the stage-suffix substring against the tracked ensign_name (the Agent
+        description, e.g. ``Create a greeting file: implementation``). Oldest
+        match wins when multiple open dispatches share the stage.
+        """
+        if not sender:
+            return None
+        sender_lower = sender.lower()
+        for dispatch_id, disp in self._open_dispatches.items():
+            name_lower = disp.ensign_name.lower()
+            for stage in ("implementation", "validation", "analysis", "design"):
+                if stage in sender_lower and stage in name_lower:
+                    return dispatch_id
+        return None
+
+    @staticmethod
     def _looks_like_bare_done(content_val: object) -> bool:
         """Return True if an Agent tool_result carries a bare-mode completion.
 
@@ -1254,12 +1319,17 @@ class FOStreamWatcher:
             # Close anchor differs by mode:
             # - bare mode: the user tool_result for the Agent tool_use_id carries the
             #   teammate's Done: payload directly (synchronous Agent() return).
-            # - teams mode: the user tool_result fires on spawn-ack, not on completion.
-            #   The true completion signal is a system entry with
-            #   subtype="task_notification", status="completed", and tool_use_id
-            #   matching the originating Agent call.
+            # - teams mode with interactive TTY: system task_notification status=completed
+            #   fires for in_process_teammate on ensign completion.
+            # - teams mode under `claude -p` (anthropics/claude-code#26426): task_notification
+            #   never fires for teammates because the InboxPoller React hook only runs
+            #   under TTY. The ground-truth completion signal in that mode lives in
+            #   `$HOME/.claude/teams/{team_name}/inboxes/team-lead.json`. The test
+            #   harness surfaces these entries into the FO's stream via a Bash
+            #   polling script (scripts/fo_inbox_poll.py); we detect the polled
+            #   output in the Bash tool_result and close the matching dispatch.
             #
-            # We match both anchors; whichever lands first closes the dispatch.
+            # We match all three anchors; whichever lands first closes the dispatch.
             if entry.get("type") == "user":
                 message = entry.get("message")
                 if isinstance(message, dict):
@@ -1270,8 +1340,19 @@ class FOStreamWatcher:
                         ):
                             tuid = str(result_block.get("tool_use_id") or "")
                             content_val = result_block.get("content")
+                            content_text = self._tool_result_text(content_val)
                             if tuid in self._open_dispatches and self._looks_like_bare_done(content_val):
                                 self._close_dispatch(tuid, now)
+                                continue
+                            # Inbox-poll close anchor: Bash tool_result whose body
+                            # contains `from: spacedock-ensign-...-{stage}` and
+                            # `text: Done:`. Matches any open dispatch whose
+                            # ensign_name shares the stage substring.
+                            done_from = self._parse_inbox_done_sender(content_text)
+                            if done_from:
+                                matched = self._find_open_dispatch_for_sender(done_from)
+                                if matched is not None:
+                                    self._close_dispatch(matched, now)
             elif (
                 entry.get("type") == "system"
                 and entry.get("subtype") == "task_notification"

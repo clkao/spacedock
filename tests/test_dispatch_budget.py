@@ -499,6 +499,89 @@ def test_teams_task_notification_completed_closes_dispatch(tmp_path):
     assert watcher.dispatch_records[0].ensign_name == "teams-dispatch"
 
 
+def _inbox_poll_bash_result(tool_use_id: str, sender: str, stage: str) -> dict:
+    """Bash tool_result carrying an fo_inbox_poll.py Done: entry."""
+    body = (
+        f"team: test-team-abc\n"
+        f"from: {sender}\n"
+        f"timestamp: 2026-04-20T02:21:50.779Z\n"
+        f"summary: {stage} complete\n"
+        f"text: Done: Create a greeting file completed {stage}. Report written."
+    )
+    return {
+        "type": "user",
+        "message": {
+            "content": [
+                {
+                    "type": "tool_result",
+                    "tool_use_id": tool_use_id,
+                    "content": body,
+                }
+            ],
+        },
+    }
+
+
+def test_inbox_poll_bash_result_closes_teams_dispatch(tmp_path):
+    """Bash tool_result carrying fo_inbox_poll.py output closes the matching dispatch.
+
+    Under `claude -p` (anthropics/claude-code#26426), task_notification does
+    not fire for teammate dispatches. The inbox-poll Bash output is the
+    close anchor.
+    """
+    budget = DispatchBudget(soft_s=30.0, hard_s=60.0, shutdown_grace_s=5.0)
+    watcher, _proc, log = _make_watcher(tmp_path, budget)
+
+    _write_line(
+        log,
+        _agent_dispatch(
+            "du_impl",
+            description="Create a greeting file: implementation",
+        ),
+    )
+    _write_line(log, _teams_spawn_ack("du_impl"))
+    _write_line(
+        log,
+        _inbox_poll_bash_result(
+            "du_poll_1",
+            sender="spacedock-ensign-keepalive-test-task-implementation",
+            stage="implementation",
+        ),
+    )
+    watcher._drain_entries()
+
+    assert watcher._open_dispatches == {}
+    assert len(watcher.dispatch_records) == 1
+    assert "implementation" in watcher.dispatch_records[0].ensign_name
+
+
+def test_inbox_poll_without_done_does_not_close(tmp_path):
+    """An inbox-poll output that doesn't contain `Done:` is ignored."""
+    budget = DispatchBudget(soft_s=30.0, hard_s=60.0, shutdown_grace_s=5.0)
+    watcher, _proc, log = _make_watcher(tmp_path, budget)
+
+    _write_line(log, _agent_dispatch("du_impl", description="impl-dispatch"))
+    _write_line(
+        log,
+        {
+            "type": "user",
+            "message": {
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "du_poll_noop",
+                        "content": "from: spacedock-ensign-impl\ntext: still working on it",
+                    }
+                ],
+            },
+        },
+    )
+    watcher._drain_entries()
+
+    assert len(watcher._open_dispatches) == 1
+    assert watcher.dispatch_records == []
+
+
 def test_task_notification_in_progress_does_not_close(tmp_path):
     """Only status=completed closes; intermediate task_notifications must be ignored."""
     budget = DispatchBudget(soft_s=30.0, hard_s=60.0, shutdown_grace_s=5.0)
