@@ -28,9 +28,11 @@ def _extract_checklist_items(agent_prompt: str) -> list[str]:
     in_checklist = False
     for raw in agent_prompt.splitlines():
         line = raw.strip()
-        if line.lower().startswith("### completion checklist"):
+        if re.match(r"(?i)^(###\s+)?completion checklist:?\s*$", line):
             in_checklist = True
             continue
+        if in_checklist and re.match(r"(?i)^instructions:\s*$", line):
+            break
         if in_checklist and line.startswith("### "):
             break
         m = re.match(r"^\d+\.\s+(.*)$", line)
@@ -109,16 +111,16 @@ def test_checklist_e2e(test_project, runtime, model, effort):
     else:
         log = CodexLogParser(t.log_dir / "codex-fo-log.txt")
         agent_prompt = ""
-        # Prefer structured collab tool calls when available; fall back to raw-text scan.
-        collab_prompts = "\n".join(
-            (call.get("prompt") or "")
-            for call in log.collab_tool_calls()
-            if call.get("tool") in {"spawn", "spawn_agent"}
-        )
-        for text in (collab_prompts, log.full_text()):
-            if "### Completion checklist" in text:
-                agent_prompt = text
+        # Prefer the actual prompt passed to the worker; fall back to raw-text scan.
+        for call in log.collab_tool_calls():
+            if call.get("tool") not in {"spawn", "spawn_agent"}:
+                continue
+            prompt_text = call.get("prompt") or ""
+            if re.search(r"(?i)completion checklist", prompt_text):
+                agent_prompt = prompt_text
                 break
+        if not agent_prompt:
+            agent_prompt = log.full_text()
 
     print()
     print("[Ensign Dispatch Prompt]")
@@ -156,7 +158,7 @@ def test_checklist_e2e(test_project, runtime, model, effort):
     t.check(
         "stage report uses DONE/SKIPPED/FAILED markers (no checkbox bullets)",
         bool(re.search(r"(?m)^- (DONE|SKIPPED|FAILED):", stage_report_text))
-        and not bool(re.search(r"(?m)^- \\[[xX ]\\]", stage_report_text)),
+        and not bool(re.search(r"(?m)^- \[[xX ]\]", stage_report_text)),
     )
     t.check("stage report includes Summary subsection", "### Summary" in stage_report_text)
 
@@ -168,4 +170,3 @@ def test_checklist_e2e(test_project, runtime, model, effort):
     t.check("output file created", out_path.is_file())
 
     t.finish()
-

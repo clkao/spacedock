@@ -329,6 +329,13 @@ def cmd_build(args):
         '### Summary\n'
         '{brief description of what was accomplished}\n'
     )
+    prompt_parts.append(
+        '\n### Stage report\n\n'
+        'Append a Stage Report section at the end of the entity file (per the shared-core Stage Report Protocol). '
+        'Use the title `Stage Report: {stage}`. '
+        'Account for every checklist item above with a `- DONE:` / `- SKIPPED:` / `- FAILED:` entry. '
+        'Use the checklist item text verbatim when possible.\n'
+    )
 
     # 9. Standing teammates available (conditional: team mode, alive members found)
     standing_teammates = enumerate_declared_standing_teammates(workflow_dir, team_name)
