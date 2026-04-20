@@ -96,6 +96,10 @@ def test_feedback_keepalive(test_project, model, effort):
     # premature shutdown_request. This is a runtime-environmental constraint,
     # not workflow coaching.
     headless_hint = (
+        f"The spacedock plugin directory is at `{t.repo_root}`. Use it "
+        f"directly; do NOT run `find / -name claude-team` — the binaries you "
+        f"need are `{t.repo_root}/skills/commission/bin/status` and "
+        f"`{t.repo_root}/skills/commission/bin/claude-team`.\n\n"
         "You are running in `claude -p` headless single-entity mode. "
         "The runtime will NOT deliver inter-turn idle notifications from "
         "teammates; your next turn begins when a real ensign event arrives. "
