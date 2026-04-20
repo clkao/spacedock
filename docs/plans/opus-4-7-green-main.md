@@ -1039,3 +1039,63 @@ This turns the dumb keep-alive into a real inbox surrogate. The test exercises t
 If round 6 lands green: ship all seven commits as one PR. The keep-alive sentinel pattern becomes part of the test harness vocabulary for any teams-mode live E2E in headless mode.
 
 If round 6 stays red: xfail `test_feedback_keepalive` with a sharp pointer at #26426 and the round-by-round evidence above. Ship the diagnostic improvements, watcher work, and keep-alive sentinel. The test's contract remains verifiable under interactive captain sessions; headless is explicitly out of reach until Anthropic reopens #26426 or we commit to a non-trivial polling shim.
+
+## Stage Report: implementation (cycle 8 — standing_teammate budget proposal)
+
+Cycle-7's inbox-poll + keep-alive sentinel pattern shipped and greened `test_feedback_keepalive` via PR #128/#137. Cycle-8 ports the same pattern to `test_standing_teammate_spawn.py` (currently `@pytest.mark.xfail` per #194). This section proposes per-stage budgets BEFORE code changes per captain directive.
+
+### Stage enumeration (as test is currently written)
+
+Five observable checkpoints in `test_standing_teammate_spawns_and_roundtrips`, plus a terminal assertion:
+
+1. **`TeamCreate` emitted** — FO discovers workflow, decides teams mode, invokes TeamCreate. FO-visible (assistant tool_use in fo-log).
+2. **`claude-team spawn-standing` Bash invoked** — FO lists standing mods and runs the spawn helper. FO-visible.
+3. **Agent(echo-agent) dispatched** — FO spawns the standing teammate with the JSON spec from step 2. FO-visible.
+4. **Agent(ensign) dispatched** — FO advances task 001 to work stage and dispatches the ensign. FO-visible. Per AC-14, the dispatch prompt must contain the `### Standing teammates available in your team` section listing `echo-agent`.
+5. **Ensign's SendMessage(echo-agent) + ECHO reply captured into entity body** — these are done by the ensign, **not** FO-visible under `-p` teams-mode.
+
+### Structural observation — test assertion scope needs pivot
+
+Under `-p` teams-mode, the ensign's internal tool_use events (SendMessage to echo-agent, Edit to the entity body with "ECHO: ping") live in the ensign's subagent jsonl, NOT the FO's fo-log.jsonl. The current test asserts these via `w.expect(tool_use_matches(...))` on the FO stream — structurally unreachable, independent of any timing. Evidence: fo-log L54 of the cycle-4 xfail run at `/var/folders/…/tmphylyeo77/fo-log.jsonl` shows FO's only `SendMessage(to="echo-agent")` is the teardown `shutdown_request`, not a "ping" message — the genuine ping is emitted inside the ensign's process.
+
+Cycle-8 ports the cycle-7 pattern by:
+- Adopting inbox-poll + keep-alive sentinel so the FO stays alive while the ensign runs (same as cycle-7).
+- Replacing the FO-stream assertions on ensign-internal tool_uses with (a) ensign `Done:` completion via `expect_dispatch_close` (inbox-poll close anchor), plus (b) a post-run **on-disk** check on the archived entity body for `ECHO: ping` content. This is the real ground truth: if the ensign captured the echo into the entity body, the file on disk contains it.
+- Keeping AC-14 assertion on the ensign dispatch prompt text (FO-visible via tool_use input).
+
+This pivot is within the test file only; no infrastructure changes. Per captain directive, flagging before code change for review.
+
+### Proposed per-stage budgets
+
+Based on cycle-4 xfail fo-log L25-L42 timeline evidence (TeamCreate ~15s; Bash list-standing ~35s; Agent(echo-agent) ~40s; Agent(ensign) ~55s; first ensign Spawned ack L42):
+
+| # | Stage | overall_timeout_s | dispatch_budget_s | Rationale |
+|---|-------|-------------------|-------------------|-----------|
+| 1 | TeamCreate emitted | 60 | — | FO boot + workflow discovery + TeamCreate; fast path. |
+| 2 | spawn-standing Bash invoked | 60 | — | List-standing + build + Bash invoke. |
+| 3 | Agent(echo-agent) dispatched | 60 | — | Claude-team build JSON + Agent() emission. |
+| 4 | Agent(ensign) dispatched (AC-14 prompt check) | 60 | — | Advance-to-work + build + Agent() emission. |
+| 5 | ensign `Done:` close (via inbox-poll anchor) | 300 | 180 | Ensign does: append "work done" to entity, git commit, SendMessage(echo-agent) "ping", await ECHO reply, capture reply to stage report, SendMessage(team-lead) "Done:". The SendMessage roundtrip to a standing teammate is the slow step; it depends on a second Agent's wake + response latency. Budget mirrors cycle-7 `PER_STAGE_OVERALL_S=300` direction and gives `dispatch_budget_s=180s` for the ensign's own work (matches cycle-7 `hard_s=180`). |
+| 6 | On-disk: `ECHO: ping` present in archived entity body | post-run | — | File-system check after `w.close()` / subprocess exit, not a watcher step. |
+
+### DispatchBudget
+
+Mirror cycle-7: `DispatchBudget(soft_s=30.0, hard_s=180.0, shutdown_grace_s=10.0)`. Soft emits a warning at 30s; hard trips cooperative shutdown at 180s.
+
+### SUBPROCESS_EXIT_BUDGET_S
+
+Mirror cycle-7: 180s. Post-contract FO activity (terminal cleanup, archive, shutdown echo-agent) is not asserted; if the FO overshoots, the context manager kills it without failing the test.
+
+### Commits expected
+
+1. Budget proposal added to entity file (this commit).
+2. Un-xfail + port cycle-7 pattern to the test file (inbox-poll prompt, keep-alive sentinel, DispatchBudget, pivot ensign-internal assertions to on-disk check, apply per-stage budgets above).
+
+### Open question for captain (flagged before code change)
+
+Is the structural pivot (replace FO-stream ensign-internal tool_use assertions with (a) ensign `Done:` close + (b) on-disk echo check) acceptable? Alternatives considered:
+- **A.** Keep the FO-stream assertions — structurally unreachable under `-p` teams mode, will always StepTimeout. Not recommended.
+- **B.** Proposed pivot — tests the observable contract end-to-end without requiring a second polling shim to inline subagent jsonls. Recommended.
+- **C.** Switch the test to `@pytest.mark.bare_mode` — the current test is `@pytest.mark.teams_mode`, but echo-agent requires teams mode (standing-teammate concept only exists in teams). Not viable.
+
+Proceeding with B unless captain redirects.
