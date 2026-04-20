@@ -63,6 +63,24 @@ def test_feedback_keepalive(test_project, model, effort):
     """FO drives teams-mode keepalive: TeamCreate -> impl ensign -> validation ensign -> SendMessage reuse (not fresh Agent)."""
     t = test_project
 
+    # haiku-4-5 at low effort does not honor the keep-alive Bash-probe-every-turn
+    # rule across `system init` cycle boundaries. Evidence at round-6 haiku N=1
+    # (/tmp/keepalive-haiku/spacedock-test-xt6ha078/fo-log.jsonl): FO polled
+    # inbox once (L71), a `system init` fired at L77, next turn FO skipped the
+    # poll and emitted `shutdown_request(reason="session ending")` at L84 —
+    # the exact anthropics/claude-code#26426 fresh-context hallucination the
+    # sentinel was designed to prevent. Opus-4-7-low follows the discipline
+    # (round-6d green at 4m36s); haiku does not.
+    if model == "claude-haiku-4-5":
+        pytest.xfail(
+            reason=(
+                "pending haiku-teams keepalive — haiku-4-5-low drops the "
+                "keep-alive Bash-probe discipline at `system init` cycle "
+                "boundaries and hallucinates teardown "
+                "(anthropics/claude-code#26426 class; opus-4-7-low green)"
+            )
+        )
+
     print("--- Phase 1: Set up test project from fixture ---")
     setup_fixture(t, "keepalive-pipeline", "keepalive-pipeline")
     install_agents(t, include_ensign=True)
