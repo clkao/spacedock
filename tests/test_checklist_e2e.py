@@ -29,10 +29,16 @@ def _extract_checklist_items(agent_prompt: str) -> list[str]:
     in_checklist = False
     for raw in agent_prompt.splitlines():
         line = raw.strip()
-        if re.match(r"(?i)^(###\s+)?completion checklist:?\s*$", line):
+        # Seen variants:
+        # - "### Completion checklist"
+        # - "Completion checklist:"
+        # - "Completion checklist (linchpins):"
+        if re.match(r"(?i)^(###\s+)?completion checklist\b.*:\s*$", line) or re.match(
+            r"(?i)^###\s+completion checklist\s*$", line
+        ):
             in_checklist = True
             continue
-        if in_checklist and re.match(r"(?i)^instructions:\s*$", line):
+        if in_checklist and re.match(r"(?i)^(instructions|requirements):\s*$", line):
             break
         if in_checklist and line.startswith("### "):
             break
