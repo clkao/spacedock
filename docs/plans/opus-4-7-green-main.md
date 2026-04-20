@@ -1554,3 +1554,87 @@ Two narrow fixes from cycle-10's fo-log diagnosis of the opus-low CI reds.
 ### Next
 
 Captain to approve CI-E2E-OPUS + CI-E2E via REST API for verification. No ensign action pending CI signal.
+
+## Stage Report: implementation (cycle 12 — feedback_keepalive CI regression diagnosis)
+
+CI run `24650495498` on branch HEAD post-cycle-11: `test_feedback_keepalive` FAILED with `StepTimeout: Step 'implementation dispatch close' did not close within 120s overall. Open dispatches: ['Validation stage'].` Prior CI run `24649016585` had this test green. Diagnosis scope: root-cause the regression and recommend a fix direction. No code committed this cycle per brief.
+
+### Root cause — case-sensitive substring match in `expect_dispatch_close`, not cycle-11's watcher change
+
+The `"work"` stage-tuple addition in `scripts/test_lib.py::_find_open_dispatch_for_sender` (commit `e13bfa57`) is **unrelated** to this regression. That function uses lowercased comparisons (`name_lower = disp.ensign_name.lower()`) and operates only on inbox-poll Bash tool_results. The impl dispatch's Done signal at failing-CI `spacedock-test-ichaxax0/fo-log.jsonl:L44` DID match that function and close via the sender path. Validation's Agent dispatch at L66 (with description `"Validation stage"`) was still open when the test's `expect_dispatch_close` timed out, producing the observed error message.
+
+The actual break is **`FOStreamWatcher.expect_dispatch_close` at `scripts/test_lib.py:1523`**:
+
+```python
+if ensign_name is None or ensign_name in record.ensign_name:
+```
+
+This is a **case-sensitive substring check**. The test passes lowercase `ensign_name="implementation"`. The `record.ensign_name` stores the FO's Agent `description` verbatim, which in this run was `"Implementation stage"` (capitalized I). `"implementation" in "Implementation stage"` → `False`, so the test never recognized the record even though it was correctly appended to `dispatch_records`.
+
+### Evidence — FO description variance run-to-run
+
+| Run | State | Impl Agent description | Validation Agent description |
+|-----|-------|-----------------------|------------------------------|
+| `24649016585` (last green) | PASS | `Dispatch implementation` | `Dispatch validation` |
+| `24650495498` (failing)   | FAIL | `Implementation stage`   | `Validation stage`           |
+| cycle-7 round-6d (local green) | PASS | `Create a greeting file: implementation` | `Create a greeting file: validation` |
+
+The FO reads `claude-team build`'s output — which contains the correct fixture-derived lowercase `"description": "Create a greeting file: implementation"` — then paraphrases it for the Agent tool call's own `description` field rather than passing the value through. This is pure opus-4-7 sampling variance: sometimes it preserves the lowercase stage word (`"Dispatch implementation"`, `"Create a greeting file: implementation"`); sometimes it invents a capitalized restructure (`"Implementation stage"`). The watcher's sender-side matcher already handles this because we wrote it case-insensitive in cycle-7 round-6b; the test-side consumer was never updated to match.
+
+### Why cycle-7 round-6d green was "lucky" and the pattern is brittle
+
+Round-6d's Agent description `"Create a greeting file: implementation"` was fixture-derived verbatim. The test relied on that format holding across runs — but it's not under our control. Any run where opus-4-7 opts to paraphrase without the lowercase substring `implementation` will produce the observed StepTimeout. This flake class is invisible on local runs that hit the lowercase variant and masked entirely on CI runs where opus goes the capitalized route.
+
+### Recommended fix — option (c): normalize case in `expect_dispatch_close`
+
+Two-line change in `scripts/test_lib.py`:
+
+```python
+# line 1523 (inside baseline loop):
+if ensign_name is None or ensign_name.lower() in record.ensign_name.lower():
+
+# line 1530 (inside post-proc-exit loop — same change):
+if ensign_name is None or ensign_name.lower() in record.ensign_name.lower():
+```
+
+Mirrors what `_find_open_dispatch_for_sender` already does at line 1251-1253. Zero behavioral change for current-green runs (lowercase-in-lowercase is unchanged); adds tolerance for capitalized variants. This is the minimum-blast-radius fix.
+
+### Why NOT options (a) or (b)
+
+- **(a) Revert the `"work"` tuple addition.** Not the cause. Would re-break `test_merge_hook_guardrail` without fixing feedback_keepalive.
+- **(b) Tighten stage-tuple to exact match.** Orthogonal to the bug — sender-side matching worked correctly in this run.
+
+### Suggested offline test to lock this in
+
+After the case-normalization fix, add one offline test to `tests/test_dispatch_budget.py`:
+
+```python
+def test_expect_dispatch_close_matches_case_insensitive(tmp_path):
+    """expect_dispatch_close uses case-insensitive substring match (FO may paraphrase descriptions)."""
+    budget = DispatchBudget(soft_s=30.0, hard_s=60.0, shutdown_grace_s=5.0)
+    watcher, _proc, log = _make_watcher(tmp_path, budget)
+
+    _write_line(log, _agent_dispatch("du_1", description="Implementation stage"))
+    _write_line(log, _inbox_poll_bash_result(
+        "du_poll_1",
+        sender="spacedock-ensign-keepalive-test-task-implementation",
+        stage="implementation",
+    ))
+
+    record = watcher.expect_dispatch_close(
+        overall_timeout_s=1.0, ensign_name="implementation", label="impl close",
+    )
+    assert record.ensign_name == "Implementation stage"
+```
+
+### Follow-on: exact-match hardening (not urgent)
+
+`_find_open_dispatch_for_sender` does substring matching (`stage in sender_lower and stage in name_lower`) which could false-positive if two open dispatches shared a stage-token prefix. Not a current-fixture problem. Full tightening would split the sender at dashes and require an exact tail-token match. Out of scope for cycle-12.
+
+### Artifacts
+
+- Failing CI fo-log: `/tmp/ci-opus-fail-evidence-r2/runtime-live-e2e-claude-live-opus/spacedock-test-ichaxax0/fo-log.jsonl`
+- Last-green CI fo-log: `/tmp/ci-opus-green-evidence/runtime-live-e2e-claude-live-opus/spacedock-test-jatkq3_6/fo-log.jsonl`
+- Cycle-7 round-6d local green: `/tmp/keepalive-r6d/spacedock-test-aavel027/fo-log.jsonl` (preserved)
+
+No code committed this cycle. Captain to dispatch implementation for the two-line change to `expect_dispatch_close` (lines 1523 and 1530) + the offline test case. Expected turnaround: ~10 min to edit + run `make test-static` + commit + push + trigger CI.
