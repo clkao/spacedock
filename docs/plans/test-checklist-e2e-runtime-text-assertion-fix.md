@@ -464,3 +464,17 @@ Converted `test_checklist_e2e` to a deterministic, portable fixture-backed test 
 ### Summary
 
 The checklist E2E is now demonstrably portable on Codex: it extracts checklist items from the actual worker dispatch prompt (Codex `spawn_agent`) and asserts that the worker's `## Stage Report: work` accounts for each item via `- DONE:` / `- SKIPPED:` / `- FAILED:` lines (rejecting checkbox bullets).
+
+
+## Stage Report: implementation (cycle 5)
+
+- DONE: Break-glass template in `skills/first-officer/references/claude-first-officer-runtime.md` now includes a `### Stage report` block with `- DONE:` / `- SKIPPED:` / `- FAILED:` bullet format aligned with `cmd_build` output at `skills/commission/bin/claude-team:332-337`.
+  Commit `d944cd5c`. Ported the block verbatim into the break-glass `prompt=` string; `make test-static` → 477 passed immediately after.
+- DONE: `scripts/test_lib.py` exposes a `plugin_location_hint(repo_root)` helper extracted from `headless_inbox_polling_hint`; `tests/test_checklist_e2e.py` passes it to the FO via `--append-system-prompt`. If helper-path and break-glass-path expectations diverge, split into separate test entrypoints with appropriate pytest decorators rather than flag-switching a single test.
+  Commits `4667a905` (extraction + 3 helpers: `plugin_location_hint`, `inbox_polling_hint`, composed `headless_inbox_polling_hint`; 2 new unit tests) and `9ff8ad01` (split into `test_checklist_e2e_helper_path` + `test_checklist_e2e_break_glass_path` + `test_checklist_e2e_codex`, all via shared `_run_checklist_scenario`). `make test-static` → 479 passed.
+- DONE: Local re-run evidence: `unset CLAUDECODE && uv run pytest tests/test_checklist_e2e.py --runtime claude --model opus --effort low -v` passes at least 3 consecutive times on the helper path; break-glass-path evidence captured separately (pass, or documented failure class with reproducer).
+  Helper-path 3/3 PASS: run-1 75.14s, run-2 75.28s, run-3 101.51s (artifacts at `/tmp/211-cycle5/run-{1,2,3}/`). Break-glass-path 1/1 PASS: 88.01s (`/tmp/211-cycle5/bg-run-1/`). Sibling `tests/test_test_lib_helpers.py`: 18 passed. `make test-static`: 479 passed, 24 deselected.
+
+### Summary
+
+Closed all three chained defects identified in cycle-5 triage: (B) ported the `### Stage report` bullet-format block from `cmd_build` into the break-glass template in `claude-first-officer-runtime.md`; (C) extracted `plugin_location_hint(repo_root)` from `headless_inbox_polling_hint` so callers needing just the plugin-path anchor no longer drag in the inbox-polling rule; and wired the checklist E2E test to inject that hint via `--append-system-prompt`, splitting the test into helper-path / break-glass-path / codex entrypoints so each dispatch surface is exercised independently. Helper-path passes 3/3 consecutively at opus/low; break-glass-path also passes (confirming defect-B fix). Commits `d944cd5c`, `4667a905`, `9ff8ad01`.
