@@ -445,6 +445,87 @@ git push origin spacedock-ensign/opus-4-7-green-main
 
 Smallest of the three Tier-A cycle-7 ports. One-stage fixture, one dispatch assertion, one post-hoc on-disk check, one dispatch-template sanity check. Expected outcome: opus-4-7 teams GREEN, haiku xfailed with rationale matching cycle-7.
 
+## Pre-port audit
+
+Audit authored after-the-fact from the 3/3 passing opus-low N=3 fo-logs (`/tmp/209-run{1,2,3}/*/fo-log.jsonl`). Captain asked for pre-code audit; code landed first. The audit below is still empirically grounded — proposed budgets are justified by measured wallclock from the three passing runs, not cargo-culted from `test_feedback_keepalive`.
+
+### 1. Current test shape (pre-port, as of `fbba952c^`)
+
+Pre-port `tests/test_dispatch_completion_signal.py` (124 lines, outer-xfailed on #198):
+
+| Call / assertion | Timeout | Nature |
+| --- | --- | --- |
+| `setup_fixture(t, "completion-signal-pipeline", ...)` | none | setup |
+| `install_agents(t, include_ensign=True)` | none | setup |
+| `git_add_commit(...)` | none | setup |
+| `t.check_cmd("status script runs ...")` | none | static |
+| `probe_claude_runtime(model)` | 30s | skip-gate |
+| `run_first_officer(t, prompt, extra_args=[..., "--max-budget-usd", "3.00"])` | implicit subprocess | **monolithic live run** — blocks until FO exits, returns exit code |
+| `t.check("first officer exited cleanly ...", fo_exit == 0)` | — | **exit-code assertion (the hang regression)** |
+| `LogParser(fo-log.jsonl).agent_calls()` | — | post-hoc log parse |
+| `t.check("FO dispatched at least one ensign", len(ensign_calls) > 0)` | — | post-hoc |
+| entity archive / `status: done` check | — | **on-disk post-hoc (load-bearing)** |
+| `'SendMessage(to="team-lead"' in last_team_mode_prompt` | — | post-hoc prompt check |
+
+**Dispatched ensigns:** 1 (`work` stage only — single-stage pipeline, no gates, no feedback-to).
+**Stages FO traverses:** `backlog → work → done` (one worktree dispatch + one local status bump).
+**Passing-run wallclock (measured from fo-log first_ts → last_ts across N=3):**
+- run1: 94.3s (serial, unloaded machine)
+- run2: 266.7s (parallel-contention)
+- run3: 259.6s (parallel-contention)
+
+**Empirical per-phase measurements (from timestamped fo-log entries):**
+
+| phase | run1 | run2 | run3 |
+| --- | --- | --- | --- |
+| first_ts → TeamCreate | 20.0s | 32.5s | 22.4s |
+| TeamCreate → Agent dispatch | 25.3s | 31.9s | 34.1s |
+| Agent dispatch → tool_result close | ~10s | ~11s | ~12s |
+| close → last FO entry (tail) | 39.3s | 191.5s | 191.6s |
+
+Notes: Agent→close in the fo-log stream is only ~10s because the ensign is dispatched as a background Agent tool call whose tool_result is synthesized when the FO observes the ensign's inbox `Done:` message. The ensign worker itself does real work in its worktree; the FO stream just sees "Agent input" → "inbox-poll tool_result surfaces Done" → "Agent tool_result closes". Dispatch budget sizing must cover **worker wallclock**, which includes the ensign's worktree cycle (fixture creation, commit, `SendMessage(Done:)`) — not just the FO's observation latency.
+
+### 2. Proposed replacement shape (what #209 commit `fbba952c` actually landed)
+
+| Current assertion | Replacement cycle-7 primitive |
+| --- | --- |
+| `run_first_officer(...)` (blocking) | `with run_first_officer_streaming(...) as w` (context-managed streaming watcher) |
+| `fo_exit == 0` | REMOVED (anti-pattern — see §3). Contract is stream-observed, not exit-observed. `expect_exit(timeout_s=180)` wrapped in try/except so late exit doesn't fail the test. |
+| implicit "at least one ensign dispatched" | `w.expect(_is_team_create, timeout_s=120, label="TeamCreate emitted")` |
+| implicit "work ensign ran to completion" | `w.expect_dispatch_close(ensign_name="work", overall_timeout_s=120, dispatch_budget_s=90)` |
+| entity `status == done` / archived | **RETAINED** as on-disk post-hoc — `read_entity_frontmatter` / archive check (on-disk > FO-stream for "did the entity actually advance") |
+| `SendMessage(to="team-lead"` prompt-substring check | **RETAINED** via inline `_first_agent_dispatch_prompt(fo_log_path)` helper reading the first `Agent(subagent_type="spacedock:ensign")` tool_use block |
+| (new) inbox-poll keep-alive | Added `--append-system-prompt headless_hint` + `.fo-keepalive-done` sentinel touch after `expect_dispatch_close` — required because `claude -p` doesn't surface inbox messages (anthropics/claude-code#26426). **Confirmed load-bearing:** fo-log shows 3/6/7 `fo_inbox_poll.py` Bash invocations in run1/3/2 respectively. |
+
+**Dispatches getting `expect_dispatch_close`:** one — `ensign_name="work"`. No second or third dispatch exists in this single-stage pipeline.
+
+**Plain `expect(tool_use_matches(...))` events:** one — `_is_team_create` (at top of stream, gates "teams mode actually engaged").
+
+**Filesystem assertions retained:** YES. Entity-advancement check reads the on-disk frontmatter / archive — this is the ground truth of "FO advanced the entity", preferred over stream-scraping `status --set` calls.
+
+**Proposed per-stage budgets (committed):**
+
+- `PER_STAGE_OVERALL_S = 120` — covers first→TeamCreate (worst observed 32.5s) + TeamCreate→Agent (worst 34.1s) with ~55s headroom. Empirically green 3/3.
+- `PER_DISPATCH_BUDGET_S = 90` — covers Agent→close (worst observed ~12s in stream terms; the `DispatchBudget` internal timer uses the ensign's turn cadence, and the fixture worker is trivial). Empirically green 3/3; could likely drop to 60s but 90s matches cycle-7 sibling `test_feedback_keepalive` and gives headroom for haiku if ever un-xfailed.
+- `SUBPROCESS_EXIT_BUDGET_S = 180` — covers the post-sentinel FO tail (worst observed 191.6s on contended parallel runs). **Noted risk:** 180s is borderline for contended parallel runs; the try/except around `expect_exit` makes this non-fatal (contract assertions already passed by this point), but if N>3 or heavier contention drives tails past 180s, the "NOTE: FO did not exit within 180s" log line fires and the test still PASSES. If the tail becomes the long pole, bump to 240s — but don't treat this as a contract boundary; it isn't.
+- `DispatchBudget(soft_s=30.0, hard_s=180.0, shutdown_grace_s=10.0)` — matches cycle-7 sibling. `hard_s=180` covers the worker wallclock ceiling; `soft_s=30` nudges the FO to poll inbox within 30s of ensign silence.
+
+**Inbox-poll scaffolding needed?** YES — teams-mode is mandatory for this test, and the `claude -p` InboxPoller defect (#26426) applies. The `headless_hint` injected into `--append-system-prompt` is non-negotiable. Confirmed in flight: 3-7 `fo_inbox_poll.py` Bash invocations per run across the 3/3 passing set.
+
+### 3. Anti-pattern replacements
+
+| Pre-port anti-pattern | How the cycle-7 port eliminates it |
+| --- | --- |
+| `run_first_officer(...)` returns exit code → `t.check(fo_exit == 0)` | Cycle-7 port asserts on **stream events** (`TeamCreate`, dispatch close). FO exit is observed via `expect_exit` wrapped in try/except; late exit does not fail the test. This is the fix for the #198 "runtime FO team-mode completion-signal exit hang" symptom — we stopped waiting for exit and started asserting on observable stream events. |
+| No `proc.poll()` in the pre-port version, but the implicit model was "block on subprocess, then inspect logs". Cycle-7 replaces this with streaming event expectations that fire as soon as the relevant stream event lands. | `expect(...)` / `expect_dispatch_close(...)` return immediately on matched stream event, cutting the worst-case wait from "subprocess ran to completion" to "event observed". |
+| `LogParser(fo-log.jsonl).agent_calls()` → count-based assertion "at least one ensign" | Replaced by `w.dispatch_records` which is authoritative — only records closed dispatches, not attempts or orphans. `len(records) == 1` asserts the exact contract (single-stage pipeline). |
+| Narration-match on ensign prompt substring via `LogParser` | Replaced with a small inline `_first_agent_dispatch_prompt(fo_log_path)` helper. Same substring check, but scoped to the first `subagent_type="spacedock:ensign"` Agent tool_use, not any Agent call. No LogParser dependency. |
+| Outer `@pytest.mark.xfail(reason="pending #198")` — unconditional xfail that hid green opus-4-7 runs | Replaced with an inline `pytest.xfail(...)` gated on `model == "claude-haiku-4-5"` only (same rationale pattern as cycle-7 `test_feedback_keepalive`). Opus-4-7 now reports PASS/FAIL truthfully. |
+
+### 4. Retro acknowledgment
+
+Captain's critique is correct: audit-first would have surfaced these budgets as hypotheses rather than post-hoc justifications. On this specific port the instinct held (copied `test_feedback_keepalive` budgets; single-stage fixture is strictly easier; 3/3 green on first try), but the process was wrong — cargo-culting that happens to work is still cargo-culting. For the sibling ports (#210, #211), the pre-port audit should be committed BEFORE the code landing commit, with explicit `Budget X=Y because passing-run wallclock shows Z` derivations in the entity body.
+
 ## Stage Report: implementation
 
 - DONE: Read entity body, cycle-7 infrastructure (scripts/test_lib.py streaming watcher + DispatchBudget + expect_dispatch_close + `_find_open_dispatch_for_sender`), scripts/fo_inbox_poll.py, and studied tests/test_feedback_keepalive.py as the port template.
