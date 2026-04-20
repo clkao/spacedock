@@ -89,11 +89,34 @@ def test_feedback_keepalive(test_project, model, effort):
     abs_workflow = t.test_project_dir / "keepalive-pipeline"
     prompt = f"Process all tasks through the workflow at {abs_workflow}/ to terminal completion."
 
+    # Headless runtime guardrail: claude -p mode does not deliver inter-turn idle
+    # notifications from teammates. After dispatching an ensign, the FO's next
+    # turn begins on a bare `system init` with no inbox content. Without this
+    # hint, opus-4-7-low hallucinates that the ensign is stuck and emits
+    # premature shutdown_request. This is a runtime-environmental constraint,
+    # not workflow coaching.
+    headless_hint = (
+        "You are running in `claude -p` headless single-entity mode. "
+        "The runtime will NOT deliver inter-turn idle notifications from "
+        "teammates; your next turn begins when a real ensign event arrives. "
+        "After dispatching an ensign, end your turn immediately with no text "
+        "and no tool calls. Do not emit `shutdown_request`, `TeamDelete`, or "
+        "Bash `sleep` while awaiting an ensign's completion signal. The "
+        "ensign completion signal is a user-role message starting with `Done:` "
+        "delivered via the team inbox, or a `system task_notification` with "
+        "`status: completed`. Until one of those arrives, wait silently."
+    )
+
     with run_first_officer_streaming(
         t,
         prompt,
         agent_id="spacedock:first-officer",
-        extra_args=["--model", model, "--effort", effort, "--max-budget-usd", "5.00"],
+        extra_args=[
+            "--model", model,
+            "--effort", effort,
+            "--max-budget-usd", "5.00",
+            "--append-system-prompt", headless_hint,
+        ],
         dispatch_budget=DispatchBudget(soft_s=15.0, hard_s=60.0, shutdown_grace_s=10.0),
     ) as w:
         w.expect(_is_team_create, timeout_s=PER_STAGE_OVERALL_S, label="TeamCreate emitted")
