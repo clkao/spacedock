@@ -136,7 +136,7 @@ Tests that need the FO to actually observe teammate Done messages (keepalive con
 3. The FO's Bash tool_result now contains the real inbox content, surfacing teammate messages into the FO's stream (filling the gap the missing `InboxPoller` left).
 4. The turn ends with `stop_reason=tool_use` instead of `stop_reason=end_turn`, keeping `-p`'s prompt cycle open and preventing the fresh-context hallucination.
 
-Canonical implementation in `tests/test_feedback_keepalive.py` (see `headless_hint`) and `scripts/fo_inbox_poll.py`. The `FOStreamWatcher` recognizes inbox-poll Bash tool_result content as a close anchor — specifically, entries shaped as `from: spacedock-ensign-{slug}-{stage}` + `text: Done: ...` will close any open dispatch whose `ensign_name` contains the matching stage substring.
+Canonical implementation in `scripts/test_lib.py` (`headless_inbox_polling_hint(...)`) and `scripts/fo_inbox_poll.py`. The `FOStreamWatcher` recognizes inbox-poll Bash tool_result content as a close anchor — specifically, entries shaped as `from: spacedock-ensign-{slug}-{stage}` + `text: Done: ...` will close any open dispatch whose `ensign_name` contains the matching stage substring.
 
 **When to touch the sentinel.** Touch `{keepalive_done}` AFTER the test's contract assertions have fired. Do NOT treat the sentinel as a "workflow is done" signal the FO should obey strictly — the FO will correctly continue to process any in-flight terminal-stage work (cycle-2 impl fix, merge, archive) even after the sentinel appears. Wrap `expect_exit(...)` in `try/except` so post-contract FO activity is non-blocking; the `run_first_officer_streaming` context manager's `finally:` block kills the subprocess cleanly on test completion.
 

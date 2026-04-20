@@ -21,6 +21,7 @@ from test_lib import (
     _isolated_claude_env,
     bash_command_targets_write,
     emit_skip_result,
+    headless_inbox_polling_hint,
     prepare_codex_skill_home,
     probe_claude_runtime,
 )
@@ -52,6 +53,24 @@ def test_bash_command_targets_write_flags_shell_writes():
 
 def test_bash_command_targets_write_requires_a_target_match():
     assert not bash_command_targets_write("echo hi > /tmp/elsewhere.txt", TARGETS)
+
+
+def test_headless_inbox_polling_hint_contains_expected_prompt_text(tmp_path):
+    repo_root = tmp_path / "repo"
+    keepalive_done = tmp_path / ".fo-keepalive-done"
+    seen_file = tmp_path / ".fo-inbox-seen"
+
+    hint = headless_inbox_polling_hint(repo_root, keepalive_done, seen_file)
+
+    assert "HEADLESS INBOX-POLLING RULE." in hint
+    assert f"The spacedock plugin directory is at `{repo_root}`." in hint
+    assert f"Until the sentinel file `{keepalive_done}` exists" in hint
+    poll_script = repo_root / "scripts" / "fo_inbox_poll.py"
+    assert (
+        f"python3 {poll_script} --home \"$HOME\" --pattern 'Done:' "
+        f"--timeout 5 --seen-file {seen_file}"
+    ) in hint
+    assert "Never emit `SendMessage(shutdown_request)`" in hint
 
 
 def test_probe_claude_runtime_reports_timeout(monkeypatch):

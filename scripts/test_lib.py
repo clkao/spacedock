@@ -312,6 +312,49 @@ def _isolated_claude_env() -> dict[str, str] | None:
     return None
 
 
+def headless_inbox_polling_hint(
+    repo_root: Path,
+    keepalive_done: Path,
+    seen_file: Path,
+    *,
+    timeout_s: int = 5,
+) -> str:
+    """Return the shared `--append-system-prompt` hint for Claude `-p` teams mode.
+
+    Under headless `claude -p`, teammate inbox-delivered messages may not be
+    surfaced to the lead agent's stream (anthropics/claude-code#26426). This
+    hint instructs the first officer to (a) keep idle turns ending with a Bash
+    tool_use and (b) poll the on-disk inbox via scripts/fo_inbox_poll.py.
+    """
+    poll_script = repo_root / "scripts" / "fo_inbox_poll.py"
+    return (
+        f"The spacedock plugin directory is at `{repo_root}`. Use it "
+        f"directly; do NOT run `find / -name claude-team` — the binaries you "
+        f"need are `{repo_root}/skills/commission/bin/status` and "
+        f"`{repo_root}/skills/commission/bin/claude-team`.\n\n"
+        f"HEADLESS INBOX-POLLING RULE. You are running in `claude -p` headless "
+        f"mode. Per anthropics/claude-code#26426, inbox-delivered teammate "
+        f"messages accumulate on disk at `$HOME/.claude/teams/{{team_name}}/"
+        f"inboxes/team-lead.json` but are NOT surfaced to your stream. The "
+        f"workaround is to surface them yourself via an external polling "
+        f"script.\n\n"
+        f"Until the sentinel file `{keepalive_done}` exists, every turn "
+        f"MUST end with a Bash tool_use (not text) that runs the poll "
+        f"script:\n\n"
+        f"    python3 {poll_script} --home \"$HOME\" --pattern 'Done:' "
+        f"--timeout {timeout_s} --seen-file {seen_file}\n\n"
+        f"The script blocks up to {timeout_s} seconds waiting for a new inbox "
+        f"message whose text contains 'Done:'. Its stdout contains the "
+        f"teammate message (or is empty on timeout, in which case repeat). "
+        f"Treat any 'from: spacedock-ensign-...' block with 'text: Done: "
+        f"... completed {{stage}}' as the teammate's completion signal for "
+        f"that stage — proceed to the next workflow step per shared-core "
+        f"discipline. Never emit `SendMessage(shutdown_request)`, "
+        f"`TeamDelete`, or other teardown while awaiting an ensign. Once "
+        f"the workflow reaches terminal completion, you may end with text."
+    )
+
+
 def emit_skip_result(reason: str) -> None:
     """Print a standardized SKIP result and exit 0 for standalone uv-run scripts."""
     print(f"  SKIP: {reason}")
