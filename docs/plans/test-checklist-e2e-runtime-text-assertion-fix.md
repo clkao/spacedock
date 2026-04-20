@@ -449,3 +449,18 @@ Resolved the `claude-live-opus` failure mode for PR #142 by re-targeting `test_c
 ### Summary
 
 Converted `test_checklist_e2e` to a deterministic, portable fixture-backed test (no `/spacedock:commission`) and tightened it to assert the checklist protocol directly: the subagent prompt must contain a completion checklist and the entity must contain a Stage Report that accounts for every checklist item via DONE/SKIPPED/FAILED markers. Also added a small ensign shared-core clarification to prefer verbatim checklist item text in stage reports to keep the protocol mechanically verifiable across runtimes.
+
+
+## Stage Report: implementation (cycle 4)
+
+- DONE: Reproduce the Codex checklist E2E failure locally (portable, no live Claude auth required)
+  `uv run pytest tests/test_checklist_e2e.py -m live_codex --runtime codex -q` failed with: `FAIL: ensign prompt contains at least one checklist item` (0 extracted).
+- DONE: Fix checklist extraction to match observed Codex dispatch prompt formatting
+  The Codex spawn prompt uses `Completion checklist:` (no `###` heading) and is available as a structured `spawn_agent` prompt; the test now (a) selects that prompt and (b) parses checklist headers with/without `###`, stopping before the `Instructions:` block. Also fixed the checkbox-bullet regex to correctly detect `- [x]` markers. Commit `88adb44f`.
+- DONE: Verification evidence
+  `uv run pytest tests/test_checklist_e2e.py -m live_codex --runtime codex -q` → **1 passed**.
+  `make test-static` → **477 passed, 22 deselected, 10 subtests passed**.
+
+### Summary
+
+The checklist E2E is now demonstrably portable on Codex: it extracts checklist items from the actual worker dispatch prompt (Codex `spawn_agent`) and asserts that the worker's `## Stage Report: work` accounts for each item via `- DONE:` / `- SKIPPED:` / `- FAILED:` lines (rejecting checkbox bullets).
