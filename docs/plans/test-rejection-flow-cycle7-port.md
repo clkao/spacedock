@@ -554,3 +554,189 @@ git push origin spacedock-ensign/opus-4-7-green-main
 ## Summary
 
 Largest of the three cycle-7 ports. Splits dual-runtime test into two siblings (mechanical), then rewrites the claude side on the cycle-7 pattern with the #141 reviewer-reuse as the key assertion. Un-skips on opus-4-7; retains haiku xfail and codex skip.
+
+---
+
+## Pre-port audit
+
+Authored 2026-04-20 after N=1 opus-low probe exposed plan/fixture/env mismatches. Three commits are already landed on `spacedock-ensign/test-rejection-flow-cycle7-port` (af814b1d fixture, fc1f5bf8 codex split, 30e1d778 claude rewrite) but the claude rewrite's contract shape is suspect pending captain sign-off on this audit.
+
+### 1. Current test shape (claude branch, pre-skip version at 4384e70a)
+
+The pre-skip claude branch was 297 lines of SINGLE-RUN blocking-subprocess shape, not streaming. Canonical assertions in `test_rejection_flow(test_project, runtime="claude", model, effort)`:
+
+- Phase 1 setup:
+  - `setup_fixture(t, "rejection-flow", "rejection-pipeline")` — installs fixture into test project.
+  - `install_agents(t, include_ensign=True)` — claude-only.
+  - `shutil.copy2(fixture_dir / "math_ops.py", t.test_project_dir)` — copies the buggy impl.
+  - `shutil.copy2(fixture_dir / "tests" / "test_add.py", tests_dir)` — copies the test.
+  - `git_add_commit(t.test_project_dir, "setup: rejection flow fixture with buggy implementation")`.
+  - `t.check_cmd("status script runs without errors", ...)` — runs commission/bin/status.
+  - `t.check("status --next detects dispatchable entity", "buggy-add-task" in status_result.stdout)`.
+
+- Phase 2 FO run:
+  - `probe_claude_runtime(model)` + optional `emit_skip_result`.
+  - `run_first_officer(t, prompt, agent_id, extra_args=["--model", model, "--effort", effort, "--max-budget-usd", "5.00"])` — BLOCKING subprocess; no explicit timeout in the claude branch (the runner's own `run_first_officer` default applies). Prompt verbatim: `"Process all tasks through the workflow at {abs_workflow}/. When you encounter a gate review where the reviewer recommends REJECTED, confirm the rejection so the feedback flow routes fixes back to implementation."`
+  - `if fo_exit != 0: print("  (may be expected — budget cap or gate hold)")` — exit code NOT asserted.
+
+- Phase 3 post-run assertions (claude only):
+  - `log = LogParser(t.log_dir / "fo-log.jsonl")`; extracts `agent_calls` + `fo_texts`.
+  - `ensign_calls = [c for c in agent_calls if c["subagent_type"] == "spacedock:ensign"]`.
+  - `t.check("FO dispatched an ensign for validation stage", len(ensign_calls) > 0)`.
+  - `t.check("reviewer stage report contains REJECTED recommendation", rejection_signal_present(...))`.
+  - **The milestone-count anti-pattern (verbatim from pre-skip source lines 233-239):**
+    - `if ensign_count >= 3: t.pass_(f"FO dispatched ensign for fix after rejection ({ensign_count} total ensign dispatches)")`
+    - `elif ensign_count >= 2: t.fail(f"... (only {ensign_count} ensign dispatches — missing fix dispatch)")`
+    - `else: t.fail(f"... (only {ensign_count} ensign dispatches)")`
+  - `t.finish()`.
+
+- Stages the FO traverses (per fixture entity state `status: implementation` + completed Stage Report pre-baked, see **Section 3c**): validation (cycle-1) → [REJECTED] → implementation (fix) → validation (cycle-2 recheck).
+
+- **Dispatches expected by the pre-skip assertion:** `ensign_count >= 3`, which corresponds to THREE `Agent(subagent_type="spacedock:ensign")` tool_uses. The comment in the plan (lines 86-93) interprets this as impl-cycle-1 + validation-cycle-1 + impl-fix. But the fixture state contradicts: no impl-cycle-1 is needed (stage report already present).
+
+- **Passing-run fo-log evidence:** NONE available. The test has been `@pytest.mark.skip(reason="pending #141")` since 2c27630c (2025-09) and the prior green runs were standalone-script (pre-pytest) runs from before 4384e70a (2025-10). No JSONL artifact from a known-green opus-4-7 run exists in the repo; CI artifacts for green runs of this test are absent (was skipped before CI began collecting artifacts). Git archaeology: the pytest migration at 4384e70a landed the `ensign_count >= 3` assertion unchanged from its pre-pytest ancestor. The `>= 3` bound was never empirically tuned on opus-4-7 — it dates from haiku-era experimentation. **BUDGET ESTIMATES IN SECTION 3 CARRY AN EXPLICIT "NO EMPIRICAL BASIS" FLAG where cited.**
+
+### 2. Current test shape (codex branch, to be split)
+
+Split into `tests/test_rejection_flow_codex.py` at commit fc1f5bf8 — NOT cycle-7-ported, skip marker retained. Unique-to-codex surface:
+
+- Helpers: `_codex_rejection_flow_milestones()`, `_codex_rejection_follow_up_order()`, `_codex_rejection_flow_stop_ready()`. All preserved verbatim.
+- Runner: `run_codex_first_officer(t, "rejection-pipeline", ..., timeout_s=420, stop_checker=_codex_rejection_flow_stop_ready)`. The 420s timeout is codex-specific.
+- Log parser: `CodexLogParser` (consumes plaintext `codex-fo-log.txt`, not JSONL).
+- Reuse semantics: codex uses `send_input` on a persistent worker pane (`collab_tool_call` with `tool == "send_input"`) to push follow-up prompts to a kept-alive worker. This is the **codex analog of claude's SendMessage reuse**. The `follow_up_seen` milestone in `_codex_rejection_flow_milestones` flips true on `send_input`. Different tool, different runtime primitive. Not cycle-7-portable without a codex streaming-watcher primitive (which does not exist).
+- Branch / worktree naming assertions (unique to codex; claude doesn't check these at the test level): `ensign/buggy-add-task` vs `spacedock-ensign/buggy-add-task` safe-key verification.
+- Bounded stop condition: `stop_checker` lets codex exit early when `final_response AND follow_up_seen AND implementation_dispatch` are all true. Claude `run_first_officer_streaming` has `expect_exit(timeout_s=...)` as its analog, but the semantics differ (codex checks a disk file predicate; claude watches a subprocess stream).
+
+**Skip remains** with reason `"pending #141 — reviewer keepalive across feedback cycles — codex reuse via send_input has separate semantics; #210 split only, un-skip tracked separately"`. Un-skip is out of scope.
+
+### 3. Proposed replacement shape for claude branch
+
+#### 3a. Critical finding — teams-mode assumption vs environment reality
+
+**The plan (lines 66-80) assumes teams-mode execution: TeamCreate emitted, SendMessage reviewer-reuse for re-review.**
+
+**Empirical N=1 evidence at /tmp/210-rejection-flow-evidence/r1/spacedock-test-0ct8ld79/fo-log.jsonl contradicts this.** Under `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 --team-mode=teams --model opus --effort low`:
+
+- The FO **did NOT** emit `TeamCreate` (no `tool_use.name == "TeamCreate"` in the entire log).
+- The FO **did NOT** call `ToolSearch(select:TeamCreate)` to probe availability — skipped step 1 of the runtime contract.
+- The FO went straight to `Bash` → `echo '<json>' | claude-team build --workflow-dir ...` — which returned `WARN: bare_mode dispatch with no recent TeamCreate evidence`.
+- The FO forwarded the bare_mode Agent spec to `Agent()` directly; no `SendMessage` to reviewer anywhere in the log.
+- Trajectory: 1× `Agent(description="validation for buggy-add-task")` → FO Edit'd entity status `validation→implementation` directly → 1× `Agent(description="implementation fix cycle 1")` → test timed out.
+
+This means opus-low in this environment defaults to **bare-mode FO behavior** even when teams-mode is nominally enabled. The plan's **"Out of scope" line 552** explicitly acknowledges: "Bare-mode rejection flow. Bare Agent() is synchronous; reviewer-reuse has no analog. Different contract; own test if required."
+
+**The plan is internally contradictory:** it targets opus-low teams mode, but opus-low in practice runs bare; the resulting contract (TeamCreate + SendMessage reuse) is unreachable in the execution environment the captain dispatched.
+
+**Required decision from captain before porting** — one of:
+
+- **(A) Drop bare-mode contradiction: pin to `@pytest.mark.bare_mode` and rewrite contract for bare-mode trajectory.** Use `expect_dispatch_close(ensign_name=...)` per sender; assert 2-3 dispatches; no TeamCreate, no SendMessage assertions. Lose the #141 reviewer-keepalive validation (which is the whole point of un-skipping). #141 remains open/unaddressed for opus-low.
+- **(B) Keep `@pytest.mark.teams_mode` but investigate WHY opus-low-teams falls into bare mode.** If FO bug, file follow-up and skip in the meantime. If expected, pin to a model/effort where teams mode actually materializes (opus-medium? opus-4-7 specifically?) and update dispatch command accordingly.
+- **(C) Accept BOTH shapes at runtime via branching predicates** (detect bare vs teams from the first dispatch and assert the appropriate shape).
+
+My recommendation: **(B)**. Evidence from #203 shipping green on cycle-7 implies teams mode WAS reachable during that port; something diverged. Low-effort variance is plausible. Rerunning at `--effort medium` would be cheap to probe.
+
+#### 3b. Per-assertion mapping (assuming (B) resolves — teams mode materializes)
+
+Pre-skip assertion | Cycle-7 primitive | Rationale
+--- | --- | ---
+`len(ensign_calls) > 0` ("FO dispatched ensign for validation") | `expect_dispatch_close(ensign_name="validation", ...)` inside `with run_first_officer_streaming(...) as w:` | Per-dispatch close, not milestone count.
+`rejection_signal_present(...)` | Post-`with`-block assertion on entity file + worktree stage-report files. Same helper, invoked after streaming completes. | On-disk post-run check replaces mid-stream text scan.
+`ensign_count >= 3` (the anti-pattern) | SPLIT into ordered per-dispatch `expect_dispatch_close` calls by sender role (see 3c). The `len(records) == N` post-check is a redundant secondary assertion, NOT the primary signal. | Cycle-7 idiom = per-dispatch close by sender name, not count.
+implicit "feedback routing happens" | `expect(tool_use_matches("SendMessage", to~="implementation"))` OR `expect_dispatch_close(ensign_name="implementation", ...)` (whichever fires first in stream). | Feedback path accepts reuse OR fresh-dispatch.
+implicit "#141 reviewer keepalive" | `expect(tool_use_matches("SendMessage", to~="validation"))` | THE load-bearing assertion. Distinct from "fresh validation re-dispatch" (which would be `expect_dispatch_close(ensign_name="validation", ...)` a second time).
+
+#### 3c. Fixture state clarification
+
+Fixture entity at `tests/fixtures/rejection-flow/buggy-add-task.md`:
+```yaml
+status: implementation
+```
+with a completed `## Stage Report: implementation` section.
+
+**Implication for trajectory:** FO enters with the entity ALREADY past backlog and past the implementation stage report. FO's first dispatchable stage is **validation**. There is NO cycle-1 implementation dispatch by a live ensign — the buggy implementation is pre-baked into `math_ops.py` by the fixture's `shutil.copy2`.
+
+Correct claude-teams-mode trajectory (fixture current state):
+1. FO TeamCreate
+2. FO advances entity `implementation → validation`
+3. `Agent(..., description="... validation")` — cycle-1 validation ensign dispatch (FIRST dispatch)
+4. Validation ensign reads math_ops.py, runs tests, writes REJECTED Stage Report, SendMessage `Done:` to FO
+5. FO enters Feedback Rejection Flow, checks reuse_ok for implementation ensign (none alive yet → fresh)
+6. `Agent(..., description="... implementation")` — implementation-fix dispatch (SECOND dispatch)
+7. Implementation ensign fixes math_ops.py, Done
+8. FO re-runs validation. Reviewer was kept alive at gate after REJECTED? Under the `fresh: true` + `feedback-to: implementation` stage config, the validation reviewer IS kept alive per shared-core. FO `SendMessage(to="spacedock-ensign-...-validation", "Re-validate: ...")` — #141 reuse signal.
+9. Validation ensign re-runs tests, emits PASSED Stage Report, Done.
+10. FO advances validation→done, archives entity.
+
+**Dispatch count under this trajectory: 2 `Agent` + 1 `SendMessage` reuse. NOT 3-4 Agents as the plan claims.**
+
+The plan's expected trajectory (lines 68-80) is **wrong about the initial state**. It assumes fixture `status: backlog` + cycle-1 impl dispatch. Either:
+- **Option X:** Update fixture to `status: backlog` with no stage report, so plan's trajectory holds. Requires: edit fixture entity; the `math_ops.py` copy in the test becomes the cycle-1-implementation ensign's OUTPUT rather than fixture setup. Major reshape of how the fixture works.
+- **Option Y:** Update the plan's assertion shape to match current fixture state. 2 Agents + 1 SendMessage reuse is the correct cycle-7 shape. No fixture change needed.
+
+Option Y is less invasive and matches the 1f456b34 / cf999338 / 3fcd207a git history of the fixture (it has ALWAYS started at status=implementation since the codex-flow-first design).
+
+#### 3d. Per-stage budget proposal
+
+**⚠️ NO EMPIRICAL BASIS for these numbers — no passing-run fo-log of this test on opus-4-7 teams exists.** Derived by analogy to feedback_keepalive + observed N=1 bare-mode timings. Cycle-7 feedback_keepalive uses `PER_STAGE_OVERALL_S=120`, `PER_DISPATCH_BUDGET_S=90`, `SUBPROCESS_EXIT_BUDGET_S=180`. Feedback_keepalive is 2 dispatches total.
+
+Rejection-flow (claude-teams) under Option Y = 2 dispatches + 1 SendMessage reuse cycle (re-review). Observed N=1 bare-mode timings:
+- TeamCreate would-be point: 0:00-0:40 (FO boot + ToolSearch + first Agent spec build). N=1 showed ~42s from start to first Agent dispatch (opus-low-bare).
+- Validation dispatch duration: ~42s from Agent call to REJECTED Done message (22s watch, ~42s wall).
+- Inter-dispatch FO work (read REJECTED, Edit entity, commit): ~25-35s.
+- Implementation-fix dispatch duration: not completed before timeout, but feedback_keepalive saw ~60-90s for the impl dispatch.
+- Validation recheck via SendMessage reuse: would add ~30-60s (no ensign boot cost; just re-invoke).
+
+Proposed budgets (flagged as estimates):
+
+- `PER_STAGE_OVERALL_S = 150` (up from 120 in feedback_keepalive; rejection-flow has MORE work per stage — 2 test files + full pytest collection on math_ops.py + Stage Report write with evidence citations).
+- `PER_DISPATCH_BUDGET_S = 120` (up from 90 in feedback_keepalive; validation ensign does real work: runs pytest + writes detailed REJECTED report).
+- `SUBPROCESS_EXIT_BUDGET_S = 240` (up from 180; 2 dispatches + 1 reuse cycle has more post-contract FO activity: merge-archive, terminal advance, branch cleanup).
+
+Total expected wallclock: 6-10 minutes per the plan's own estimate. With these budgets, a happy-path run has ~150+120+120+30 ≈ 7 minutes of observable deadlines and 4min slack to exit budget. N=1 bare-mode actual: 2 dispatches consumed ~90s of that; 127s total before StepTimeout on a phantom TeamCreate.
+
+#### 3e. Inbox-poll scaffolding
+
+Required in teams mode (per anthropics/claude-code#26426). feedback_keepalive's `headless_hint` prose is already copied verbatim into the current rewrite at commit 30e1d778. Retain as-is. No changes.
+
+#### 3f. On-disk post-run checks
+
+Replace mid-stream text scans. After the `with` block:
+
+- `rejection_signal_present("rejection-pipeline", "buggy-add-task", entity_main, worktrees_dir, "", "")` — unchanged from current rewrite.
+- `read_entity_frontmatter(entity_main).get("status")` checked for `"done"` OR entity archived. Unchanged from current rewrite.
+- NO `len(dispatch_records) in (3, 4)` assertion. Under Option Y, dispatch_records should be `(ensign_name="validation", ensign_name="implementation")` = len 2 (the SendMessage reuse cycle does NOT produce a new dispatch record because FOStreamWatcher's `dispatch_records` tracks `Agent()` calls only). Assert `len(records) == 2` with sender-ordering check.
+
+### 4. Codex-branch sibling file plan
+
+Done at commit fc1f5bf8. `tests/test_rejection_flow_codex.py` carries:
+- `@pytest.mark.live_codex` + `@pytest.mark.skip(reason="pending #141 ... codex reuse via send_input has separate semantics; #210 split only, un-skip tracked separately")`.
+- Codex-only helpers preserved verbatim.
+- Assertion shape unchanged from pre-skip test.
+- Sentinel/stop via `_codex_rejection_flow_stop_ready(log_path)` against `CodexLogParser.raw_lines`, not a streaming watcher. This matches codex's reuse model (persistent worker pane receiving `send_input`).
+
+No changes needed to this file from the audit. Static-green verified (476 passed, 23 deselected).
+
+### 5. Anti-pattern replacements
+
+Anti-pattern | Replacement
+--- | ---
+`ensign_count >= 3` milestone count | Two ordered `expect_dispatch_close(ensign_name=...)` calls in-stream (validation, then implementation), PLUS one `expect(tool_use_matches("SendMessage", to~="validation"))` for the #141 reuse signal. Post-block `len(records) == 2` as secondary.
+`proc.poll()` blocking-wait + `LogParser` post-hoc text scan | `run_first_officer_streaming` + `FOStreamWatcher.expect(...)` + `expect_dispatch_close(...)` + `expect_exit(...)`.
+FO-text regex narration matching (e.g. `follow-up\|feedback-to\|fix`) | Either tool-use predicate (`tool_use_matches("SendMessage", ...)`) OR on-disk post-run check on entity frontmatter/stage-report files. No mid-stream text scans.
+`t.check("FO dispatched an ensign for validation stage", ...)` as the only validation-stage assertion | Primary: `expect_dispatch_close(ensign_name="validation")` in-stream. Secondary: `rejection_signal_present(...)` post-block.
+Dual-runtime `if runtime == "claude":` branching | File split (done at fc1f5bf8). Each runtime has its own test file + marker gate.
+
+### 6. Open questions for captain sign-off
+
+1. **(A/B/C) teams-vs-bare mode gate.** My recommendation: **(B)** — investigate opus-low-teams→bare divergence with one probe run at `--effort medium`. If teams mode materializes, proceed with port under Option Y trajectory. If not, reset to `@pytest.mark.bare_mode` and accept loss of #141 assertion for opus-low.
+2. **(X/Y) fixture state.** My recommendation: **(Y)** — keep fixture at `status: implementation` with pre-baked Stage Report; rewrite plan's trajectory expectations to match (2 Agents + 1 SendMessage reuse, not 3-4 Agents). Less invasive; preserves historical fixture design.
+3. **Budget acceptance.** 150s/120s/240s are dead-reckoned estimates. Captain to confirm or dictate alternatives. First live probe under chosen shape should be treated as budget calibration, not pass/fail.
+4. **Existing commit rollback.** Current 30e1d778 rewrite assumes plan's trajectory (impl first, 3-4 Agents, TeamCreate, SendMessage to validation). Under recommended Option Y + (B or bare-fallback), the rewrite needs a substantial second pass. I will NOT amend 30e1d778 — new commit on top post-approval. Acknowledge if any git-hygiene preference overrides this.
+
+Static tests verify no regression from landed commits: `make test-static` 476 passed pre-port + 476 post-codex-split + 476 post-claude-rewrite. Offline dispatch-budget: 22 passed.
+
+Evidence paths:
+- N=1 opus-low-teams fo-log: `/tmp/210-rejection-flow-evidence/r1/spacedock-test-0ct8ld79/fo-log.jsonl`
+- N=1 pytest output: `/tmp/210-rejection-flow-evidence/r1/pytest.log`
+- Pre-skip test: `git show 4384e70a:tests/test_rejection_flow.py`
+- Landed commits on `spacedock-ensign/test-rejection-flow-cycle7-port`: af814b1d, fc1f5bf8, 30e1d778.
