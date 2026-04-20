@@ -586,3 +586,7 @@ This plan ports `test_reuse_dispatch` onto the cycle-7 streaming watcher + inbox
 ### Summary
 
 Ported test_reuse_dispatch.py to the cycle-7 streaming watcher + inbox-poll keepalive pattern, mirroring test_feedback_keepalive.py. Dropped the incidental `gate: true` on the reuse-pipeline validation stage (the reuse contract is analysis→implementation SendMessage + fresh validation redispatch; the gate has no captain under `claude -p`). Live verification at opus-low teams mode is 3/3 PASS, well above the ≥2/3 bar. No changes to shared infrastructure (scripts/test_lib.py, scripts/fo_inbox_poll.py, shared-core prose).
+
+### PR
+
+https://github.com/clkao/spacedock/pull/141 — commits: 10e6aa75 (fixture), e4df21ab (test rewrite), cc98f14e (stage report)
