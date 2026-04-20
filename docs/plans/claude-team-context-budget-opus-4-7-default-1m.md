@@ -60,15 +60,17 @@ Unit tests in the same style as existing `context_limit_for_model` coverage (if 
 
 ## Stage Report — implementation (2026-04-19)
 
-**Approach:** Option 3 from the entity body — model-family allow-list with config-declared-model trust. Added `NATIVE_1M_MODEL_PREFIXES = ("claude-opus-4-7", "claude-opus-4-8", "claude-opus-4-9", "claude-opus-5")` constant in `skills/commission/bin/claude-team`. Extended `context_limit_for_model` to return `EXTENDED_CONTEXT_LIMIT` when the base model (before any `[...]` suffix) matches any prefix in that tuple. Existing `[1m]` bracket detection preserved for older families.
+**Approach:** Option 1 (allow-list) with empirically-verified entries only. Added `NATIVE_1M_MODELS = frozenset({"claude-opus-4-7"})` constant in `skills/commission/bin/claude-team`. `context_limit_for_model` returns `EXTENDED_CONTEXT_LIMIT` when (a) the model string contains `[1m]` (existing behavior, preserved for opus-4-6 and any future opt-in), or (b) the base model (before any `[...]` suffix) is exactly in `NATIVE_1M_MODELS`. No version parsing, no prefix matching, no speculation about unreleased models.
 
-**Why Option 3 (allow-list):** Version parsing (Option 2) would require a regex contract that's fragile against future naming drift. The allow-list is three lines of data, greps cleanly, and explicit. Opus-4-6 and earlier still need the bracket to opt in, so no old behavior breaks.
+**Scope correction (captain, 2026-04-19):** Initial implementation used a prefix allow-list including `claude-opus-4-8`/`4-9`/`opus-5` — that was speculation. Captain constrained the allow-list to the single model we have empirical evidence for this session (`claude-opus-4-7` at 285k resident → no compaction, no errors). Future models must default to 200k until the empirical check is re-run and the exact string is added.
 
 **Commits:**
-- 579b1924 — fix: default claude-opus-4-7 context limit to 1M without [1m] suffix
+- 579b1924 — fix: default claude-opus-4-7 context limit to 1M without [1m] suffix (initial, over-broad prefix list)
+- ab232ad3 — report: #207 implementation stage report appended
+- (next commit) — scope correction: constrain allow-list to claude-opus-4-7 only + add no-speculation test
 
 **Test evidence:**
-- `make test-static` → 480 passed, 22 deselected, 10 subtests passed (baseline before change was 476; +4 new assertions: 3 parametrized model-mapping entries for 4-7, 4-7[1m], 4-8 + 1 drift scenario in `TestRuntimeModelDetection.test_opus_4_7_bare_runtime_gets_1m`).
+- `make test-static` → 481 passed, 22 deselected, 10 subtests passed (baseline before change was 476; +5 new assertions: 4 parametrized model-mapping entries for 4-7 (→1M), 4-7[1m] (→1M), 4-8 (→200k locks no-speculation), 4-8[1m] (→1M bracket still works) + 1 drift scenario in `TestRuntimeModelDetection.test_opus_4_7_bare_runtime_gets_1m`).
 - Older-model tests unchanged (opus-4-6 → 200k; opus-4-6[1m] → 1M; haiku → 200k; unknown → 200k).
 
 **AC check:**
@@ -77,5 +79,7 @@ Unit tests in the same style as existing `context_limit_for_model` coverage (if 
 - AC-3 — no `config_drift_warning` when config is `opus[1m]` and runtime is bare `claude-opus-4-7`. Covered by same test (`assert "config_drift_warning" not in data`).
 - AC-4 — `claude-opus-4-6` without `[1m]` still 200k; `claude-opus-4-6[1m]` still 1M. Preserved by existing parametrize entries.
 - AC-5 — `make test-static` green.
+
+**No-speculation lock-in:** `claude-opus-4-8` → 200k parametrize entry encodes the discipline. The `claude-opus-4-8[1m]` → 1M entry shows the bracket opt-in still works for any future model without adding it to the allow-list.
 
 **PR:** https://github.com/clkao/spacedock/pull/139

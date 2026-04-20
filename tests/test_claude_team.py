@@ -195,9 +195,13 @@ class TestModelMapping:
         ("claude-haiku-4-5-20251001", 200000),
         ("unknown-model-xyz", 200000),
         ("unknown-model-xyz[1m]", 1000000),  # heuristic works on unknown models too
-        ("claude-opus-4-7", 1000000),  # native-1M family, no bracket needed
+        ("claude-opus-4-7", 1000000),  # empirically verified 1M-native, no bracket needed
         ("claude-opus-4-7[1m]", 1000000),
-        ("claude-opus-4-8", 1000000),  # future native-1M family
+        # Future models default to 200k until empirically verified. Locks in the
+        # no-speculation discipline: when a new opus ships, someone re-runs the
+        # check and adds the exact string to NATIVE_1M_MODELS.
+        ("claude-opus-4-8", 200000),
+        ("claude-opus-4-8[1m]", 1000000),  # bracket opt-in still works for any future model
     ])
     def test_model_context_limits(self, tmp_path, model, expected_limit):
         usage = {
