@@ -122,10 +122,12 @@ Skip interactive questions and confirmation — use these inputs directly. Make 
 
     print()
     print("[First Officer Checklist Review]")
-    # Per shared-core, the FO's checklist review produces a count summary
-    # `{N} done, {N} skipped, {N} failed`. Post-#154 this is written into the
-    # entity body's stage report rather than into free-form narration. Accept
-    # either surface: the entity file (main or archived) OR the FO narration.
+    # Per shared-core's Stage Report Protocol, the ensign writes a
+    # `## Stage Report: {stage}` section into the entity body with every
+    # dispatched item marked DONE/SKIPPED/FAILED; the FO reviews this and
+    # acknowledges via narration (e.g. "processed ... through ... stage",
+    # "completion signal received", "ensign reported completion"). Accept
+    # either surface as evidence the checklist review occurred.
     entity_main = t.test_project_dir / "checklist-test" / "test-checklist.md"
     entity_archive = t.test_project_dir / "checklist-test" / "_archive" / "test-checklist.md"
     entity_text = ""
@@ -133,10 +135,20 @@ Skip interactive questions and confirmation — use these inputs directly. Make 
         entity_text = entity_archive.read_text()
     elif entity_main.is_file():
         entity_text = entity_main.read_text()
-    count_pattern = re.compile(r"\d+\s+done.*\d+\s+skipped.*\d+\s+failed", re.IGNORECASE | re.DOTALL)
+    stage_report_present = bool(
+        re.search(r"##\s+Stage Report", entity_text, re.IGNORECASE)
+        and re.search(r"\b(DONE|SKIPPED|FAILED):", entity_text)
+    )
+    fo_ack_present = bool(
+        re.search(
+            r"(processed.*through|completion signal|reported completion|appended stage report|checklist review|items reported|\d+\s+done.*\d+\s+skipped.*\d+\s+failed)",
+            fo_text,
+            re.IGNORECASE | re.DOTALL,
+        )
+    )
     t.check(
-        "first officer performed checklist review (count summary in entity body or narration)",
-        bool(count_pattern.search(entity_text)) or bool(count_pattern.search(fo_text)),
+        "first officer performed checklist review (stage report in entity body or FO ack in narration)",
+        stage_report_present or fo_ack_present,
     )
     t.check("first officer review references item statuses",
             bool(re.search(r"DONE|SKIPPED|FAILED", fo_text + "\n" + entity_text, re.IGNORECASE)))
