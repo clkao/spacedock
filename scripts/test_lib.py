@@ -312,26 +312,37 @@ def _isolated_claude_env() -> dict[str, str] | None:
     return None
 
 
-def headless_inbox_polling_hint(
+def plugin_location_hint(repo_root: Path) -> str:
+    """Return the `--append-system-prompt` hint that pins the plugin path.
+
+    Under headless `claude -p`, the lead agent may try to `find / -name
+    claude-team` when it can't resolve the helper binaries. That search is
+    both slow and sandbox-hostile; pinning the plugin directory up front
+    steers the agent directly at the commissioned binaries instead.
+    """
+    return (
+        f"The spacedock plugin directory is at `{repo_root}`. Use it "
+        f"directly; do NOT run `find / -name claude-team` — the binaries you "
+        f"need are `{repo_root}/skills/commission/bin/status` and "
+        f"`{repo_root}/skills/commission/bin/claude-team`."
+    )
+
+
+def inbox_polling_hint(
     repo_root: Path,
     keepalive_done: Path,
     seen_file: Path,
     *,
     timeout_s: int = 5,
 ) -> str:
-    """Return the shared `--append-system-prompt` hint for Claude `-p` teams mode.
+    """Return the HEADLESS INBOX-POLLING RULE paragraph alone (no plugin path).
 
-    Under headless `claude -p`, teammate inbox-delivered messages may not be
-    surfaced to the lead agent's stream (anthropics/claude-code#26426). This
-    hint instructs the first officer to (a) keep idle turns ending with a Bash
-    tool_use and (b) poll the on-disk inbox via scripts/fo_inbox_poll.py.
+    Prefer :func:`headless_inbox_polling_hint` for the full composed hint that
+    callers typically want. This helper is exposed separately so callers that
+    already inject a plugin-path hint do not duplicate it.
     """
     poll_script = repo_root / "scripts" / "fo_inbox_poll.py"
     return (
-        f"The spacedock plugin directory is at `{repo_root}`. Use it "
-        f"directly; do NOT run `find / -name claude-team` — the binaries you "
-        f"need are `{repo_root}/skills/commission/bin/status` and "
-        f"`{repo_root}/skills/commission/bin/claude-team`.\n\n"
         f"HEADLESS INBOX-POLLING RULE. You are running in `claude -p` headless "
         f"mode. Per anthropics/claude-code#26426, inbox-delivered teammate "
         f"messages accumulate on disk at `$HOME/.claude/teams/{{team_name}}/"
@@ -352,6 +363,28 @@ def headless_inbox_polling_hint(
         f"discipline. Never emit `SendMessage(shutdown_request)`, "
         f"`TeamDelete`, or other teardown while awaiting an ensign. Once "
         f"the workflow reaches terminal completion, you may end with text."
+    )
+
+
+def headless_inbox_polling_hint(
+    repo_root: Path,
+    keepalive_done: Path,
+    seen_file: Path,
+    *,
+    timeout_s: int = 5,
+) -> str:
+    """Return the shared `--append-system-prompt` hint for Claude `-p` teams mode.
+
+    Under headless `claude -p`, teammate inbox-delivered messages may not be
+    surfaced to the lead agent's stream (anthropics/claude-code#26426). This
+    hint instructs the first officer to (a) keep idle turns ending with a Bash
+    tool_use and (b) poll the on-disk inbox via scripts/fo_inbox_poll.py.
+    Composes :func:`plugin_location_hint` + :func:`inbox_polling_hint` so the
+    plugin-path paragraph can be reused independently.
+    """
+    return (
+        f"{plugin_location_hint(repo_root)}\n\n"
+        f"{inbox_polling_hint(repo_root, keepalive_done, seen_file, timeout_s=timeout_s)}"
     )
 
 

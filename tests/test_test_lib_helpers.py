@@ -22,6 +22,7 @@ from test_lib import (
     bash_command_targets_write,
     emit_skip_result,
     headless_inbox_polling_hint,
+    plugin_location_hint,
     prepare_codex_skill_home,
     probe_claude_runtime,
 )
@@ -71,6 +72,30 @@ def test_headless_inbox_polling_hint_contains_expected_prompt_text(tmp_path):
         f"--timeout 5 --seen-file {seen_file}"
     ) in hint
     assert "Never emit `SendMessage(shutdown_request)`" in hint
+
+
+def test_plugin_location_hint_pins_plugin_dir_without_inbox_polling_rule(tmp_path):
+    repo_root = tmp_path / "repo"
+
+    hint = plugin_location_hint(repo_root)
+
+    assert f"The spacedock plugin directory is at `{repo_root}`." in hint
+    assert f"`{repo_root}/skills/commission/bin/claude-team`" in hint
+    assert "find / -name claude-team" in hint
+    # The plugin-location hint MUST NOT drag in the inbox-polling rule; callers
+    # that need both compose them explicitly (or use headless_inbox_polling_hint).
+    assert "HEADLESS INBOX-POLLING RULE." not in hint
+
+
+def test_headless_inbox_polling_hint_composes_plugin_location_hint(tmp_path):
+    repo_root = tmp_path / "repo"
+    keepalive_done = tmp_path / ".fo-keepalive-done"
+    seen_file = tmp_path / ".fo-inbox-seen"
+
+    plugin_hint = plugin_location_hint(repo_root)
+    headless_hint = headless_inbox_polling_hint(repo_root, keepalive_done, seen_file)
+
+    assert headless_hint.startswith(plugin_hint)
 
 
 def test_probe_claude_runtime_reports_timeout(monkeypatch):
