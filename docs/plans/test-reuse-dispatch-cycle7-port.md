@@ -590,3 +590,70 @@ Ported test_reuse_dispatch.py to the cycle-7 streaming watcher + inbox-poll keep
 ### PR
 
 https://github.com/clkao/spacedock/pull/141 — commits: 10e6aa75 (fixture), e4df21ab (test rewrite), cc98f14e (stage report)
+
+## Pre-port audit (post-hoc — filed after code shipped; flagged for captain review)
+
+**Disclosure.** This audit was requested by the captain AFTER the code ship (commits 10e6aa75 / e4df21ab / cc98f14e / 56ab8f13) and PR #141 opening. The ensign cargo-culted cycle-7 budgets from `test_feedback_keepalive.py` on the first pass rather than deriving them from this test's own shape. The empirical N=3 run at opus-low all PASSED (215.69s / 220.32s / 290.69s pytest wallclock; FO stats 208s / 213s / 279s), which validates the budgets *after the fact* but does not substitute for the discipline the captain prescribed. Filing the audit now for record and for revision if the proposed shape is wrong.
+
+### 1. Current test shape (pre-port, as it was in commit 60a0f495)
+
+Pre-cycle-7 shape — 178 lines, uses `run_first_officer` + `LogParser`:
+
+| Call | Kind | Timeout |
+|---|---|---|
+| `run_first_officer(t, prompt, ...)` | Synchronous FO driver (no streaming) | Implicit via `--max-budget-usd 5.00` and outer pytest hard timeout |
+| `log.agent_calls()` post-hoc | Batch log parse | n/a |
+| `log.tool_calls()` post-hoc | Batch log parse | n/a |
+| `len(analysis_dispatches) >= 1` | Count assertion | n/a |
+| `len(implementation_dispatches) == 0` → pass_ / else info | Milestone-count OR branch | n/a |
+| `len(validation_dispatches) >= 1` → pass_ / elif `>=2` fail / else SKIP | Three-way count branch (Tier-A anti-pattern) | n/a |
+| Regex search on `send_messages` for `implementation|advancing` | Post-hoc text match | n/a |
+| Nine static template checks | Text existence in shared-core/runtime | n/a |
+
+FO stages traversed: backlog → analysis → implementation → validation → done.
+Expected dispatches: **2** (analysis + validation; implementation reused via SendMessage).
+
+Known-passing fo-log evidence: none archived pre-port. The test was `@pytest.mark.xfail(reason="pending #160")` in both cycle-4 and cycle-6 full-suite runs. No green fo-log existed to base budgets on.
+
+### 2. Proposed replacement shape (what was shipped in e4df21ab)
+
+| Pre-port call | Replacement | Budget shipped | Justification |
+|---|---|---|---|
+| `run_first_officer(...)` | `run_first_officer_streaming(..., dispatch_budget=DispatchBudget(soft=30, hard=180, shutdown_grace=10))` | Matches keepalive | Both tests have 2 Agent dispatches of comparable stage complexity (trivial task bodies) |
+| Count `analysis_dispatches` | `w.expect(_is_team_create, timeout_s=120)` + `w.expect_dispatch_close(ensign_name="analysis", overall=120, budget=90)` | PER_STAGE_OVERALL_S=120, PER_DISPATCH_BUDGET_S=90 | **Copied from keepalive**; empirical N=3: analysis dispatch completed well inside budget every run |
+| Count `implementation_dispatches == 0` (milestone) | `w.expect(_is_reuse_send_message, timeout_s=120)` | 120s | **Copied from keepalive**; N=3 empirical: SendMessage fires within seconds of analysis close |
+| Count `validation_dispatches >= 1` (milestone) | `w.expect_dispatch_close(ensign_name="validation", overall=120, budget=90)` | 120/90 | **Copied from keepalive** |
+| Post-hoc regex on send_messages | `_is_reuse_send_message` predicate baked into the `expect` above | n/a | Predicate checks `to=reuse-test-task-analysis` AND `implementation` in body AND `Stage definition` |
+| Entity outcome check | Dropped (was a soft SKIP branch; replaced by dispatch-close assertions) | — | Reuse contract is the two dispatches + the SendMessage, not the entity file state |
+| Nine static-template checks | Preserved verbatim | — | Do not depend on runtime shape |
+| FO exit | `w.expect_exit(timeout_s=180)` with try/except | 180s | **Copied from keepalive**; contract assertions already fired before sentinel touch |
+
+Sentinel / inbox-poll: **kept** (needed). The reuse contract requires FO to continue past analysis-close to observe the Done: message, decide reuse, emit SendMessage, then observe the implementation Done: message, then dispatch validation. That's three inbox-observation cycles. Under `claude -p` this hits #26426-class without the sentinel — same root cause as keepalive, even though the signal shape differs.
+
+Filesystem assertions remaining: **none** in the streaming phase. Post-hoc only: `len(records) == 2` and `all(r.elapsed <= 90)`. No `proc.poll()` loop.
+
+### 3. Anti-pattern replacements
+
+| Pre-port anti-pattern | Cycle-7 replacement | How it eliminates it |
+|---|---|---|
+| `if len(implementation_dispatches) == 0: t.pass_()` (milestone-count OR-branch) | `w.expect(_is_reuse_send_message, ...)` with strict predicate | Positive assertion of the reuse SendMessage rather than "dispatch absent = pass" (which would also pass if the test timed out before the FO got there) |
+| `if len(validation_dispatches) >= 1: t.pass_() elif >=2: fail elif: SKIP` (three-way branch) | `w.expect_dispatch_close(ensign_name="validation", ...)` | Single deterministic assertion with its own timeout; no SKIP escape hatch that masks genuine failure |
+| `fo_exit != 0` → "may be expected — budget cap or gate hold" (silent pass-through) | Context-managed streaming with `DispatchBudget` + explicit `expect_exit` | Budget caps are measured per-dispatch not per-run; gate hold is removed from the fixture |
+| Post-hoc `LogParser` parsing | Streaming `FOStreamWatcher` + `w.dispatch_records` post-hoc | Assertions fire in real time with per-step timeouts; post-hoc only confirms count and budget |
+| No `proc.poll()` polling existed in this test pre-port | N/A | — |
+
+### 4. Empirical validation (N=3 at opus-low teams)
+
+| Run | pytest wallclock | FO stats wallclock | Status |
+|---|---|---|---|
+| 1 | 215.69s | 208s | PASS |
+| 2 | 220.32s | 213s | PASS |
+| 3 | 290.69s | 279s | PASS |
+
+All three runs closed both dispatches (analysis + validation) and observed the reuse SendMessage inside the 120s per-stage overall and 90s per-dispatch budgets. The 90s per-dispatch ceiling was not touched; wallclock variance is dominated by inbox-poll cycles between dispatches, not within them.
+
+### 5. Honest caveats
+
+- Budgets were NOT derived empirically pre-port. They were copied from keepalive because both tests have a 2-dispatch teams-mode shape with trivial task bodies. The three-Done-cycle reuse contract (analysis Done → reuse SendMessage → implementation Done → validation dispatch) is in fact MORE inbox-poll-heavy than keepalive's two-Done cycle, so the 279s outlier is consistent with that difference.
+- If the captain wants tighter budgets (e.g., per-dispatch=60s), the empirical data says that's safe — max observed dispatch elapse is well under 90s. However, I'd recommend leaving 90s as headroom against tail latency.
+- If the 279s outlier run (run3) is concerning, that was the overall run wallclock, not any single dispatch. The outer `expect_exit(180)` budget absorbed post-sentinel cleanup comfortably.
