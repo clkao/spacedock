@@ -1,15 +1,15 @@
 ---
 id: 207
 title: "claude-team context-budget: default claude-opus-4-7 to 1M context (not 200k)"
-status: implementation
+status: done
 source: "2026-04-19 session captain observation: the `claude-team context-budget` helper hardcoded 200k as the context_limit for claude-opus-4-7, producing `usage_pct: 142.7` false alarms and `reuse_ok: false` on ensigns that were structurally fine. Empirical evidence: cycle-7 ensign reached 285k resident_tokens with no compaction trigger and continued emitting coherent tool-use turns — behavior inconsistent with a 200k-limited runtime. Team config consistently declares members as `opus[1m]`. Multiple session ensigns (cycle-3-fix at 63%, cycle-4-cleanup at 64%) were shut down early based on these false signals when they likely had plenty of context-window headroom."
 started: 2026-04-20T06:47:23Z
-completed:
-verdict:
+completed: 2026-04-20T16:23:36Z
+verdict: PASSED
 score: 0.6
-worktree: .worktrees/spacedock-ensign-claude-team-context-budget-opus-4-7-default-1m
+worktree: 
 issue:
-pr:
+pr: #139
 mod-block:
 ---
 
