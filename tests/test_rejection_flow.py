@@ -24,10 +24,18 @@ from test_lib import (  # noqa: E402
 )
 
 
-PER_STAGE_OVERALL_S = 120
-PER_DISPATCH_BUDGET_S = 90
+# Budgets (NO EMPIRICAL BASIS on opus-4-7 teams — no passing-run fo-log exists
+# for this test at this model/effort; the file has been skipped since 2c27630c
+# (2025-09) pending #141). Derived by scaling feedback_keepalive's 120/90/180
+# single-cycle budgets upward for this test's 2-full-cycles + reviewer-reuse
+# trajectory (cycle-1 impl → cycle-1 validation → feedback → cycle-2 impl-fix
+# → cycle-2 validation-recheck via SendMessage). Validation ensigns here run
+# real pytest + compose detailed REJECTED reports, which take longer than
+# keepalive's greeting-file impl.
+PER_STAGE_OVERALL_S = 180
+PER_DISPATCH_BUDGET_S = 150
 
-SUBPROCESS_EXIT_BUDGET_S = 180
+SUBPROCESS_EXIT_BUDGET_S = 300
 
 
 def _is_tool_use(entry: dict, name: str) -> dict | None:
