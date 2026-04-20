@@ -119,6 +119,41 @@ Anti-patterns to avoid when writing new live E2E:
 - `milestones[...]` dicts where Phase-3 accepts any subset of keys via `or`-chains. Replace with per-dispatch `expect_dispatch_close` calls or an assertion on `w.dispatch_records`.
 - OR-chain fallbacks like `entry_contains_text(e, r"SOMETHING") or tool_use_matches(e, "Bash", command="SOMETHING")` that accept narration in place of behavior — the tool_use branch is the contract, the text branch is a tautology bait.
 
+### Teams-Mode Under `claude -p` (headless runtime quirks)
+
+Agent Teams dispatches (`Agent(subagent_type="spacedock:ensign")` with `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`) behave differently under `claude -p` headless mode vs. an interactive TTY session. Both quirks are upstream ([anthropics/claude-code#26426](https://github.com/anthropics/claude-code/issues/26426) — "Agent Teams inbox polling doesn't work in non-interactive/SDK streaming mode"; closed as `not_planned`). Tests that exercise teammate keepalive must account for them.
+
+**Quirk 1 — Inbox polling is a React UI hook and doesn't fire under `-p`.** In interactive mode, the `InboxPoller` React hook runs every 1000ms, reads `$HOME/.claude/teams/{team_name}/inboxes/team-lead.json`, and surfaces teammate messages as user-role content. Under `-p` the TUI never renders, so the hook never fires. Inbox JSON files accumulate on disk but are never delivered to the lead (FO). Symptoms: the FO has no way to observe ensign `Done:` messages, its `task_notification(completed)` system events never fire for `task_type=in_process_teammate`, and the FO hangs waiting for signals that are physically present on disk but never read.
+
+**Quirk 2 — Text-only turn endings close the prompt cycle and reset context.** When an FO turn ends with `stop_reason=end_turn` and text-only content (no tool_use), `claude -p` emits `type=result subtype=success` and starts a new prompt cycle. The new cycle re-enters with fresh context, and models at lower effort (notably opus-low) may hallucinate reasons to act — e.g. emit `SendMessage(shutdown_request, reason="session ending")` to a still-working ensign based on a fabricated `Human:` prefix user message they generate to themselves. Symptoms: FO tears down ensigns mid-work ~15s after spawn; ensigns never see the shutdown_request (they aren't polling inbox mid-tool-loop); teams get stuck in `TeamDelete → "Cannot cleanup with 1 active member"` loops.
+
+**Combined fix — inbox-poll keep-alive pattern.**
+
+Tests that need the FO to actually observe teammate Done messages (keepalive contract tests, feedback-routing tests, anything with multi-stage teammate handoff) should inject an `--append-system-prompt` hint that:
+
+1. Names a keep-alive sentinel file the harness controls (e.g. `{test_project_dir}/.fo-keepalive-done`).
+2. Tells the FO: until that sentinel exists, every turn MUST end with a Bash tool_use rather than text. The Bash tool_use runs `scripts/fo_inbox_poll.py` to block-poll the team-lead inbox file for teammate `Done:` messages and print them to stdout.
+3. The FO's Bash tool_result now contains the real inbox content, surfacing teammate messages into the FO's stream (filling the gap the missing `InboxPoller` left).
+4. The turn ends with `stop_reason=tool_use` instead of `stop_reason=end_turn`, keeping `-p`'s prompt cycle open and preventing the fresh-context hallucination.
+
+Canonical implementation in `tests/test_feedback_keepalive.py` (see `headless_hint`) and `scripts/fo_inbox_poll.py`. The `FOStreamWatcher` recognizes inbox-poll Bash tool_result content as a close anchor — specifically, entries shaped as `from: spacedock-ensign-{slug}-{stage}` + `text: Done: ...` will close any open dispatch whose `ensign_name` contains the matching stage substring.
+
+**When to touch the sentinel.** Touch `{keepalive_done}` AFTER the test's contract assertions have fired. Do NOT treat the sentinel as a "workflow is done" signal the FO should obey strictly — the FO will correctly continue to process any in-flight terminal-stage work (cycle-2 impl fix, merge, archive) even after the sentinel appears. Wrap `expect_exit(...)` in `try/except` so post-contract FO activity is non-blocking; the `run_first_officer_streaming` context manager's `finally:` block kills the subprocess cleanly on test completion.
+
+**Event-driven vs timeout-driven progression.** The stage-to-stage advance in a test like `test_feedback_keepalive` is driven by runtime-emitted signals (TeamCreate tool_use, dispatch-close via inbox-poll content or task_notification, SendMessage tool_use), not by timeouts. Timeouts are backstops for failure, not progression gates. The only timeout in the happy path is `fo_inbox_poll.py --timeout` (default 10s), which is a bounded-poll window inside each FO Bash invocation; a shorter/longer value affects the number of FO turns but not correctness.
+
+**Investigating a failing live run.** The FO's `fo-log.jsonl` is the primary artifact. Look for:
+
+- `system init` events — each marks a new `-p` prompt cycle. Multiple inits mean the session cycled; opus-low is most likely to misbehave at cycle-2+.
+- `result subtype=success` with `stop_reason=end_turn` — cycle close. If this appears while the workflow isn't terminal, the keep-alive discipline failed.
+- Assistant text entries with `"Human: ..."` prefix — smoking-gun for the fabricated-user-message hallucination.
+- Bash tool_use with `command` containing `fo_inbox_poll.py` — inbox-poll attempts. The matching `tool_result` contains any delivered messages.
+- `SendMessage` tool_use with `type: shutdown_request` addressed at an ensign — confirm this follows an actual completion signal, not a self-generated one.
+
+The ensign's own side lives in `$HOME/.claude/projects/{cwd-slug}/{session_id}/subagents/agent-{hash}.jsonl` (inside the test's isolated HOME under `/var/folders/.../spacedock-clean-home-*/`). Useful for proving an ensign completed even when the FO never observed it.
+
+There is no dedicated timeline-dump tool today; investigations typically use inline `python3 -c "import json; ..."` one-liners against the jsonl. A reusable `scripts/fo_log_timeline.py` would be a reasonable follow-up when investigation overhead becomes a bottleneck.
+
 ### Interactive PTY (`test_lib_interactive.py` + `InteractiveSession`)
 
 Use only when the behavior under test requires an interactive session — multi-turn conversation, skill invocations, team member switching, or behavior that differs between interactive and pipe mode.
