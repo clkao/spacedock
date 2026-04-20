@@ -22,13 +22,51 @@ from test_lib import (  # noqa: E402
     run_codex_first_officer,
     run_first_officer_streaming,
     setup_fixture,
+    tool_use_matches,
 )
+
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 PER_DISPATCH_OVERALL_S = 150
 PER_DISPATCH_BUDGET_S = 120
 MERGE_HOOK_FIRED_S = 90
-SUBPROCESS_EXIT_BUDGET_S = 45
+SUBPROCESS_EXIT_BUDGET_S = 180
+
+
+def _headless_keepalive_hint(
+    repo_root: Path,
+    keepalive_done: Path,
+    seen_file: Path,
+) -> str:
+    poll_script = repo_root / "scripts" / "fo_inbox_poll.py"
+    return (
+        f"The spacedock plugin directory is at `{repo_root}`. Use it "
+        f"directly; do NOT run `find / -name claude-team` — the binaries you "
+        f"need are `{repo_root}/skills/commission/bin/status` and "
+        f"`{repo_root}/skills/commission/bin/claude-team`.\n\n"
+        f"HEADLESS INBOX-POLLING RULE. You are running in `claude -p` headless "
+        f"mode. Per anthropics/claude-code#26426, inbox-delivered teammate "
+        f"messages accumulate on disk at `$HOME/.claude/teams/{{team_name}}/"
+        f"inboxes/team-lead.json` but are NOT surfaced to your stream. The "
+        f"workaround is to surface them yourself via an external polling "
+        f"script.\n\n"
+        f"Until the sentinel file `{keepalive_done}` exists, every turn "
+        f"MUST end with a Bash tool_use (not text) that runs the poll "
+        f"script:\n\n"
+        f"    python3 {poll_script} --home \"$HOME\" --pattern 'Done:' "
+        f"--timeout 5 --seen-file {seen_file}\n\n"
+        f"The script blocks up to 5 seconds waiting for a new inbox "
+        f"message whose text contains 'Done:'. Its stdout contains the "
+        f"teammate message (or is empty on timeout, in which case repeat). "
+        f"Treat any 'from: spacedock-ensign-...' block with 'text: Done: "
+        f"... completed {{stage}}' as the teammate's completion signal for "
+        f"that stage — proceed to the next workflow step per shared-core "
+        f"discipline. Never emit `SendMessage(shutdown_request)`, "
+        f"`TeamDelete`, or other teardown while awaiting an ensign. Once "
+        f"the workflow reaches terminal completion, you may end with text."
+    )
 
 
 def _run_claude_merge_case(
@@ -39,21 +77,36 @@ def _run_claude_merge_case(
     log_name: str,
     *,
     hook_expected: bool,
+    sentinel_suffix: str,
 ) -> int:
     """Drive the claude FO through a merge-hook pipeline with streaming milestones.
 
     Milestones differ by fixture variant:
       hook_expected=True  → ensign dispatched → hook-fired write observed → exit
       hook_expected=False → ensign dispatched → exit (local-merge fallback)
+
+    Under teams-mode `claude -p`, anthropics/claude-code#26426 blocks the
+    InboxPoller from surfacing teammate `Done:` messages to the FO stream.
+    The test supplies a headless keepalive hint via `--append-system-prompt`
+    instructing the FO to poll the inbox JSON via `scripts/fo_inbox_poll.py`
+    each idle turn. After the contract milestones surface (dispatch close,
+    plus hook-fired Bash for Phase-2), the test touches a sentinel file so
+    the FO may end its turn with text and exit.
     """
     abs_workflow = t.test_project_dir / workflow_dir
     prompt = f"Process all tasks through the workflow at {abs_workflow}/ to completion."
+
+    keepalive_done = t.test_project_dir / f".fo-keepalive-done-{sentinel_suffix}"
+    seen_file = t.test_project_dir / f".fo-inbox-seen-{sentinel_suffix}"
+    headless_hint = _headless_keepalive_hint(t.repo_root, keepalive_done, seen_file)
+
+    extra_args = list(claude_extra_args) + ["--append-system-prompt", headless_hint]
 
     with run_first_officer_streaming(
         t,
         prompt,
         agent_id=agent_id,
-        extra_args=claude_extra_args,
+        extra_args=extra_args,
         log_name=log_name,
         dispatch_budget=DispatchBudget(
             soft_s=30.0, hard_s=150.0, shutdown_grace_s=10.0,
@@ -66,13 +119,24 @@ def _run_claude_merge_case(
         )
         print(f"[OK] ensign dispatch closed in {dispatch_record.elapsed:.1f}s")
 
+        if hook_expected:
+            w.expect(
+                lambda e: tool_use_matches(e, "Bash", command="_merge-hook-fired.txt"),
+                timeout_s=MERGE_HOOK_FIRED_S,
+                label="merge hook wrote _merge-hook-fired.txt",
+            )
+            print("[OK] merge hook fired (write to _merge-hook-fired.txt observed)")
+
+        keepalive_done.touch()
+        print(f"[OK] keep-alive sentinel {keepalive_done.name} touched")
+
         try:
             return w.expect_exit(timeout_s=SUBPROCESS_EXIT_BUDGET_S)
         except Exception as exc:
             print(
                 f"  NOTE: FO did not exit within {SUBPROCESS_EXIT_BUDGET_S}s "
-                f"post-dispatch-close ({type(exc).__name__}); contract "
-                f"assertions already passed"
+                f"post-sentinel ({type(exc).__name__}); contract assertions "
+                f"already passed"
             )
             return 0
 
@@ -88,11 +152,13 @@ def _run_merge_case(
     log_name: str,
     stop_checker: Callable[[Path], bool] | None = None,
     hook_expected: bool = True,
+    sentinel_suffix: str = "default",
 ) -> int:
     if runtime == "claude":
         return _run_claude_merge_case(
             t, agent_id, workflow_dir, claude_extra_args, log_name,
             hook_expected=hook_expected,
+            sentinel_suffix=sentinel_suffix,
         )
     return run_codex_first_officer(
         t,
@@ -156,6 +222,7 @@ def _resume_codex_terminal_cleanup(t, workflow_dir, run_goal, log_name, stop_che
 
 @pytest.mark.live_claude
 @pytest.mark.live_codex
+@pytest.mark.teams_mode
 def test_merge_hook_guardrail(test_project, runtime, model, effort):
     """Merge hooks fire before local merge; no-mods fallback works (claude + codex)."""
     t = test_project
@@ -187,6 +254,7 @@ def test_merge_hook_guardrail(test_project, runtime, model, effort):
             with_hook_project, "merge-hook-pipeline", "merge-hook-entity",
         ) if runtime == "codex" else None,
         hook_expected=True,
+        sentinel_suffix="hook",
     )
     if runtime == "codex":
         hook_stop_ready = _codex_merge_stop_ready(
@@ -269,6 +337,7 @@ def test_merge_hook_guardrail(test_project, runtime, model, effort):
             nomods_project, "merge-hook-pipeline", "merge-hook-entity",
         ) if runtime == "codex" else None,
         hook_expected=False,
+        sentinel_suffix="nomods",
     )
     if runtime == "codex":
         nomods_stop_ready = _codex_merge_stop_ready(
