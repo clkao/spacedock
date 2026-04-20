@@ -18,7 +18,9 @@ import tempfile
 import textwrap
 import time
 from collections.abc import Callable, Iterator
+from dataclasses import dataclass, field
 from datetime import datetime
+from enum import Enum
 from pathlib import Path
 
 
@@ -745,6 +747,7 @@ def run_first_officer_streaming(
     extra_args: list[str] | None = None,
     log_name: str = "fo-log.jsonl",
     hard_cap_s: int = 600,
+    dispatch_budget: DispatchBudget | None = None,
 ) -> Iterator[FOStreamWatcher]:
     """Launch the FO as a live subprocess and yield a watcher.
 
@@ -783,7 +786,7 @@ def run_first_officer_streaming(
         log_file.close()
         raise
 
-    watcher = FOStreamWatcher(log_path, proc)
+    watcher = FOStreamWatcher(log_path, proc, dispatch_budget=dispatch_budget)
     exception_exit = False
     try:
         yield watcher
@@ -971,6 +974,57 @@ def run_codex_first_officer(
     return result.returncode
 
 
+@dataclass
+class DispatchBudget:
+    """Soft/hard budgets applied to each spacedock:ensign Agent() dispatch.
+
+    Soft crossings emit a structured warning only; hard crossings transition
+    the dispatch to cooperative-shutdown state and kill the FO subprocess if
+    the dispatch does not close within ``shutdown_grace_s``.
+    """
+
+    soft_s: float = 15.0
+    hard_s: float = 60.0
+    shutdown_grace_s: float = 10.0
+
+
+@dataclass
+class DispatchRecord:
+    """Record of a closed ensign dispatch.
+
+    ``ensign_name`` is the ``description`` (or prompt prefix) of the Agent()
+    call. ``elapsed`` is wallclock seconds from the Agent tool_use entry to
+    the matching SendMessage(to="team-lead", message="Done:...") close.
+    """
+
+    ensign_name: str
+    elapsed: float
+
+
+class _DispatchState(Enum):
+    OPEN = "open"
+    SHUTDOWN_REQUESTING = "shutdown_requesting"
+
+
+@dataclass
+class _OpenDispatch:
+    dispatch_id: str
+    ensign_name: str
+    start: float
+    state: _DispatchState = _DispatchState.OPEN
+    warned: bool = False
+    shutdown_requested_at: float | None = None
+
+
+class DispatchHardTimeout(AssertionError):
+    """Ensign dispatch exceeded its hard budget and did not close within grace."""
+
+    def __init__(self, message: str, ensign_name: str, elapsed: float):
+        super().__init__(message)
+        self.ensign_name = ensign_name
+        self.elapsed = elapsed
+
+
 class StepTimeout(AssertionError):
     """Expected log entry did not appear within the per-step budget."""
 
@@ -1090,11 +1144,19 @@ class FOStreamWatcher:
     POLL_INTERVAL_S = 0.2
     _LOG_TAIL_LINES = 20
 
-    def __init__(self, log_path: Path, proc: subprocess.Popen):
+    def __init__(
+        self,
+        log_path: Path,
+        proc: subprocess.Popen,
+        dispatch_budget: DispatchBudget | None = None,
+    ):
         self.log_path = Path(log_path)
         self.proc = proc
         self._fh = None
         self._buffer = ""
+        self.dispatch_budget = dispatch_budget or DispatchBudget()
+        self._open_dispatches: dict[str, _OpenDispatch] = {}
+        self.dispatch_records: list[DispatchRecord] = []
 
     def _ensure_handle(self) -> None:
         if self._fh is None:
@@ -1108,24 +1170,136 @@ class FOStreamWatcher:
         """
         self._ensure_handle()
         chunk = self._fh.read()
-        if not chunk:
-            return []
-        self._buffer += chunk
         entries: list[dict] = []
-        while True:
-            newline_idx = self._buffer.find("\n")
-            if newline_idx < 0:
-                break
-            line = self._buffer[:newline_idx]
-            self._buffer = self._buffer[newline_idx + 1:]
-            stripped = line.strip()
-            if not stripped:
-                continue
-            try:
-                entries.append(json.loads(stripped))
-            except json.JSONDecodeError:
-                continue
+        if chunk:
+            self._buffer += chunk
+            while True:
+                newline_idx = self._buffer.find("\n")
+                if newline_idx < 0:
+                    break
+                line = self._buffer[:newline_idx]
+                self._buffer = self._buffer[newline_idx + 1:]
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                try:
+                    entries.append(json.loads(stripped))
+                except json.JSONDecodeError:
+                    continue
+        self._update_dispatch_budgets(entries)
         return entries
+
+    def _update_dispatch_budgets(self, entries: list[dict]) -> None:
+        """Track ensign dispatches and enforce soft/hard budgets.
+
+        Called from ``_drain_entries`` on every poll. Registers open dispatches
+        from Agent(subagent_type="spacedock:ensign") tool_use entries, closes
+        them on the matching user tool_result keyed by the Agent tool_use_id
+        (same anchor works in bare and teams mode). Emits structured warnings
+        at soft crossings, transitions to cooperative-shutdown at hard
+        crossings, and kills the FO subprocess when the grace window expires
+        after a hard trip.
+        """
+        now = time.monotonic()
+
+        for entry in entries:
+            # Open: Agent(subagent_type="spacedock:ensign") assistant tool_use.
+            block = _tool_use_block(entry)
+            if block is not None:
+                tool_name = block.get("name")
+                inp = block.get("input", {}) or {}
+                if tool_name == "Agent" and inp.get("subagent_type") == "spacedock:ensign":
+                    dispatch_id = str(block.get("id") or f"anon-{len(self._open_dispatches)}")
+                    ensign_name = str(
+                        inp.get("description")
+                        or inp.get("prompt", "")[:40]
+                        or "unnamed-ensign"
+                    )
+                    self._open_dispatches[dispatch_id] = _OpenDispatch(
+                        dispatch_id=dispatch_id,
+                        ensign_name=ensign_name,
+                        start=now,
+                    )
+                    continue
+
+            # Close: user tool_result whose tool_use_id matches a tracked
+            # open dispatch. Works in both modes: in bare mode the Agent
+            # call returns its result synchronously; in teams mode Claude
+            # Code emits the matching tool_result when the teammate's
+            # worker returns.
+            if entry.get("type") == "user":
+                message = entry.get("message")
+                if isinstance(message, dict):
+                    for result_block in message.get("content", []) or []:
+                        if (
+                            isinstance(result_block, dict)
+                            and result_block.get("type") == "tool_result"
+                        ):
+                            tuid = str(result_block.get("tool_use_id") or "")
+                            if tuid in self._open_dispatches:
+                                closing = self._open_dispatches.pop(tuid)
+                                self.dispatch_records.append(
+                                    DispatchRecord(
+                                        ensign_name=closing.ensign_name,
+                                        elapsed=now - closing.start,
+                                    )
+                                )
+
+        for disp in self._open_dispatches.values():
+            elapsed = now - disp.start
+            if (not disp.warned) and elapsed > self.dispatch_budget.soft_s:
+                msg = (
+                    f"ensign dispatch {disp.ensign_name} exceeded "
+                    f"{self.dispatch_budget.soft_s}s soft budget, "
+                    f"elapsed {elapsed:.2f}s, "
+                    f"hard {self.dispatch_budget.hard_s}s"
+                )
+                print(f"  WARN: {msg}")
+                disp.warned = True
+
+        for disp in self._open_dispatches.values():
+            if disp.state != _DispatchState.OPEN:
+                continue
+            elapsed = now - disp.start
+            if elapsed > self.dispatch_budget.hard_s:
+                print(
+                    f"  WARN: ensign dispatch {disp.ensign_name} exceeded "
+                    f"{self.dispatch_budget.hard_s}s hard budget "
+                    f"(elapsed {elapsed:.2f}s) — attempting cooperative shutdown"
+                )
+                disp.state = _DispatchState.SHUTDOWN_REQUESTING
+                disp.shutdown_requested_at = now
+
+        for disp in self._open_dispatches.values():
+            if (
+                disp.state == _DispatchState.SHUTDOWN_REQUESTING
+                and disp.shutdown_requested_at is not None
+                and now - disp.shutdown_requested_at
+                    > self.dispatch_budget.shutdown_grace_s
+            ):
+                elapsed = now - disp.start
+                print(
+                    f"  ERROR: ensign dispatch {disp.ensign_name} did not close "
+                    f"within {self.dispatch_budget.shutdown_grace_s}s grace — "
+                    f"killing FO subprocess"
+                )
+                try:
+                    self.proc.terminate()
+                    try:
+                        self.proc.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        self.proc.kill()
+                        self.proc.wait()
+                except Exception:
+                    pass
+                raise DispatchHardTimeout(
+                    f"ensign dispatch {disp.ensign_name} exceeded "
+                    f"{self.dispatch_budget.hard_s}s hard budget "
+                    f"(elapsed {elapsed:.2f}s, no close after "
+                    f"{self.dispatch_budget.shutdown_grace_s}s grace)",
+                    ensign_name=disp.ensign_name,
+                    elapsed=elapsed,
+                )
 
     def _log_tail(self, max_lines: int = _LOG_TAIL_LINES) -> str:
         if not self.log_path.is_file():
@@ -1176,6 +1350,83 @@ class FOStreamWatcher:
                     f"Step {label!r} did not match within {timeout_s}s.\n"
                     f"Log tail:\n{self._log_tail()}",
                     label=label,
+                )
+            time.sleep(self.POLL_INTERVAL_S)
+
+    def expect_dispatch_close(
+        self,
+        overall_timeout_s: float,
+        ensign_name: str | None = None,
+        label: str | None = None,
+        dispatch_budget_s: float | None = None,
+    ) -> DispatchRecord:
+        """Block until the next ensign dispatch close matching ``ensign_name``.
+
+        ``overall_timeout_s`` is the wall budget for the matching dispatch to
+        close, counting from now. It absorbs bootstrap, inter-dispatch FO
+        thinking, and the dispatch's own lifetime. Exceeding it raises
+        ``StepTimeout``.
+
+        ``dispatch_budget_s`` (optional) asserts that the dispatch's own
+        elapsed time — from its Agent tool_use entry to its Done: close — is
+        at most this many seconds. When the closed record's ``elapsed``
+        exceeds this budget, raises ``StepTimeout``. When None, no
+        per-dispatch assertion fires. Use this to budget the stage's actual
+        work separately from bootstrap / FO-turn overhead.
+
+        ``ensign_name`` is matched as a substring against the dispatch's
+        description. When None, returns the record for the first dispatch
+        that closes.
+
+        Returns the DispatchRecord that was just appended to dispatch_records.
+        Raises StepFailure on early proc exit.
+        """
+        step_label = label or (
+            f"dispatch close: {ensign_name}" if ensign_name else "dispatch close"
+        )
+
+        def _assert_budget(record: DispatchRecord) -> DispatchRecord:
+            if (
+                dispatch_budget_s is not None
+                and record.elapsed > dispatch_budget_s
+            ):
+                raise StepTimeout(
+                    f"Step {step_label!r} dispatch {record.ensign_name!r} "
+                    f"took {record.elapsed:.1f}s, exceeding the "
+                    f"{dispatch_budget_s}s per-dispatch budget.",
+                    label=step_label,
+                )
+            return record
+
+        baseline = len(self.dispatch_records)
+        deadline = time.monotonic() + overall_timeout_s
+        while True:
+            self._drain_entries()
+            for record in self.dispatch_records[baseline:]:
+                if ensign_name is None or ensign_name in record.ensign_name:
+                    return _assert_budget(record)
+            baseline = len(self.dispatch_records)
+
+            if self.proc.poll() is not None:
+                self._drain_entries()
+                for record in self.dispatch_records[baseline:]:
+                    if ensign_name is None or ensign_name in record.ensign_name:
+                        return _assert_budget(record)
+                raise StepFailure(
+                    f"FO subprocess exited (code={self.proc.returncode}) "
+                    f"before step {step_label!r} matched.\n"
+                    f"Log tail:\n{self._log_tail()}",
+                    label=step_label,
+                    exit_code=self.proc.returncode,
+                )
+
+            if time.monotonic() >= deadline:
+                open_names = [d.ensign_name for d in self._open_dispatches.values()]
+                raise StepTimeout(
+                    f"Step {step_label!r} did not close within "
+                    f"{overall_timeout_s}s overall. Open dispatches: {open_names}.\n"
+                    f"Log tail:\n{self._log_tail()}",
+                    label=step_label,
                 )
             time.sleep(self.POLL_INTERVAL_S)
 

@@ -93,15 +93,31 @@ Use for testing FO/ensign behavior that runs to completion in pipe mode. The tes
 
 Examples: `test_gate_guardrail.py`, `test_rejection_flow.py`, `test_single_entity_team_skip.py`.
 
-### Codex FO Prompt Discipline
+### FO Prompt Discipline (Claude and Codex)
 
-When a test exercises Codex first-officer behavior:
+When a test exercises first-officer behavior on either runtime:
 
-- Invoke only `$first-officer` / `spacedock:first-officer`.
-- Keep the invocation prompt minimal: identify the workflow target, runtime, and entity scope only.
-- Do not add behavioral coaching in the test prompt for reuse, wait semantics, shutdown, rejection routing, or other FO operating rules.
-- If Codex FO behavior needs to change, encode that in the scaffolding under test: `SKILL.md` references, shared core, runtime adapter, or fixture/workflow structure.
-- Prefer shared runtime-switchable tests such as `test_rejection_flow.py --runtime codex` for generic workflow behavior. Use Codex-only E2E tests only for truly Codex-specific deltas that cannot be covered by the shared path.
+- Invoke only `spacedock:first-officer` (Claude) or `$first-officer` (Codex).
+- Keep the invocation prompt minimal: identify the workflow target and entity scope only. The clean pattern is one line, e.g. `f"Process all tasks through the workflow at {abs_workflow}/ to completion."` (see `test_merge_hook_guardrail.py`) or `f"Process the entity `X` through the workflow at {abs_workflow}/."` (see `test_feedback_keepalive.py`).
+- Do not add behavioral coaching in the test prompt for reuse, wait semantics, shutdown, rejection routing, keepalive, feedback-to, gate approvals, hook dialogue, or any other FO operating rule. If an FO behavior needs to change, encode that in the scaffolding under test: shared core, runtime adapter, skill references, or fixture/workflow structure.
+- Prompt coaching masks FO-contract-loading bugs. If the clean prompt surfaces a new red that the hint-laden prompt hid, that is the signal — file it as a contract-loading finding, do not revert the cleanup.
+- Exception: files that name the variable `tempt_prompt` are adversarial-input tests (e.g. `test_repo_edit_guardrail.py`, `test_scaffolding_guardrail.py`) — the tempting phrasing is the experimental variable under test. Keep as-is.
+- Prefer shared runtime-switchable tests such as `test_rejection_flow.py --runtime codex` for generic workflow behavior. Use runtime-only E2E tests only for truly runtime-specific deltas that cannot be covered by the shared path.
+
+### Strict Per-Stage Assertions (Watcher API)
+
+Live E2E tests that drive the FO through multiple ensign dispatches should assert one behavioral shape, not a soup of heuristic signals. The `FOStreamWatcher` API supports this directly:
+
+- `w.expect_dispatch_close(timeout_s, ensign_name=..., label=...) -> DispatchRecord` — block until the next ensign dispatch with a matching name-substring closes (by `SendMessage(to="team-lead", message="Done: ...")`). Raises `StepTimeout` on budget miss, `StepFailure` on early FO exit.
+- `w.dispatch_records` — post-hoc list of `DispatchRecord(ensign_name, elapsed)` for every closed ensign dispatch.
+- `DispatchBudget(soft_s=15, hard_s=60, shutdown_grace_s=10)` — per-dispatch soft (warn to fo-log + stdout) / hard (cooperative shutdown + kill on grace) budgets, threaded through `run_first_officer_streaming(dispatch_budget=...)`.
+
+Anti-patterns to avoid when writing new live E2E:
+
+- Path-A / Path-B disjunctions that accept either of two FO trajectories. If the test is about one contract, assert that contract; if both paths are worth covering, split into two tests.
+- "SKIP: pipeline did not reach stage X within budget" softeners that convert a missing signal into a pass. If the stage is required by the contract, it's a hard assertion; if it isn't, it doesn't belong in the test.
+- `milestones[...]` dicts where Phase-3 accepts any subset of keys via `or`-chains. Replace with per-dispatch `expect_dispatch_close` calls or an assertion on `w.dispatch_records`.
+- OR-chain fallbacks like `entry_contains_text(e, r"SOMETHING") or tool_use_matches(e, "Bash", command="SOMETHING")` that accept narration in place of behavior — the tool_use branch is the contract, the text branch is a tautology bait.
 
 ### Interactive PTY (`test_lib_interactive.py` + `InteractiveSession`)
 
@@ -347,6 +363,32 @@ The live workflow sets `KEEP_TEST_DIR=1` automatically and uploads each job's pr
 - `runtime-live-e2e-codex-live`
 
 For local debugging, set `KEEP_TEST_DIR=1` to preserve temp directories after test runs. Set `SPACEDOCK_TEST_TMP_ROOT=/path/to/root` to force `TestRunner` to create preserved dirs under a predictable parent directory.
+
+## Test Hygiene Follow-ups
+
+These tests carry patterns that violate the FO Prompt Discipline or Strict Per-Stage Assertions sections above. Filed during #203 cycle-7 but deferred so that cycle could stay focused on the opus-4-7 green-main failure inventory. Each row is a candidate for a focused cleanup follow-up (likely a new task entity per row, or a single umbrella entity with three items).
+
+### Tier A — structurally similar to the pre-cycle-7 `test_feedback_keepalive`
+
+| Test | Shape | Suggested rewrite |
+|---|---|---|
+| `test_rejection_flow.py` | Runtime-branched (claude vs codex two different assertion blocks) with a `milestones[...]` dict of ~8 keys consumed via OR-chains (`milestones["validation_wait"] or milestones["validation_completed"] or milestones["rejection_seen"] or milestones["follow_up_seen"]`) and disjunctions like `fo_exit == 0 or milestones["final_response"]`. | Strict per-dispatch: impl dispatch close → validation dispatch close → second impl dispatch close (rejection → fix), with `expect_dispatch_close(ensign_name="implementation" / "validation")`. Drop the milestones dict and OR-chains. Split claude and codex into two tests if the shared invariant doesn't fit both. |
+| `test_reuse_dispatch.py` | Three-way branches on dispatch counts (`len(implementation_dispatches) == 0` → pass via reuse, `>= 1` → info-not-fail, etc.) — ~27 possible pass paths for what should be two assertions: "reuse conditions match → SendMessage", "`fresh: true` → Agent()". | Assert exactly one SendMessage reuse event on analysis→implementation transition, assert exactly one fresh Agent() dispatch at validation. Drop the count-threshold branches. |
+| `test_rebase_branch_before_push.py` | 242-line body with nanny prompt (`"say 'yes, go ahead' when asked"`), pre-streaming watcher shape. Contains inherited soft fallbacks. | Strip the nanny prompt hints (the hook dialogue belongs in the merge-hook contract, not the test prompt). Migrate to `expect_dispatch_close` for any ensign dispatches + `expect` for the `git push origin main` Bash signal. |
+
+### Tier B — moderate softness
+
+| Test | Issue |
+|---|---|
+| `test_merge_hook_guardrail.py` | Uses hardcoded `timeout_s=300` on `expect_exit` and `expect`. Would benefit from per-dispatch budgets once the #203 instrumentation lands on main. Fixture variants (`hook_expected=True`/`False`) are legitimate and should stay. |
+| `test_gate_guardrail.py` | Has `"SKIP: first officer gate report not found (ensign may not have completed before budget cap)"` — classic "didn't see what I wanted → pass" softener. Either the gate report is contractually required (then it's an assertion) or it isn't (then drop the check). |
+| `test_team_fail_early_live.py` | Mixes probe-gated skips with test content. Consider splitting probe/skip logic into a fixture. |
+
+### Background and motivation
+
+The pattern being removed: live E2E tests that accumulate heuristic "milestones" (dispatch counts, text matches, file-state flags) and accept any subset via OR-chains, so the test passes as long as the FO does *something vaguely close to* the intended behavior. The failure mode is that the test flakes on any adjacent regression — and when it does flake, the signal is `StepTimeout` after 300s with no indication of which dispatch was slow or which signal was missing.
+
+The fix: pick one FO trajectory per test, assert each dispatch closes under its per-stage budget via `expect_dispatch_close`, let `w.dispatch_records` carry the post-hoc evidence. When a test needs to cover two trajectories (e.g. Path-A fresh dispatch vs Path-B in-place processing), split into two tests — one contract per test.
 
 ## File Requirements
 
