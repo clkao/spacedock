@@ -89,29 +89,48 @@ def test_feedback_keepalive(test_project, model, effort):
     abs_workflow = t.test_project_dir / "keepalive-pipeline"
     prompt = f"Process all tasks through the workflow at {abs_workflow}/ to terminal completion."
 
-    # Keep-alive sentinel: under `claude -p`, a turn ending with text-only
-    # emits stop_reason=end_turn and closes the prompt cycle; the next cycle
-    # starts with fresh context and opus-4-7-low hallucinates reasons to tear
-    # down the team. This sentinel file forces every idle turn to end with a
-    # tool_use (stop_reason=tool_use) instead of text-only, preserving the
-    # cycle until the test harness signals workflow completion.
+    # Headless runtime workaround: under `claude -p`, the InboxPoller React
+    # hook never fires (anthropics/claude-code#26426), so inbox-delivered
+    # teammate messages accumulate on disk but never surface to the FO's
+    # stream. Two compounding problems:
+    #   1. FO can't observe ensign `Done:` messages → appears stuck forever.
+    #   2. A turn ending with text-only emits stop_reason=end_turn → closes
+    #      the prompt cycle → next cycle starts with fresh context →
+    #      opus-4-7-low hallucinates teardown.
+    # Fix: instruct the FO to end every idle turn with a Bash invocation of
+    # the inbox-polling script. The script blocks on the team-lead inbox
+    # JSON file and prints any matching unread entries, surfacing real
+    # teammate `Done:` messages to the FO as Bash tool_result. This both
+    # keeps the cycle open (stop_reason=tool_use) and gives the FO the
+    # information the missing InboxPoller would have provided.
     keepalive_done = t.test_project_dir / ".fo-keepalive-done"
+    poll_script = t.repo_root / "scripts" / "fo_inbox_poll.py"
+    seen_file = t.test_project_dir / ".fo-inbox-seen"
     headless_hint = (
         f"The spacedock plugin directory is at `{t.repo_root}`. Use it "
         f"directly; do NOT run `find / -name claude-team` — the binaries you "
         f"need are `{t.repo_root}/skills/commission/bin/status` and "
         f"`{t.repo_root}/skills/commission/bin/claude-team`.\n\n"
-        f"HEADLESS KEEP-ALIVE RULE. You are running in `claude -p` headless "
-        f"mode. The file `{keepalive_done}` signals end-of-workflow. Until "
-        f"that file exists, every turn MUST end with a tool_use, not with "
-        f"text. When your only work is to wait for an ensign's completion "
-        f"signal, end the turn by running the Bash tool with command "
-        f"`test -f {keepalive_done}` as a no-op keep-alive probe. Do NOT "
-        f"emit `SendMessage(shutdown_request)`, `TeamDelete`, or any other "
-        f"teardown action while awaiting an ensign. The ensign completion "
-        f"signal is a user-role message starting with `Done:` delivered via "
-        f"the team inbox. Once all ensigns have completed and the workflow "
-        f"is done, you may end with text."
+        f"HEADLESS INBOX-POLLING RULE. You are running in `claude -p` headless "
+        f"mode. Per anthropics/claude-code#26426, inbox-delivered teammate "
+        f"messages accumulate on disk at `$HOME/.claude/teams/{{team_name}}/"
+        f"inboxes/team-lead.json` but are NOT surfaced to your stream. The "
+        f"workaround is to surface them yourself via an external polling "
+        f"script.\n\n"
+        f"Until the sentinel file `{keepalive_done}` exists, every turn "
+        f"MUST end with a Bash tool_use (not text) that runs the poll "
+        f"script:\n\n"
+        f"    python3 {poll_script} --home \"$HOME\" --pattern 'Done:' "
+        f"--timeout 10 --seen-file {seen_file}\n\n"
+        f"The script blocks up to 10 seconds waiting for a new inbox "
+        f"message whose text contains 'Done:'. Its stdout contains the "
+        f"teammate message (or is empty on timeout, in which case repeat). "
+        f"Treat any 'from: spacedock-ensign-...' block with 'text: Done: "
+        f"... completed {{stage}}' as the teammate's completion signal for "
+        f"that stage — proceed to the next workflow step per shared-core "
+        f"discipline. Never emit `SendMessage(shutdown_request)`, "
+        f"`TeamDelete`, or other teardown while awaiting an ensign. Once "
+        f"the workflow reaches terminal completion, you may end with text."
     )
 
     with run_first_officer_streaming(
