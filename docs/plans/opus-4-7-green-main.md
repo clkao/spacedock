@@ -1201,3 +1201,73 @@ With `DispatchBudget(soft_s=30.0, hard_s=150.0, shutdown_grace_s=10.0)` on the s
 3. Verify `make test-static` stays green (no test_dispatch_budget regressions). No new code commit if clean.
 
 Step-4 (opus-low N=3) runs after the port commits land.
+
+## Stage Report: implementation (cycle 8 — merge_hook_guardrail greening via cycle-7 pattern)
+
+**Target:** ≥ 2/3 PASS at opus-low. **Actual:** **1/3 PASS**. Target NOT met — STOPPING per step-4 brief directive "If fail, STOP and report."
+
+### Commits
+
+- `0116050e` propose: cycle-8 merge_hook per-stage budgets (bare-mode port of cycle-7)
+- `5498ddbe` impl: cycle-8 merge_hook — port `expect_dispatch_close` + `DispatchBudget` (bare mode)
+
+### Budgets applied
+
+```
+PER_DISPATCH_OVERALL_S   = 150
+PER_DISPATCH_BUDGET_S    = 120
+SUBPROCESS_EXIT_BUDGET_S = 45
+DispatchBudget(soft_s=30.0, hard_s=150.0, shutdown_grace_s=10.0)
+```
+
+Stage-B (merge-hook-fired Bash tool_use) dropped from FO-stream assertions — Phase-3's `check_merge_outcome(hook_expected=True)` filesystem check (line 204) is authoritative. `tool_use_matches` import removed.
+
+### Local verification: opus-low N=3
+
+Environment: `claude --version` 2.1.114, worktree HEAD `5498ddbe`. Evidence dir: `/tmp/203-cycle8-mergehook-evidence/`.
+
+| Run | Wallclock | Result | Failure signature |
+|---|---|---|---|
+| 1 | 173s | **PASS** | 9/9 checks; Phase-2 dispatch closed cleanly; FO exited under SUBPROCESS_EXIT_BUDGET_S |
+| 2 | 264s | **FAIL** | 8/9 checks; `FAIL: merge hook fired marker exists` (Phase-3 filesystem check). Phase-2 dispatch closed at 42.8s (under budget) but hook never ran — ensign got `shutdown_request` + `TeamDelete` before work completed. See fo-log analysis below. |
+| 3 | 156s | **FAIL** | `StepTimeout` on `merge-hook ensign dispatch close did not close within 150s overall`. 30s soft-warning fired at elapsed 30.06s. Dispatch was open at the `overall_timeout_s=150` cliff. |
+
+Preserved artifacts: `opus-low-run{1,2,3}.log` (pytest), `opus-low-run2-fo-log.jsonl`, `opus-low-run2-fo-nomods-log.jsonl`. Run1 and run3 fo-logs were cleaned up by pytest (only failures with `Test dir preserved` survived; run1 passed; run3 raised inside the `with` and pytest did not preserve — a harness gap worth tracking separately).
+
+### Root cause of reds (run2 fo-log analysis)
+
+**Run2 — the critical signal.** My cycle-8 step-2 "scope" section framed merge_hook as bare-mode based on stale evidence (cycle-5 reports, pre-TeamCreate). The actual runtime is teams-mode — at L27 the FO calls `TeamCreate`, at L39 the Agent() dispatch is teams-spawn (L41: `"Spawned successfully."`), and dispatch close lands at L55 as `system subtype=task_notification status=completed`. Per `scripts/test_lib.py:1356-1363` this IS a supported close anchor, but between L43 `RESULT success` (FO ends a `claude -p` cycle at 69s) and L55 task_notification (dispatch actually completed), the FO runs through a **fresh-context `system init` at L44** and hallucinates teardown:
+
+- L51: `SendMessage(shutdown_request, reason="session ending")` to the still-working ensign
+- L53: `TeamDelete` (blocked — team has active member)
+- L57: `Bash sleep 30; cat ...` waiting
+- L62-64: second `TeamDelete` + `shutdown_request(reason="work complete")`
+
+This is the exact anthropics/claude-code#26426-class fresh-context teardown pattern that motivated cycle-7's keep-alive sentinel + inbox-poll discipline for `test_feedback_keepalive.py`. The ensign was interrupted mid-work by the shutdown_request, so `_merge-hook-fired.txt` never got written — Phase-3's filesystem check failed.
+
+**Run3** — different signature. Dispatch elapsed >150s, tripped `expect_dispatch_close` overall_timeout. Soft budget warning fired at 30s. Either host-variance slowness or another hallucination-teardown instance where the task_notification never surfaced before the wall. Without the fo-log (not preserved) we can't distinguish. Run1 cleanly closed in <150s and passed end-to-end.
+
+### Correction to step-2 analysis
+
+My step-2 assertion that merge_hook is bare-mode and does NOT need inbox-poll + keep-alive scaffolding is **wrong**. The test engages teams mode via `TeamCreate` at FO bootstrap, uses teams-spawn for the ensign Agent(), and relies on `task_notification` as the close anchor — which under `claude -p` interleaves with fresh-context `system init` cycles that the FO hallucinates teardown across.
+
+The captain's cycle-8 brief direction — "port cycle-7 pattern … inbox-poll + keepalive + subagent-jsonl close anchors" — was correct for this test. My scoping clarification message to team-lead (pre-code) proceeded on the wrong premise; I should have run N=1 first to confirm runtime mode before committing to a simplification that dropped the keep-alive scaffolding.
+
+### What this cycle shipped
+
+- **Tight per-stage budgets applied.** When the test passes (run1), it passes in 173s with structured dispatch-elapsed logging (`[OK] ensign dispatch closed in 42.8s`) instead of the pre-cycle-8 "wallclock 173s, no visibility" signal. Diagnostic quality leap analogous to cycle-7.
+- **StepTimeout at 150s surfaces faster** than the old 300s wall (run3 failed at 156s instead of 378s+).
+- **Test_static stays green** at 475/475.
+
+Partial port. Captain directive "per-stage timeout tightening FIRST" was honored and produced real diagnostic improvement; the follow-on keep-alive + inbox-poll port was ruled out in step-2 on a wrong premise and is NOT in this cycle's commits. A cycle-9 should re-apply the feedback_keepalive pattern to merge_hook (headless append-system-prompt hint with inbox-poll script + sentinel file + inbox-poll close anchor) to rescue the 2/3 and 3/3 runs.
+
+### For the next cycle
+
+1. Add teams-mode `@pytest.mark.teams_mode` marker (confirms runtime intent).
+2. Port the full cycle-7 scaffolding from `test_feedback_keepalive.py:124-164` (keep-alive sentinel, inbox-poll Bash hint, `--append-system-prompt` headless discipline, poll-script invocation).
+3. Keep the tight dispatch budgets from this cycle.
+4. Re-run N=3 opus-low. Target 2/3.
+
+### Summary
+
+Tight per-stage budgets ported from cycle-7 to `test_merge_hook_guardrail.py` (commits `0116050e`, `5498ddbe`), `make test-static` green (475/475), opus-low N=3 yielded 1/3 PASS — **below the ≥2/3 target**. Root cause of reds: merge_hook is teams-mode (not bare-mode as step-2 assumed), and under `claude -p` the FO hallucinates teardown across fresh-context `system init` cycles, interrupting the ensign mid-work. The cycle-7 keep-alive + inbox-poll scaffolding was NOT ported this cycle due to the step-2 scoping error; a cycle-9 should apply it. No haiku N=3 (step-5 gated on opus-low green). STOPPING cleanly per step-4 brief directive.
