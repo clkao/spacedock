@@ -1459,3 +1459,70 @@ Captain can dispatch cycle-11 with this fix + N=3 opus-low verification.
 
 ### Summary
 One-line xfail-fix committed for haiku-teams keepalive. Two diagnosis-only reports with targeted fix proposals: merge_hook is a one-line infrastructure fix (add `"work"` stage to inbox-poll anchor); standing_teammate is a test-fixture-level fix (make on-disk stage-report write explicit in the entity body). Static stays green 475/475.
+
+## Stage Report: implementation (cycle 9 — merge_hook N=3 teams-mode verification)
+
+**Target:** ≥ 2/3 PASS at opus-low teams-mode. **Actual:** **3/3 PASS.** Exceeded target.
+
+### Cycle-9 commits
+
+- `7f44763a` impl: teams-mode scaffolding port (@pytest.mark.teams_mode, headless keepalive hint, inbox-poll, sentinel release, per-phase sentinel names).
+- `34dc1f0b` fix: drop FO-stream `Bash _merge-hook-fired.txt` expect; rely on Phase-3 `check_merge_outcome` filesystem check.
+
+### First N=3 attempt (post-7f44763a, pre-34dc1f0b): 0/3
+
+All three runs failed at the post-dispatch-close `w.expect(Bash _merge-hook-fired.txt, timeout=90s)` step. Evidence at `/tmp/203-cycle9-mergehook-n3/run{1,2,3}.log` + `run{1,2}-fo-log.jsonl`.
+
+Run 1 fo-log timeline inspection (`/tmp/203-cycle9-mergehook-n3/run1-fo-log.jsonl`) revealed the root cause:
+- L40 Agent tool_use dispatches the ensign (tuid=toolu_01VU)
+- L41 system task_started (same tuid)
+- L44-45 local Bash `Poll inbox` fires task_started/task_notification with a DIFFERENT tuid (toolu_01MW) — ignored by watcher since not in `_open_dispatches`
+- L48 user tool_result contains the inbox-poll script's output with `from: spacedock-ensign-merge-hook-entity-work` + `text: Done: Merge hook test entity completed work.` — this is the inbox-poll close anchor (`_parse_inbox_done_sender` at `scripts/test_lib.py:1208`) and correctly closes the dispatch
+- L61 + L64 assistant tool_use Bash with command containing `_merge-hook-fired.txt` — the hook DOES fire, but AFTER dispatch close
+- L73 result success (first claude-p cycle ends) → L74 system init (new cycle) → L76 result success → L77 system init → L81 TeamDelete → L84 result success
+
+Under the teams plugin, `claude -p` cycles through multiple `result success` / `system init` transitions while the FO drives the workflow. Between cycles, `proc.poll()` returns non-None momentarily. `FOStreamWatcher.expect()` sees `proc.poll() != None` and raises `StepFailure` before drainng the stream for the late-arriving Bash tool_use.
+
+### Fix (34dc1f0b)
+
+Dropped the FO-stream `Bash _merge-hook-fired.txt` assertion. Phase-3's `check_merge_outcome(hook_expected=True)` at test_merge_hook_guardrail.py:278-284 verifies the file exists on disk with the entity slug — that IS the authoritative contract. The stream assertion was a redundant secondary check that happened to race with the FO's multi-cycle teams-mode flow.
+
+Post-dispatch-close, the test now:
+1. Touches the keepalive sentinel (FO may wind down text-only per the headless rule)
+2. Waits SUBPROCESS_EXIT_BUDGET_S=180s for FO exit (try/except, non-blocking)
+3. Phase-3 filesystem check validates the hook actually ran
+
+### Second N=3 attempt (post-34dc1f0b): 3/3 PASS
+
+| Run | Wallclock | Result |
+|---|---|---|
+| 1 | 242s | PASS |
+| 2 | 252s | PASS |
+| 3 | 250s | PASS |
+
+Command per cycle (captain template):
+
+```
+unset CLAUDECODE && KEEP_TEST_DIR=1 CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 \
+  uv run pytest tests/test_merge_hook_guardrail.py::test_merge_hook_guardrail \
+  --runtime claude --model opus --effort low -v
+```
+
+Evidence at `/tmp/203-cycle9-mergehook-n3-v2/run{1,2,3}.log` + preserved tmp dirs. `make test-static`: 475/475 pass on both `7f44763a` and `34dc1f0b`.
+
+### Captain-level follow-up to flag
+
+Per captain's note: `test_merge_hook_guardrail` until `7f44763a` had no mode-marker while CI-E2E-OPUS forces `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` at the job-env level (`.github/workflows/runtime-live-e2e.yml:401`), silently pinning the test to teams-mode regardless of its file-level markers. This is a drift class worth a tracker — any mode-agnostic test inherits the invocation env without awareness, which cost this cycle a step-2 scoping error. Captain to file separately; no action in cycle-9.
+
+### What this cycle shipped
+
+- Explicit `@pytest.mark.teams_mode` marker — future readers see mode intent directly.
+- Headless keepalive prose via `--append-system-prompt` — prevents #26426 fresh-context teardown hallucination.
+- Inbox-poll Bash keepalive invocation — surfaces ensign `Done:` messages under `claude -p` (cycle-7 pattern, reused).
+- Separate per-phase sentinels (`hook`, `nomods`) — avoids cross-phase file interference in the single test-project dir.
+- Tight dispatch budgets from cycle-8 kept — contribute diagnostic quality (structured elapsed logging, 150s wall vs old 300s noise).
+- Removed the redundant FO-stream hook-fired assertion that raced with the teams-plugin multi-cycle flow.
+
+### Summary
+
+Cycle-9 ports the cycle-7 teams-mode scaffolding to `test_merge_hook_guardrail.py` and drops the racy FO-stream hook-fired assertion in favor of the authoritative Phase-3 filesystem check. Two discrete commits (`7f44763a`, `34dc1f0b`). `make test-static` 475/475. **Local opus-low teams-mode N=3: 3/3 PASS** (242s, 252s, 250s) — target ≥2/3 exceeded. Haiku N=3 skipped per captain guidance (haiku-low has its own #200-class drift outside cycle-9 scope). The no-marker/CI-env-forcing drift class flagged for captain follow-up tracker.
