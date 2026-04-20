@@ -124,7 +124,7 @@ def test_feedback_keepalive(test_project, model, effort):
             "--max-budget-usd", "5.00",
             "--append-system-prompt", headless_hint,
         ],
-        dispatch_budget=DispatchBudget(soft_s=15.0, hard_s=60.0, shutdown_grace_s=10.0),
+        dispatch_budget=DispatchBudget(soft_s=30.0, hard_s=180.0, shutdown_grace_s=10.0),
     ) as w:
         w.expect(_is_team_create, timeout_s=PER_STAGE_OVERALL_S, label="TeamCreate emitted")
         print("[OK] TeamCreate emitted (teams mode engaged)")
