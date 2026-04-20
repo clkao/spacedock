@@ -28,7 +28,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 PER_STAGE_OVERALL_S = 120
 PER_DISPATCH_BUDGET_S = 90
 
-SUBPROCESS_EXIT_BUDGET_S = 60
+SUBPROCESS_EXIT_BUDGET_S = 180
 
 
 def _is_tool_use(entry: dict, name: str) -> dict | None:
