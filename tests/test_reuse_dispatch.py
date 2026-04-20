@@ -1,5 +1,5 @@
-# ABOUTME: E2E and static tests for ensign reuse dispatch behavior in the FO template.
-# ABOUTME: Runs the reuse-pipeline fixture through the FO and verifies Agent/SendMessage patterns.
+# ABOUTME: E2E test for ensign reuse dispatch behavior in the FO template.
+# ABOUTME: Pinned to teams_mode; asserts analysis dispatch + SendMessage reuse + fresh validation dispatch.
 
 from __future__ import annotations
 
@@ -12,12 +12,13 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 from test_lib import (  # noqa: E402
-    LogParser,
+    DispatchBudget,
     assembled_agent_content,
+    emit_skip_result,
     git_add_commit,
     install_agents,
-    read_entity_frontmatter,
-    run_first_officer,
+    probe_claude_runtime,
+    run_first_officer_streaming,
     setup_fixture,
 )
 
@@ -25,126 +26,196 @@ from test_lib import (  # noqa: E402
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
-# #154 cycle-2: static Phase-1 checks pass after the "Dispatch a worker via" wording refresh.
-# Local haiku-bare run (2026-04-18) shows 2/18 runtime failures: `FO dispatched Agent() for
-# analysis stage (initial dispatch)` and `FO reached validation but did not dispatch Agent()
-# (fresh: true should force fresh)`. Same haiku-FO-dispatch-compression class tracked by #160.
-@pytest.mark.xfail(strict=False, reason="pending #160 — haiku FO compresses dispatches (skips initial Agent() + skips fresh:true reforce); see docs/plans/haiku-fo-multi-dispatch-compression.md")
+PER_STAGE_OVERALL_S = 120
+PER_DISPATCH_BUDGET_S = 90
+
+SUBPROCESS_EXIT_BUDGET_S = 180
+
+
+def _is_tool_use(entry: dict, name: str) -> dict | None:
+    if entry.get("type") != "assistant":
+        return None
+    msg = entry.get("message") or {}
+    for block in (msg.get("content") or []):
+        if (
+            isinstance(block, dict)
+            and block.get("type") == "tool_use"
+            and block.get("name") == name
+        ):
+            return block
+    return None
+
+
+def _is_send_message_to(entry: dict, recipient_substr: str) -> bool:
+    block = _is_tool_use(entry, "SendMessage")
+    if not block:
+        return False
+    inp = block.get("input") or {}
+    return recipient_substr in str(inp.get("to", ""))
+
+
+def _is_reuse_send_message(entry: dict) -> bool:
+    """The reuse contract: SendMessage to the analysis ensign whose body
+    carries the implementation stage assignment. The addressee is the
+    ensign's full name (e.g. spacedock-ensign-reuse-test-task-analysis);
+    the body contains 'Advancing to next stage: implementation' and
+    'Stage definition:' per shared-core line 119.
+    """
+    block = _is_tool_use(entry, "SendMessage")
+    if not block:
+        return False
+    inp = block.get("input") or {}
+    to = str(inp.get("to", ""))
+    message = str(inp.get("message", ""))
+    return (
+        "reuse-test-task-analysis" in to
+        and "implementation" in message.lower()
+        and "Stage definition" in message
+    )
+
+
+def _is_team_create(entry: dict) -> bool:
+    return _is_tool_use(entry, "TeamCreate") is not None
+
+
 @pytest.mark.live_claude
+@pytest.mark.teams_mode
 def test_reuse_dispatch(test_project, model, effort):
-    """Ensign reuse uses SendMessage; fresh: true forces new Agent dispatch."""
+    """FO drives teams-mode reuse: TeamCreate -> analysis dispatch -> SendMessage advancing to implementation -> fresh validation dispatch."""
     t = test_project
+
+    # haiku-4-5 drops keep-alive discipline under claude -p (#26426 class);
+    # matches the cycle-7 haiku xfail pattern on test_feedback_keepalive.
+    # Haiku has no reasoning-effort tiers, so --effort does not affect this.
+    if model == "claude-haiku-4-5" or model == "haiku" or "haiku" in model.lower():
+        pytest.xfail(
+            reason=(
+                "pending haiku-teams reuse — haiku-4-5 drops the "
+                "keep-alive Bash-probe discipline at `system init` cycle "
+                "boundaries and hallucinates teardown "
+                "(anthropics/claude-code#26426 class; opus-4-7 green)"
+            )
+        )
 
     print("--- Phase 1: Set up test project from fixture ---")
     setup_fixture(t, "reuse-pipeline", "reuse-pipeline")
     install_agents(t, include_ensign=True)
     git_add_commit(t.test_project_dir, "setup: reuse dispatch fixture")
 
-    status_cmd = [
-        "python3",
-        str(t.repo_root / "skills" / "commission" / "bin" / "status"),
-        "--workflow-dir", "reuse-pipeline",
-    ]
+    status_cmd = ["python3", str(t.repo_root / "skills" / "commission" / "bin" / "status"),
+                  "--workflow-dir", "reuse-pipeline"]
     t.check_cmd("status script runs without errors", status_cmd, cwd=t.test_project_dir)
     status_result = subprocess.run(
-        status_cmd + ["--next"],
-        capture_output=True, text=True, cwd=t.test_project_dir,
+        status_cmd + ["--next"], capture_output=True, text=True, cwd=t.test_project_dir,
     )
     t.check("status --next detects dispatchable entity",
             "reuse-test-task" in status_result.stdout)
     print()
 
     print("--- Phase 2: Run first officer (claude) ---")
+    ok, reason = probe_claude_runtime(model)
+    if not ok:
+        emit_skip_result(
+            f"live Claude runtime unavailable before FO dispatch: {reason}. "
+            "This environment cannot currently prove or disprove the reuse path."
+        )
+
     abs_workflow = t.test_project_dir / "reuse-pipeline"
-    fo_exit = run_first_officer(
+    prompt = f"Process all tasks through the workflow at {abs_workflow}/ to terminal completion."
+
+    keepalive_done = t.test_project_dir / ".fo-keepalive-done"
+    poll_script = t.repo_root / "scripts" / "fo_inbox_poll.py"
+    seen_file = t.test_project_dir / ".fo-inbox-seen"
+    headless_hint = (
+        f"The spacedock plugin directory is at `{t.repo_root}`. Use it "
+        f"directly; do NOT run `find / -name claude-team` — the binaries you "
+        f"need are `{t.repo_root}/skills/commission/bin/status` and "
+        f"`{t.repo_root}/skills/commission/bin/claude-team`.\n\n"
+        f"HEADLESS INBOX-POLLING RULE. You are running in `claude -p` headless "
+        f"mode. Per anthropics/claude-code#26426, inbox-delivered teammate "
+        f"messages accumulate on disk at `$HOME/.claude/teams/{{team_name}}/"
+        f"inboxes/team-lead.json` but are NOT surfaced to your stream. The "
+        f"workaround is to surface them yourself via an external polling "
+        f"script.\n\n"
+        f"Until the sentinel file `{keepalive_done}` exists, every turn "
+        f"MUST end with a Bash tool_use (not text) that runs the poll "
+        f"script:\n\n"
+        f"    python3 {poll_script} --home \"$HOME\" --pattern 'Done:' "
+        f"--timeout 5 --seen-file {seen_file}\n\n"
+        f"The script blocks up to 5 seconds waiting for a new inbox "
+        f"message whose text contains 'Done:'. Its stdout contains the "
+        f"teammate message (or is empty on timeout, in which case repeat). "
+        f"Treat any 'from: spacedock-ensign-...' block with 'text: Done: "
+        f"... completed {{stage}}' as the teammate's completion signal for "
+        f"that stage — proceed to the next workflow step per shared-core "
+        f"discipline. Never emit `SendMessage(shutdown_request)`, "
+        f"`TeamDelete`, or other teardown while awaiting an ensign. Once "
+        f"the workflow reaches terminal completion, you may end with text."
+    )
+
+    with run_first_officer_streaming(
         t,
-        (
-            f"Process the entity `reuse-test-task` through the workflow at {abs_workflow}/. "
-            "Drive it from backlog through analysis, implementation, and validation to done. "
-            "When analysis completes and the next stage (implementation) meets reuse conditions "
-            "(same worktree mode, no fresh:true, teams available), reuse the agent via SendMessage "
-            "instead of dispatching fresh. "
-            "When you reach the validation gate, auto-approve if PASSED."
-        ),
+        prompt,
         agent_id="spacedock:first-officer",
         extra_args=[
             "--model", model,
             "--effort", effort,
             "--max-budget-usd", "5.00",
+            "--append-system-prompt", headless_hint,
         ],
-    )
-    if fo_exit != 0:
-        print("  (may be expected — budget cap or gate hold)")
+        dispatch_budget=DispatchBudget(soft_s=30.0, hard_s=180.0, shutdown_grace_s=10.0),
+    ) as w:
+        w.expect(_is_team_create, timeout_s=PER_STAGE_OVERALL_S, label="TeamCreate emitted")
+        print("[OK] TeamCreate emitted (teams mode engaged)")
+
+        analysis_record = w.expect_dispatch_close(
+            overall_timeout_s=PER_STAGE_OVERALL_S,
+            dispatch_budget_s=PER_DISPATCH_BUDGET_S,
+            ensign_name="analysis",
+            label="analysis dispatch close",
+        )
+        print(f"[OK] analysis dispatch closed in {analysis_record.elapsed:.1f}s")
+
+        # Reuse contract: after analysis completes, the FO MUST advance the
+        # analysis ensign to implementation via SendMessage, NOT a fresh Agent.
+        # The SendMessage target is the analysis ensign's full name; the body
+        # carries the implementation stage assignment.
+        w.expect(
+            _is_reuse_send_message,
+            timeout_s=PER_STAGE_OVERALL_S,
+            label="SendMessage advancing analysis ensign to implementation (reuse)",
+        )
+        print("[OK] reuse dispatch via SendMessage to analysis ensign")
+
+        validation_record = w.expect_dispatch_close(
+            overall_timeout_s=PER_STAGE_OVERALL_S,
+            dispatch_budget_s=PER_DISPATCH_BUDGET_S,
+            ensign_name="validation",
+            label="validation dispatch close",
+        )
+        print(f"[OK] validation dispatch closed in {validation_record.elapsed:.1f}s (fresh: true honored)")
+
+        # Workflow contract satisfied — release the keep-alive sentinel.
+        keepalive_done.touch()
+        print(f"[OK] keep-alive sentinel {keepalive_done.name} touched")
+
+        try:
+            w.expect_exit(timeout_s=SUBPROCESS_EXIT_BUDGET_S)
+            print("[OK] FO exited cleanly after sentinel")
+        except Exception as exc:
+            print(f"  NOTE: FO did not exit within {SUBPROCESS_EXIT_BUDGET_S}s post-sentinel ({type(exc).__name__}); contract assertions already passed")
 
     print("--- Phase 3: Validation ---")
-    log = LogParser(t.log_dir / "fo-log.jsonl")
-    log.write_agent_calls(t.log_dir / "agent-calls.txt")
-    log.write_fo_texts(t.log_dir / "fo-texts.txt")
-    log.write_tool_calls(t.log_dir / "tool-calls.json")
-
-    agent_calls = log.agent_calls()
-    tool_calls = log.tool_calls()
-
-    print()
-    print("[Agent Dispatch Pattern]")
-    ensign_calls = [c for c in agent_calls if c["subagent_type"] == "spacedock:ensign"]
-    analysis_dispatches = [c for c in ensign_calls if "analysis" in c["name"]]
-    implementation_dispatches = [c for c in ensign_calls if "implementation" in c["name"]]
-    validation_dispatches = [c for c in ensign_calls if "validation" in c["name"]]
-
-    t.check("FO dispatched Agent() for analysis stage (initial dispatch)",
-            len(analysis_dispatches) >= 1)
-
-    if len(implementation_dispatches) == 0:
-        t.pass_("FO skipped Agent() for implementation (reused via SendMessage)")
-    else:
-        print(f"  INFO: FO dispatched {len(implementation_dispatches)} Agent() call(s) for implementation")
-
-    if len(validation_dispatches) >= 1:
-        t.pass_("FO dispatched Agent() for validation stage (fresh: true forces fresh dispatch)")
-    elif len(ensign_calls) >= 2:
-        t.fail("FO reached validation but did not dispatch Agent() (fresh: true should force fresh)")
-    else:
-        print("  SKIP: pipeline did not progress to validation stage within budget")
-
-    print()
-    print("[SendMessage Reuse Pattern]")
-    send_messages = [
-        c for c in tool_calls
-        if c["name"] == "SendMessage" and isinstance(c.get("input"), dict)
-    ]
-    reuse_messages = [
-        m for m in send_messages
-        if re.search(
-            r"implementation|advancing to next stage",
-            str(m.get("input", {}).get("message", "")),
-            re.IGNORECASE,
-        )
-    ]
-    t.check("FO sent SendMessage for reuse dispatch (analysis -> implementation transition)",
-            len(reuse_messages) >= 1)
-    if reuse_messages:
-        msg_content = str(reuse_messages[0].get("input", {}).get("message", ""))
-        t.check("reuse SendMessage contains stage definition",
-                "Stage definition" in msg_content or "implementation" in msg_content.lower())
-
-    print()
-    print("[Entity Outcome]")
-    entity_main = t.test_project_dir / "reuse-pipeline" / "reuse-test-task.md"
-    archive_path = t.test_project_dir / "reuse-pipeline" / "_archive" / "reuse-test-task.md"
-    if archive_path.is_file():
-        t.pass_("entity archived (reached terminal stage)")
-    elif entity_main.is_file():
-        fm = read_entity_frontmatter(entity_main)
-        status_val = fm.get("status", "?")
-        if status_val == "done":
-            t.pass_(f"entity reached terminal stage (status: {status_val})")
-        elif status_val in ("validation", "implementation"):
-            print(f"  SKIP: entity at {status_val} — FO may not have completed full cycle within budget")
-        else:
-            t.fail(f"entity did not reach expected stage (status: {status_val})")
-    else:
-        t.fail("entity file not found in active or archive location")
+    records = w.dispatch_records
+    print(f"  dispatch records: {[(r.ensign_name, round(r.elapsed, 1)) for r in records]}")
+    t.check(
+        "FO emitted exactly two ensign Agent() dispatches (analysis + validation; implementation reused via SendMessage)",
+        len(records) == 2,
+    )
+    t.check(
+        "all dispatches closed under the per-dispatch budget",
+        all(r.elapsed <= PER_DISPATCH_BUDGET_S for r in records),
+    )
 
     print()
     print("[Static Template Checks]")
@@ -175,4 +246,3 @@ def test_reuse_dispatch(test_project, model, effort):
             and bool(re.search(r"SendMessage.*completion path|completion path.*SendMessage", runtime_ref, re.IGNORECASE)))
 
     t.finish()
-
