@@ -1,15 +1,15 @@
 ---
 id: "209"
 title: "Port test_dispatch_completion_signal to cycle-7 pattern — streaming watcher + inbox-poll keep-alive + teams-mode-pinned contract"
-status: implementation
+status: done
 source: "entity #198 (fo-runtime-test-failures-post-154) — test currently xfailed on team-mode completion-signal exit hang; cycle-7 identified anthropics/claude-code#26426 as the upstream root cause and provided the keep-alive + inbox-poll workaround"
 started: 2026-04-20T06:47:24Z
-completed:
-verdict:
+completed: 2026-04-20T14:03:00Z
+verdict: PASSED
 score: 0.65
-worktree: .worktrees/spacedock-ensign-test-dispatch-completion-signal-cycle7-port
+worktree: 
 issue:
-pr:
+pr: #140
 mod-block: merge:pr-merge
 ---
 

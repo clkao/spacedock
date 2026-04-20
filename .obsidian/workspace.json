@@ -185,14 +185,16 @@
   },
   "active": "342d56225b1d3538",
   "lastOpenFiles": [
+    "docs/plans/test-reuse-dispatch-cycle7-port.md",
+    "docs/plans/test-dispatch-completion-signal-cycle7-port.md",
+    "docs/plans/_archive/test-reuse-dispatch-cycle7-port.md",
+    "docs/plans/_archive/test-dispatch-completion-signal-cycle7-port.md",
     "tests/test_fo_bootstrap_teamcreate_discipline.py",
     "tests/test_dispatch_budget.py",
     "scripts/fo_inbox_poll.py",
-    "docs/plans/test-reuse-dispatch-cycle7-port.md",
     "docs/plans/test-repo-edit-guardrail-mod-creation-drift.md",
     "docs/plans/test-rejection-flow-cycle7-port.md",
     "docs/plans/test-output-format-default-path-runtime-drift.md",
-    "docs/plans/test-dispatch-completion-signal-cycle7-port.md",
     "docs/plans/test-commission-skill-output-regressions.md",
     "docs/plans/test-checklist-e2e-runtime-text-assertion-fix.md",
     "docs/plans/standing-teammate-spawn-prompt-audit.md",
@@ -210,7 +212,6 @@
     "docs/plans/_evidence/green-opus-4-7-full-suite/cycle5/standing-run1.log",
     "docs/plans/_evidence/green-opus-4-7-full-suite/cycle5/standing-run1-stats.txt",
     "docs/plans/_evidence/green-opus-4-7-full-suite/cycle5/standing-run1-fo-log.jsonl",
-    "docs/plans/_evidence/green-opus-4-7-full-suite/cycle5/gate-run2.log",
     "docs/plans/_evidence/green-opus-4-7-full-suite/cycle5/standing-run1-archived.md",
     "docs/plans/_debriefs/_pending-notes.md",
     "docs/plans/_debriefs/2026-04-18-02.md",
@@ -219,7 +220,6 @@
     "docs/plans/_archive/streaming-watcher-over-filesystem-polling.md",
     "docs/plans/_archive/separate-ac-from-checklist-entity-vs-stage.md",
     "docs/plans/_archive/refresh-live-test-assertions-after-skill-preload.md",
-    "docs/plans/_archive/opus-4-7-standing-teammate-roundtrip-flakiness.md",
-    "docs/plans/_archive/opus-4-7-green-main.md"
+    "docs/plans/_archive/opus-4-7-standing-teammate-roundtrip-flakiness.md"
   ]
 }
