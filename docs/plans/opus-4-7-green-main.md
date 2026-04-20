@@ -1638,3 +1638,26 @@ def test_expect_dispatch_close_matches_case_insensitive(tmp_path):
 - Cycle-7 round-6d local green: `/tmp/keepalive-r6d/spacedock-test-aavel027/fo-log.jsonl` (preserved)
 
 No code committed this cycle. Captain to dispatch implementation for the two-line change to `expect_dispatch_close` (lines 1523 and 1530) + the offline test case. Expected turnaround: ~10 min to edit + run `make test-static` + commit + push + trigger CI.
+
+## Stage Report: implementation (cycle 13 — feedback_keepalive case-insensitive fix)
+
+Applied cycle-12's diagnosed fix. Narrow, two-site edit in `scripts/test_lib.py` + one offline regression test. No scope expansion.
+
+### Changes
+
+- `scripts/test_lib.py` (commit `8cb1ef9c`): changed `expect_dispatch_close` substring-match at lines 1523 and 1530 from `ensign_name in record.ensign_name` to `ensign_name.lower() in record.ensign_name.lower()`. Mirrors the already-case-insensitive pattern in `_find_open_dispatch_for_sender` (lines 1251-1253).
+- `tests/test_dispatch_budget.py` (commit `426fe5a7`): added `test_expect_dispatch_close_name_match_is_case_insensitive` locking in both directions — capitalized `ensign_name` ('Implementation stage') matches lowercase stage ('implementation'), and uppercase stage ('IMPLEMENTATION') matches mixed-case dispatch name ('Dispatch implementation').
+
+### Verification
+
+- `make test-static`: **476 passed**, 22 deselected, 10 subtests passed in 24.00s. One more than cycle-11's 475/475 baseline — matches the one new test.
+- Push: fast-forward `f51490be..426fe5a7` → `origin/spacedock-ensign/opus-4-7-green-main`. No force-with-lease required.
+
+### Commits
+
+- `8cb1ef9c` fix: #203 cycle-13 case-insensitive stage substring match in expect_dispatch_close
+- `426fe5a7` test: #203 cycle-13 offline coverage for case-insensitive expect_dispatch_close
+
+### Handoff
+
+Captain to approve CI env for live verification of `test_feedback_keepalive` on opus-4-7. No further action required in this worktree.
