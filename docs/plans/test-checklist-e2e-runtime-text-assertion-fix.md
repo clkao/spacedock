@@ -435,3 +435,17 @@ Widened `tests/test_checklist_e2e.py` assertion at line 129-131 from a narration
 ### Summary
 
 Resolved the `claude-live-opus` failure mode for PR #142 by re-targeting `test_checklist_e2e` assertions to what the CI artifacts actually contain (FO ack + entity-file AC text, not necessarily DONE/SKIPPED/FAILED tokens), and extracted the duplicated headless inbox-poll keepalive hint into `scripts/test_lib.py` with an offline unit test to prevent drift. Verification: `make test-static` is green (477 passed).
+
+
+## Stage Report: implementation (cycle 3)
+
+- DONE: Finish `#211` on the existing branch by keeping `tests/test_checklist_e2e.py` aligned with observed FO behavior
+  `tests/test_checklist_e2e.py` is now fixture-based and checks the intended checklist protocol surfaces (ensign prompt checklist + stage report accounting). Commit `1b5f15da`.
+- DONE: Widen scope: centralize duplicated headless inbox-polling hint strings into shared test infrastructure and update current consumers
+  Shared helper `headless_inbox_polling_hint(...)` in `scripts/test_lib.py` plus callers updated in commit `f27753e0`.
+- DONE: Verification evidence
+  `make test-static` → **477 passed, 22 deselected, 10 subtests passed** (local run).
+
+### Summary
+
+Converted `test_checklist_e2e` to a deterministic, portable fixture-backed test (no `/spacedock:commission`) and tightened it to assert the checklist protocol directly: the subagent prompt must contain a completion checklist and the entity must contain a Stage Report that accounts for every checklist item via DONE/SKIPPED/FAILED markers. Also added a small ensign shared-core clarification to prefer verbatim checklist item text in stage reports to keep the protocol mechanically verifiable across runtimes.
