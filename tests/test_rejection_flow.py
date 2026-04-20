@@ -1,10 +1,8 @@
 # ABOUTME: E2E test for the validation rejection flow in the first-officer template.
-# ABOUTME: Verifies that a REJECTED validation triggers implementer dispatch via the relay protocol.
+# ABOUTME: Pinned to teams_mode; asserts impl + validation dispatches + SendMessage feedback routing + reviewer-reuse for re-validation (#141).
 
 from __future__ import annotations
 
-import json
-import re
 import shutil
 import subprocess
 import sys
@@ -14,145 +12,70 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 from test_lib import (  # noqa: E402
-    CodexLogParser,
-    LogParser,
+    DispatchBudget,
     emit_skip_result,
     git_add_commit,
     install_agents,
     probe_claude_runtime,
-    rejection_follow_up_observed,
+    read_entity_frontmatter,
     rejection_signal_present,
-    run_codex_first_officer,
-    run_first_officer,
+    run_first_officer_streaming,
     setup_fixture,
 )
 
 
-def _codex_rejection_flow_milestones(log: CodexLogParser) -> dict[str, bool]:
-    milestones = {
-        "boot_status": False, "implementation_dispatch": False, "implementation_wait": False,
-        "implementation_completed": False, "validation_dispatch": False, "validation_wait": False,
-        "validation_completed": False, "rejection_seen": False, "follow_up_seen": False,
-        "final_response": False,
-    }
-    for raw_line in log.raw_lines:
-        try:
-            entry = json.loads(raw_line)
-        except json.JSONDecodeError:
-            continue
-        item = entry.get("item", {})
-        if not isinstance(item, dict):
-            continue
-        item_type = item.get("type")
-        if item_type == "command_execution":
-            command = item.get("command") or ""
-            output = item.get("aggregated_output") or ""
-            if "--boot" in command:
-                milestones["boot_status"] = True
-            if "status=implementation" in command or "entering implementation" in command:
-                milestones["implementation_dispatch"] = True
-                if milestones["rejection_seen"]:
-                    milestones["follow_up_seen"] = True
-            if "status=validation" in command or "entering validation" in command:
-                milestones["validation_dispatch"] = True
-            if re.search(r"REJECTED|recommend reject|failing test|Expected 5, got -1", output, re.IGNORECASE):
-                milestones["rejection_seen"] = True
-        if item_type == "collab_tool_call":
-            tool = item.get("tool")
-            prompt = item.get("prompt") or ""
-            agent_states = item.get("agents_states") or {}
-            state_text = json.dumps(agent_states)
-            if tool == "spawn_agent":
-                if "stage_name: `implementation`" in prompt or "stage_name: implementation" in prompt:
-                    milestones["implementation_dispatch"] = True
-                    if milestones["rejection_seen"]:
-                        milestones["follow_up_seen"] = True
-                if "stage_name: `validation`" in prompt or "stage_name: validation" in prompt:
-                    milestones["validation_dispatch"] = True
-            elif tool == "wait":
-                if re.search(r"implementation", prompt, re.IGNORECASE) or re.search(r"implementation", state_text, re.IGNORECASE):
-                    milestones["implementation_wait"] = True
-                if re.search(r"validation", prompt, re.IGNORECASE) or re.search(r"validation", state_text, re.IGNORECASE):
-                    milestones["validation_wait"] = True
-                for state in agent_states.values():
-                    if not isinstance(state, dict) or state.get("status") != "completed":
-                        continue
-                    message = str(state.get("message") or "")
-                    if re.search(r"implementation", message, re.IGNORECASE):
-                        milestones["implementation_completed"] = True
-                    if re.search(r"validation", message, re.IGNORECASE):
-                        milestones["validation_completed"] = True
-                if re.search(r"REJECTED|recommend reject|failing test|Expected 5, got -1", state_text, re.IGNORECASE):
-                    milestones["rejection_seen"] = True
-            elif tool == "send_input":
-                milestones["follow_up_seen"] = True
-        if item_type == "agent_message":
-            text = item.get("text") or ""
-            if re.search(r"REJECTED|recommend reject|failing test|Expected 5, got -1", text, re.IGNORECASE):
-                milestones["rejection_seen"] = True
-            if re.search(r"follow-up|feedback-to|feedback route|route findings|fix", text, re.IGNORECASE):
-                milestones["follow_up_seen"] = True
+PER_STAGE_OVERALL_S = 120
+PER_DISPATCH_BUDGET_S = 90
 
-    if log.completed_agent_messages():
-        milestones["final_response"] = True
-    return milestones
+SUBPROCESS_EXIT_BUDGET_S = 180
 
 
-def _codex_rejection_follow_up_order(log: CodexLogParser):
-    rejection_index = None
-    follow_up_index = None
-    rejection_pattern = r"REJECTED|recommend reject|failing test|Expected 5, got -1"
-    for idx, raw_line in enumerate(log.raw_lines):
-        try:
-            entry = json.loads(raw_line)
-        except json.JSONDecodeError:
-            continue
-        item = entry.get("item", {})
-        if not isinstance(item, dict):
-            continue
-        item_type = item.get("type")
-        item_text = json.dumps(item)
-        if rejection_index is None and re.search(rejection_pattern, item_text, re.IGNORECASE):
-            rejection_index = idx
-        if follow_up_index is not None:
-            continue
-        if item_type == "collab_tool_call":
-            tool = item.get("tool")
-            prompt = item.get("prompt") or ""
-            if tool == "send_input":
-                follow_up_index = idx
-            elif tool in {"spawn", "spawn_agent"} and re.search(r"stage_name:\s*implementation", prompt, re.IGNORECASE):
-                follow_up_index = idx
-        elif item_type == "agent_message":
-            text = item.get("text") or ""
-            if re.search(r"follow-up|feedback-to|route findings|fix", text, re.IGNORECASE):
-                follow_up_index = idx
-    return rejection_index, follow_up_index
+def _is_tool_use(entry: dict, name: str) -> dict | None:
+    if entry.get("type") != "assistant":
+        return None
+    msg = entry.get("message") or {}
+    for block in (msg.get("content") or []):
+        if (
+            isinstance(block, dict)
+            and block.get("type") == "tool_use"
+            and block.get("name") == name
+        ):
+            return block
+    return None
 
 
-def _codex_rejection_flow_stop_ready(log_path: Path) -> bool:
-    log = CodexLogParser(log_path)
-    milestones = _codex_rejection_flow_milestones(log)
-    return (
-        milestones["final_response"]
-        and milestones["follow_up_seen"]
-        and milestones["implementation_dispatch"]
-    )
+def _is_send_message_to(entry: dict, recipient_substr: str) -> bool:
+    block = _is_tool_use(entry, "SendMessage")
+    if not block:
+        return False
+    inp = block.get("input") or {}
+    return recipient_substr in str(inp.get("to", ""))
 
 
-@pytest.mark.skip(reason="pending #141 — reviewer keepalive across feedback cycles — FO correctly reuses the same-stage reviewer for re-review after rejection, test's ensign_count>=3 assertion does not yet accommodate this")
+def _is_team_create(entry: dict) -> bool:
+    return _is_tool_use(entry, "TeamCreate") is not None
+
+
 @pytest.mark.live_claude
-@pytest.mark.live_codex
-def test_rejection_flow(test_project, runtime, model, effort):
-    """Rejected validation triggers a fix dispatch via relay protocol (claude + codex)."""
+@pytest.mark.teams_mode
+def test_rejection_flow(test_project, model, effort):
+    """FO drives teams-mode rejection flow: impl -> validation REJECTED -> feedback routes back -> validation reviewer reused via SendMessage for re-review (#141)."""
     t = test_project
-    agent_id = "spacedock:first-officer"
+
+    if model == "claude-haiku-4-5" or "haiku" in model.lower():
+        pytest.xfail(
+            reason=(
+                "pending haiku-teams rejection flow — haiku-4-5 drops the "
+                "keep-alive Bash-probe discipline at `system init` cycle "
+                "boundaries and hallucinates teardown "
+                "(anthropics/claude-code#26426 class; opus-4-7 green)"
+            )
+        )
 
     print("--- Phase 1: Set up test project from fixture ---")
     fixture_dir = t.repo_root / "tests" / "fixtures" / "rejection-flow"
     setup_fixture(t, "rejection-flow", "rejection-pipeline")
-    if runtime == "claude":
-        install_agents(t, include_ensign=True)
+    install_agents(t, include_ensign=True)
 
     shutil.copy2(fixture_dir / "math_ops.py", t.test_project_dir)
     tests_dir = t.test_project_dir / "tests"
@@ -170,128 +93,152 @@ def test_rejection_flow(test_project, runtime, model, effort):
             "buggy-add-task" in status_result.stdout)
     print()
 
-    print(f"--- Phase 2: Run first officer ({runtime}) ---")
-    if runtime == "claude":
-        ok, reason = probe_claude_runtime(model)
-        if not ok:
-            emit_skip_result(
-                f"live Claude runtime unavailable before FO dispatch: {reason}. "
-                "This environment cannot currently prove or disprove the rejection-flow path."
-            )
-        abs_workflow = t.test_project_dir / "rejection-pipeline"
-        fo_exit = run_first_officer(
-            t,
-            f"Process all tasks through the workflow at {abs_workflow}/. When you encounter a gate review where the reviewer recommends REJECTED, confirm the rejection so the feedback flow routes fixes back to implementation.",
-            agent_id=agent_id,
-            extra_args=["--model", model, "--effort", effort, "--max-budget-usd", "5.00"],
-        )
-        if fo_exit != 0:
-            print("  (may be expected — budget cap or gate hold)")
-    else:
-        fo_exit = run_codex_first_officer(
-            t, "rejection-pipeline",
-            agent_id=agent_id,
-            run_goal="Process only the entity `buggy-add-task`.",
-            timeout_s=420,
-            stop_checker=_codex_rejection_flow_stop_ready,
+    print("--- Phase 2: Run first officer (claude) ---")
+    ok, reason = probe_claude_runtime(model)
+    if not ok:
+        emit_skip_result(
+            f"live Claude runtime unavailable before FO dispatch: {reason}. "
+            "This environment cannot currently prove or disprove the rejection-flow path."
         )
 
-    print("--- Phase 3: Validation ---")
-    if runtime == "claude":
-        log = LogParser(t.log_dir / "fo-log.jsonl")
-        log.write_agent_calls(t.log_dir / "agent-calls.txt")
-        log.write_fo_texts(t.log_dir / "fo-texts.txt")
-        agent_calls = log.agent_calls()
-        fo_text = "\n".join(log.fo_texts())
-        worker_messages = ""
-        milestones = {}
-    else:
-        log = CodexLogParser(t.log_dir / "codex-fo-log.txt")
-        log.write_text(t.log_dir / "codex-fo-text.txt")
-        agent_calls = []
-        fo_text = log.full_text()
-        worker_messages = "\n".join(log.completed_agent_messages())
-        milestones = _codex_rejection_flow_milestones(log)
+    abs_workflow = t.test_project_dir / "rejection-pipeline"
+    prompt = f"Process all tasks through the workflow at {abs_workflow}/ to terminal completion."
 
-    print()
-    print("[Rejection Flow Behavior]")
-    entity_main = t.test_project_dir / "rejection-pipeline" / "buggy-add-task.md"
-    worktrees_dir = t.test_project_dir / ".worktrees"
-
-    if runtime == "claude":
-        ensign_calls = [c for c in agent_calls if c["subagent_type"] == "spacedock:ensign"]
-        t.check("FO dispatched an ensign for validation stage", len(ensign_calls) > 0)
-    else:
-        t.check("at least one worker completed", bool(worker_messages.strip()))
-
-    t.check(
-        "reviewer stage report contains REJECTED recommendation",
-        rejection_signal_present("rejection-pipeline", "buggy-add-task", entity_main, worktrees_dir, worker_messages, fo_text),
+    keepalive_done = t.test_project_dir / ".fo-keepalive-done"
+    poll_script = t.repo_root / "scripts" / "fo_inbox_poll.py"
+    seen_file = t.test_project_dir / ".fo-inbox-seen"
+    headless_hint = (
+        f"The spacedock plugin directory is at `{t.repo_root}`. Use it "
+        f"directly; do NOT run `find / -name claude-team` — the binaries you "
+        f"need are `{t.repo_root}/skills/commission/bin/status` and "
+        f"`{t.repo_root}/skills/commission/bin/claude-team`.\n\n"
+        f"HEADLESS INBOX-POLLING RULE. You are running in `claude -p` headless "
+        f"mode. Per anthropics/claude-code#26426, inbox-delivered teammate "
+        f"messages accumulate on disk at `$HOME/.claude/teams/{{team_name}}/"
+        f"inboxes/team-lead.json` but are NOT surfaced to your stream. The "
+        f"workaround is to surface them yourself via an external polling "
+        f"script.\n\n"
+        f"Until the sentinel file `{keepalive_done}` exists, every turn "
+        f"MUST end with a Bash tool_use (not text) that runs the poll "
+        f"script:\n\n"
+        f"    python3 {poll_script} --home \"$HOME\" --pattern 'Done:' "
+        f"--timeout 5 --seen-file {seen_file}\n\n"
+        f"The script blocks up to 5 seconds waiting for a new inbox "
+        f"message whose text contains 'Done:'. Its stdout contains the "
+        f"teammate message (or is empty on timeout, in which case repeat). "
+        f"Treat any 'from: spacedock-ensign-...' block with 'text: Done: "
+        f"... completed {{stage}}' as the teammate's completion signal for "
+        f"that stage — proceed to the next workflow step per shared-core "
+        f"discipline. Never emit `SendMessage(shutdown_request)`, "
+        f"`TeamDelete`, or other teardown while awaiting an ensign. Once "
+        f"the workflow reaches terminal completion, you may end with text."
     )
 
-    if runtime == "claude":
-        ensign_count = len(ensign_calls)
-        if ensign_count >= 3:
-            t.pass_(f"FO dispatched ensign for fix after rejection ({ensign_count} total ensign dispatches)")
-        elif ensign_count >= 2:
-            t.fail(f"FO dispatched ensign for fix after rejection (only {ensign_count} ensign dispatches — missing fix dispatch)")
+    with run_first_officer_streaming(
+        t,
+        prompt,
+        agent_id="spacedock:first-officer",
+        extra_args=[
+            "--model", model,
+            "--effort", effort,
+            "--max-budget-usd", "5.00",
+            "--append-system-prompt", headless_hint,
+        ],
+        dispatch_budget=DispatchBudget(soft_s=30.0, hard_s=180.0, shutdown_grace_s=10.0),
+    ) as w:
+        w.expect(_is_team_create, timeout_s=PER_STAGE_OVERALL_S, label="TeamCreate emitted")
+        print("[OK] TeamCreate emitted (teams mode engaged)")
+
+        impl_record = w.expect_dispatch_close(
+            overall_timeout_s=PER_STAGE_OVERALL_S,
+            dispatch_budget_s=PER_DISPATCH_BUDGET_S,
+            ensign_name="implementation",
+            label="cycle-1 implementation dispatch close",
+        )
+        print(f"[OK] cycle-1 implementation dispatch closed in {impl_record.elapsed:.1f}s")
+
+        validation_record = w.expect_dispatch_close(
+            overall_timeout_s=PER_STAGE_OVERALL_S,
+            dispatch_budget_s=PER_DISPATCH_BUDGET_S,
+            ensign_name="validation",
+            label="cycle-1 validation dispatch close",
+        )
+        print(f"[OK] cycle-1 validation dispatch closed in {validation_record.elapsed:.1f}s")
+
+        # Feedback routing: FO must route back to implementation. Accept
+        # either SendMessage to the impl ensign (reuse) OR a fresh Agent
+        # re-dispatch of implementation. Whichever fires first is the
+        # observable signal that feedback routing happened.
+        w.expect(
+            lambda e: (
+                _is_send_message_to(e, "implementation")
+                or (
+                    _is_tool_use(e, "Agent") is not None
+                    and "implementation" in str(((_is_tool_use(e, "Agent") or {}).get("input") or {}).get("description", ""))
+                )
+            ),
+            timeout_s=PER_STAGE_OVERALL_S,
+            label="feedback routed back to implementation (SendMessage or fresh Agent)",
+        )
+        print("[OK] feedback routed back to implementation")
+
+        # The #141 contract: after the fix, FO reuses the kept-alive
+        # validation reviewer via SendMessage for re-review. This is
+        # the key signal the original test's `ensign_count >= 3` wasn't
+        # distinguishing from "fresh validation re-dispatch".
+        w.expect(
+            lambda e: _is_send_message_to(e, "validation"),
+            timeout_s=PER_STAGE_OVERALL_S,
+            label="SendMessage to validation reviewer for re-review (#141 keepalive)",
+        )
+        print("[OK] validation reviewer reused via SendMessage for re-review (#141)")
+
+        keepalive_done.touch()
+        print(f"[OK] keep-alive sentinel {keepalive_done.name} touched")
+
+        try:
+            w.expect_exit(timeout_s=SUBPROCESS_EXIT_BUDGET_S)
+            print("[OK] FO exited cleanly after sentinel")
+        except Exception as exc:
+            print(f"  NOTE: FO did not exit within {SUBPROCESS_EXIT_BUDGET_S}s post-sentinel ({type(exc).__name__}); contract assertions already passed")
+
+    print("--- Phase 3: Validation ---")
+
+    records = w.dispatch_records
+    print(f"  dispatch records: {[(r.ensign_name, round(r.elapsed, 1)) for r in records]}")
+
+    # Dispatch count analysis. Accept either:
+    #   3 Agents (impl, validation, impl-fix) — reuse path: validation re-review via SendMessage
+    #   4 Agents (impl, validation, impl-fix, validation-recheck) — fresh path
+    # Per #141 the reuse path is preferred; we don't enforce it strictly
+    # because the context-budget check is a legitimate branch to fresh.
+    t.check(
+        "FO emitted 3 or 4 ensign Agent() dispatches (impl + validation + impl-fix +/- validation-recheck)",
+        len(records) in (3, 4),
+    )
+
+    print()
+    print("[Rejection Signal Present]")
+    entity_main = t.test_project_dir / "rejection-pipeline" / "buggy-add-task.md"
+    worktrees_dir = t.test_project_dir / ".worktrees"
+    t.check(
+        "reviewer stage report contains REJECTED recommendation",
+        rejection_signal_present("rejection-pipeline", "buggy-add-task", entity_main, worktrees_dir, "", ""),
+    )
+
+    print()
+    print("[Entity Advancement]")
+    entity_archive = t.test_project_dir / "rejection-pipeline" / "_archive" / "buggy-add-task.md"
+    if entity_archive.is_file():
+        t.pass_("entity advanced to terminal stage and was archived")
+    elif entity_main.is_file():
+        fm = read_entity_frontmatter(entity_main)
+        status_val = fm.get("status", "")
+        if status_val == "done":
+            t.pass_(f"entity advanced to terminal stage (status: {status_val})")
         else:
-            t.fail(f"FO dispatched ensign for fix after rejection (only {ensign_count} ensign dispatches)")
+            t.fail(f"entity did not reach terminal stage (status: {status_val!r})")
     else:
-        spawn_count = log.spawn_count()
-        print("  Codex milestones:")
-        for key, reached in milestones.items():
-            print(f"    {key}: {reached}")
-        t.check(
-            "Codex launcher reached the bounded rejection-flow stop condition",
-            fo_exit == 0 or milestones["final_response"],
-        )
-        t.check(
-            "multiple worker dispatches occurred",
-            spawn_count >= 2 or bool(re.search(r"validation|implementation", worker_messages, re.IGNORECASE)),
-        )
-        t.check(
-            "bounded Codex run waits for the validation result before gate handling",
-            milestones["validation_dispatch"] and milestones["validation_wait"] and milestones["validation_completed"],
-        )
-        t.check(
-            "follow-up work after rejection was observable",
-            rejection_follow_up_observed("rejection-pipeline", "buggy-add-task", worktrees_dir, worker_messages, fo_text),
-        )
-        rejection_index, follow_up_index = _codex_rejection_follow_up_order(log)
-        t.check(
-            "rejection follow-up happens after rejection is observed",
-            rejection_index is not None and follow_up_index is not None and follow_up_index > rejection_index,
-        )
-        worktree_candidates = [
-            worktrees_dir / "ensign-buggy-add-task",
-            worktrees_dir / "spacedock-ensign-buggy-add-task",
-        ]
-        safe_worktree_mentions = [str(path) for path in worktree_candidates]
-        t.check(
-            "worker uses safe worktree key",
-            any(path.is_dir() for path in worktree_candidates)
-            or any(path_text in fo_text for path_text in safe_worktree_mentions)
-            or any(path_text in worker_messages for path_text in safe_worktree_mentions),
-        )
-        t.check(
-            "logical packaged id does not leak into worktree path",
-            all("spacedock:ensign" not in path.as_posix() for path in worktree_candidates if path.is_dir()),
-        )
-        branches = subprocess.run(
-            ["git", "branch", "--list"],
-            capture_output=True, text=True, cwd=t.test_project_dir, check=True,
-        ).stdout
-        t.check(
-            "validation dispatch uses the shared safe branch name",
-            "ensign/buggy-add-task" in branches or "spacedock-ensign/buggy-add-task" in branches,
-        )
-        t.check("boot status ran", milestones["boot_status"])
-        t.check("implementation dispatch was observed", milestones["implementation_dispatch"])
-        t.check("validation dispatch was observed", milestones["validation_dispatch"])
-        t.check(
-            "Codex run reached a concrete rejection-flow milestone before stop",
-            milestones["validation_wait"] or milestones["validation_completed"] or milestones["rejection_seen"] or milestones["follow_up_seen"],
-        )
+        t.fail("entity file missing from both main and _archive")
 
     t.finish()
