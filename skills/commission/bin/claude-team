@@ -407,6 +407,13 @@ DEFAULT_CONTEXT_LIMIT = 200000
 EXTENDED_CONTEXT_LIMIT = 1000000
 THRESHOLD_PCT = 60
 
+NATIVE_1M_MODEL_PREFIXES = (
+    "claude-opus-4-7",
+    "claude-opus-4-8",
+    "claude-opus-4-9",
+    "claude-opus-5",
+)
+
 
 def find_subagent_jsonl(name: str) -> str | None:
     """Find the most recently modified subagent jsonl matching the given name.
@@ -890,14 +897,18 @@ def lookup_model(name: str) -> str | None:
 
 
 def context_limit_for_model(model: str) -> int:
-    """Infer the context window size from the model name suffix.
+    """Infer the context window size from the model name.
 
-    Claude Code encodes extended-context variants with a bracket suffix like
-    `[1m]` (e.g. `claude-opus-4-6[1m]`). Any model name containing `[1m]` is
-    the 1M-context variant. Everything else defaults to 200k, which is the
-    standard Claude context window and safe fallback for unknown models.
+    Claude Code encodes opt-in extended-context variants with a bracket suffix
+    like `[1m]` (e.g. `claude-opus-4-6[1m]`). Models whose base name matches a
+    native-1M family (claude-opus-4-7 and later) default to 1M regardless of
+    the bracket. Everything else defaults to 200k, the standard Claude context
+    window and safe fallback for unknown models.
     """
     if "[1m]" in model:
+        return EXTENDED_CONTEXT_LIMIT
+    base = model.split("[", 1)[0]
+    if base.startswith(NATIVE_1M_MODEL_PREFIXES):
         return EXTENDED_CONTEXT_LIMIT
     return DEFAULT_CONTEXT_LIMIT
 
