@@ -524,3 +524,22 @@ PASSED with two captain-addressable non-blockers. Cycle-5 commits (`d944cd5c`, `
 ### Summary
 
 Codex CI was failing because the Codex dispatch prompt used `Completion checklist (linchpins):`, which the checklist extractor did not treat as a section header. Parsing is now robust to that header and to `Requirements:` as the end marker, so the Codex E2E test should no longer be sensitive to that prompt-shape variation.
+
+
+## Stage Report: implementation (cycle 7)
+
+- DONE: Tighten the Codex first-officer runtime contract to avoid parenthetical checklist headings in worker prompts
+  Updated `skills/first-officer/references/codex-first-officer-runtime.md` to explicitly require the exact heading `### Completion checklist` with no parenthetical and no extra descriptors.
+  Added a static contract test in `tests/test_agent_content.py` to keep that requirement from regressing.
+- DONE: Make the Codex checklist E2E resilient to prompt-shape drift while still validating checklist protocol
+  `tests/test_checklist_e2e.py` now:
+  - extracts checklist items from either numbered or bullet checklist formats
+  - stops checklist parsing at `Instructions:`, `Requirements:`, `Execution constraints:`, or `Additional stage rules:` so non-checklist bullets are not treated as checklist items
+  - validates stage-report coverage using stable anchors (code spans + salient keywords) instead of requiring exact full-string equality across runtime prompt reflows
+- DONE: Verification evidence
+  `KEEP_TEST_DIR=1 uv run pytest tests/test_checklist_e2e.py::test_checklist_e2e_codex -m live_codex --runtime codex -q` → **1 passed**.
+  `make test-static` → **485 passed, 25 deselected, 10 subtests passed**.
+
+### Summary
+
+Codex worker prompts sometimes rendered `Completion checklist (linchpins):` and sometimes mixed checklist bullets with adjacent “Additional stage rules” bullets, which made the checklist E2E brittle. The Codex runtime now prescribes a plain checklist heading, and the checklist E2E parses only the checklist block and verifies stage-report accounting via stable anchors so it remains portable across small prompt reflows.

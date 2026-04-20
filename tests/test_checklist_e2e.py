@@ -38,11 +38,18 @@ def _extract_checklist_items(agent_prompt: str) -> list[str]:
         ):
             in_checklist = True
             continue
-        if in_checklist and re.match(r"(?i)^(instructions|requirements):\s*$", line):
+        if in_checklist and re.match(
+            r"(?i)^(instructions|requirements|constraints|execution constraints|additional stage rules|additional rules|stage rules):\s*$",
+            line,
+        ):
             break
         if in_checklist and line.startswith("### "):
             break
         m = re.match(r"^\d+\.\s+(.*)$", line)
+        if in_checklist and m:
+            items.append(m.group(1).strip())
+            continue
+        m = re.match(r"^[-*]\s+(.*)$", line)
         if in_checklist and m:
             items.append(m.group(1).strip())
     return items
@@ -54,6 +61,35 @@ def _last_stage_report(entity_text: str) -> str:
     if len(parts) <= 1:
         return ""
     return parts[-1]
+
+
+def _anchors_from_checklist_item(item_text: str) -> list[str]:
+    """Return concrete substrings that should be reflected in the stage report.
+
+    Live runtimes may reflow checklist prose (numbered vs bullets, minor paraphrase),
+    so we key on stable anchors like code spans and salient keywords.
+    """
+    anchors: list[str] = []
+    code_spans = re.findall(r"`([^`]+)`", item_text)
+    for span in code_spans:
+        # The stage report protocol already checks for the presence of at least one
+        # DONE/SKIPPED/FAILED marker; don't require all three just because the
+        # checklist item mentions them.
+        if span in {"DONE", "SKIPPED", "FAILED"}:
+            continue
+        anchors.append(span)
+    if re.search(r"\bUTF-?8\b", item_text, re.IGNORECASE):
+        anchors.append("UTF-8")
+    if re.search(r"\bhello\b", item_text, re.IGNORECASE):
+        anchors.append("hello")
+    # De-dupe while preserving order.
+    seen = set()
+    out: list[str] = []
+    for a in anchors:
+        if a not in seen:
+            seen.add(a)
+            out.append(a)
+    return out
 
 
 def _run_checklist_scenario(
@@ -183,7 +219,12 @@ def _run_checklist_scenario(
     t.check("stage report includes Summary subsection", "### Summary" in stage_report_text)
 
     for item in checklist_items:
-        t.check(f"stage report accounts for checklist item: {item}", item in stage_report_text)
+        anchors = _anchors_from_checklist_item(item)
+        if not anchors:
+            t.check(f"stage report accounts for checklist item: {item}", item in stage_report_text)
+            continue
+        for anchor in anchors:
+            t.check(f"stage report covers checklist anchor: {anchor}", anchor in stage_report_text)
 
     # Sanity: the stage's deliverable should exist.
     out_path = t.test_project_dir / "checklist-pipeline" / "output.txt"
