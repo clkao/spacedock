@@ -39,7 +39,7 @@ def _extract_checklist_items(agent_prompt: str) -> list[str]:
             in_checklist = True
             continue
         if in_checklist and re.match(
-            r"(?i)^(instructions|requirements|constraints|execution constraints|additional stage rules|additional rules|stage rules):\s*$",
+            r"(?i)^(instructions|requirements|constraints|execution constraints|execution requirements|additional stage rules|additional rules|stage rules):\s*$",
             line,
         ):
             break
