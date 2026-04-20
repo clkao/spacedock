@@ -1376,3 +1376,86 @@ The test passes un-xfailed on both opus-low N=3 and haiku N=3 — #194's symptom
 ### Summary
 
 Cycle-7's inbox-poll + keep-alive sentinel + tight-budget + mode-aware close-anchor pattern ported cleanly to `test_standing_teammate_spawn.py` with one scope-appropriate pivot (test-file-only): replace FO-stream ensign-internal tool_use assertions — structurally unreachable under `-p` teams-mode — with ensign `Done:` close via inbox-poll anchor + post-run on-disk `ECHO: ping` check. **Opus-low N=3 3/3 PASS (297-396s), haiku N=3 3/3 PASS (236-263s), static 475/475.** Two commits, discrete per captain directive; no infrastructure touches; #194 un-xfail candidate stands ready for merge.
+
+## Stage Report: implementation (cycle 10 — CI opus+haiku diagnosis + xfail-fix)
+
+### Scope
+Cycle-10 CI triage post-push HEAD cycle-9 scaffolding. CI run 24649016585 had three live-suite reds on opus-low + haiku-teams. This cycle delivers one narrow xfail-condition fix (haiku-teams keepalive, <5 lines) + diagnosis-only for the two opus-low reds. No code fixes committed for items 2+3 per captain directive.
+
+### Commits
+1. `c9a071bb` — xfail-fix: #203 broaden haiku detection in test_feedback_keepalive to match 'haiku' alias (not just 'claude-haiku-4-5').
+
+### `make test-static` (post-xfail-fix)
+475 passed, 22 deselected, 10 subtests in 23.35s — unchanged from cycle-9 baseline.
+
+### Item 1 — haiku-xfail fix (COMMITTED)
+
+**CI failure:** job `72067555614` (haiku-teams), `test_feedback_keepalive` FAILED at the `SendMessage to implementation ensign (feedback reuse)` step with `StepTimeout` (120s). The failure was a real #26426-class teardown-hallucination that the xfail was intended to absorb, but the conditional at `tests/test_feedback_keepalive.py:75` tested `model == "claude-haiku-4-5"` while the pytest fixture passes the alias `"haiku"` — so the xfail guard never tripped and the real failure surfaced.
+
+**Fix:** one-line broadening at `tests/test_feedback_keepalive.py:75`:
+```python
+if model == "claude-haiku-4-5" or model == "haiku" or "haiku" in model.lower():
+```
+Preserves the existing xfail reason string. Covers `haiku`, `claude-haiku-4-5`, and any future haiku variant (e.g. `haiku-4.5`, `haiku-4-5-20251001`).
+
+### Item 2 — merge_hook_guardrail opus-low diagnosis (DIAGNOSIS ONLY)
+
+**CI failure:** job `72067555604` (opus-low), `test_merge_hook_guardrail` FAILED with `StepFailure: FO subprocess exited (code=0) before step 'merge hook wrote _merge-hook-fired.txt' matched`.
+
+**Artifact:** `/tmp/ci-opus-fail-evidence/spacedock-test-hlmok5ex/fo-log.jsonl` (74 lines, 94s wallclock). The merge-hook sentinel file `_merge-hook-fired.txt` WAS written on disk (contains `merge-hook-entity\n`). FO executed the hook Bash at fo-log L50 with command containing `echo "merge-hook-entity" >> $WD/_merge-hook-fired.txt`. So the FO did fire the hook — the watcher just didn't observe the Bash before the FO exited.
+
+**Root cause:** the watcher's `expect_dispatch_close` consumes log entries up through the dispatch close anchor (fo-log L64, `task_notification status=completed` for the ensign Agent tuid). The merge-hook fire Bash at fo-log L50 comes earlier in the file but AFTER `expect_dispatch_close` starts reading and is consumed silently during the anchor search. The subsequent `expect(Bash "_merge-hook-fired.txt")` call only drains entries past the cursor (post-L64), never sees L50, and times out/step-fails when proc exits.
+
+Why does `expect_dispatch_close` not close via the inbox-poll anchor (which fires at L43, BEFORE the L50 Bash)? Because `scripts/test_lib.py::_find_open_dispatch_for_sender` (lines 1252-1254) only matches stage substrings `("implementation", "validation", "analysis", "design")`. The merge-hook ensign is dispatched for stage `work` (sender: `spacedock-ensign-merge-hook-entity-work`, ensign_name: `Merge hook test entity: work`). Neither contains any of the four allowed stages, so the inbox-poll anchor silently fails to match, and the close waits for the much-later `task_notification` at L64. By then, the Bash at L50 has already been consumed.
+
+**Verified via replay:** ran `_update_dispatch_budgets` line-by-line against the CI jsonl — confirmed the dispatch closes at L64 (task_notification) with stock code. Patched the stage tuple to include `"work"` and re-ran — confirmed the dispatch closes at L43 (inbox-poll), which would leave L50 available for the subsequent `expect()` call.
+
+**Recommended fix (≤1 line, infrastructure):** add `"work"` to the stage tuple in `scripts/test_lib.py::_find_open_dispatch_for_sender` (line 1252):
+```python
+for stage in ("implementation", "validation", "analysis", "design", "work"):
+```
+Rationale: `work` is the standard terminal stage in single-stage workflows (merge-hook fixture uses it). Both-sided containment check (stage must be in BOTH sender AND ensign_name) prevents false-positive matches. This is a one-line generalization of the existing anchor pattern, not a new mechanism.
+
+Captain can dispatch cycle-11 with this fix + N=3 opus-low verification.
+
+### Item 3 — standing_teammate_spawn opus-low diagnosis (DIAGNOSIS ONLY)
+
+**CI failure:** job `72067555604` (opus-low), `test_standing_teammate_spawns_and_roundtrips` FAILED with `AssertionError: Archived entity body does not contain 'ECHO: ping'`.
+
+**Artifact:** `/tmp/ci-opus-fail-evidence/spacedock-test-xiy0z8f2/fo-log.jsonl` (82 lines, 133s wallclock). Phase-2 FO-stream assertions all PASSED (TeamCreate, spawn-standing, echo-agent Agent, ensign Agent, ensign dispatch close). Phase-3 on-disk assertion FAILED because the archived entity body contains only `work done\n` — no `## Stage Report: work` section, no `ECHO: ping` line.
+
+**Root cause:** the ensign performed steps 1+2 of its checklist in-message but skipped the stage-report file write:
+- Appended `"work done"` to the entity body and committed (✓).
+- SendMessage echo-agent with `ping`, captured `ECHO: ping` reply (✓) — confirmed in the ensign's Done: text at fo-log L55 (`summary: work stage done, echo reply captured` + `Stage report:\n- ...SendMessage to echo-agent with "ping" -> captured reply: 'ECHO: ping'`).
+- **Did NOT append a `## Stage Report: work` section to the entity body.** The captured reply exists only in the ensign→FO `Done:` message text, not on disk.
+
+Cycle-8 cycle-8 greened this 3/3 locally (`/tmp/203-cycle8-standing-evidence/opus-low-run{1,2,3}.log`) — the CI-slow-host manifestation of #194 the cycle-8 on-disk assertion was designed to expose: ensign discipline for "append stage report to entity body" is shared-core-implicit, not explicit in the dispatch prompt, and opus-low under CI cache-pressure drops it probabilistically.
+
+**Comparison vs local-green:** cycle-8 local runs succeeded because the ensign wrote both `work done` AND the `## Stage Report: work` section (with the ECHO reply). CI opus-low skipped the stage-report append. The data-flow itself (SendMessage → reply capture) works; the step that fails is the Edit to persist the reply to the entity body.
+
+**Recommended fix (test-fixture level, not infrastructure):** make the on-disk requirement explicit in the fixture entity body. Currently `tests/fixtures/standing-teammate/001-echo-roundtrip.md:16` says:
+```
+Include the captured reply in your stage report.
+```
+Change to:
+```
+Append a `## Stage Report: work` section to this entity file body containing
+the captured `ECHO: ...` reply line, then commit. This section must survive
+archival (the test reads the archived body).
+```
+
+This aligns the fixture prompt with what the test asserts, and makes the on-disk artifact a checklist item the ensign cannot skip via stage-report-in-message-only.
+
+Alternate fix direction (dispatch-prompt level, broader): add an explicit checklist item in the FO's ensign dispatch prompt builder: `3. Append the '## Stage Report: {stage}' section to the entity body on disk before SendMessage Done: — the stage-report-in-Done:-message is not sufficient.` This addresses the class of #194 defects (ensign relies on shared-core implicit discipline, drops it under load) but has broader blast radius — touches the FO template, not just this one fixture.
+
+Recommend fixture-level fix for this cycle; escalate to dispatch-prompt-level in a follow-up entity if #194 reproduces on other tests.
+
+Captain can dispatch cycle-11 with this fix + N=3 opus-low verification.
+
+### Cycle-10 artifact inventory
+- `/tmp/ci-opus-fail-evidence/spacedock-test-hlmok5ex/` — merge_hook_guardrail CI fail (fo-log.jsonl + test-project + stats).
+- `/tmp/ci-opus-fail-evidence/spacedock-test-xiy0z8f2/` — standing_teammate_spawn CI fail (fo-log.jsonl + test-project + stats).
+- `/tmp/203-cycle8-standing-evidence/opus-low-run{1,2,3}.log` — cycle-8 local-green reference (used for comparison).
+
+### Summary
+One-line xfail-fix committed for haiku-teams keepalive. Two diagnosis-only reports with targeted fix proposals: merge_hook is a one-line infrastructure fix (add `"work"` stage to inbox-poll anchor); standing_teammate is a test-fixture-level fix (make on-disk stage-report write explicit in the entity body). Static stays green 475/475.
