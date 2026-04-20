@@ -69,6 +69,7 @@ Rules:
 - `SKIPPED:` means intentionally skipped with rationale
 - `FAILED:` means attempted and failed with concrete details
 - every checklist item must appear
+- use the checklist item text verbatim for `{item text}` when possible (copy/paste)
 - do not use markdown checkbox markers in stage reports
 - append the report at the end of the entity file — do not read the entire entity body to find an insertion point
 - if redoing a stage after rejection, append a new `## Stage Report: {stage_name} (cycle N)` section at the end rather than locating and overwriting the prior report — the latest report is always the last one in the file

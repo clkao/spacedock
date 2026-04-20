@@ -1,11 +1,11 @@
-# ABOUTME: E2E test for the checklist protocol in the first-officer template.
-# ABOUTME: Commissions a workflow, runs the first officer, validates ensign checklist compliance.
+# ABOUTME: Portable E2E test for the checklist protocol in the first-officer template.
+# ABOUTME: Uses a deterministic fixture (no runtime commission) and validates:
+# ABOUTME: (1) the ensign dispatch prompt contains a completion checklist
+# ABOUTME: (2) the ensign accounts for that checklist in a Stage Report
 
 from __future__ import annotations
 
-import os
 import re
-import shutil
 import sys
 from pathlib import Path
 
@@ -13,162 +13,159 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 from test_lib import (  # noqa: E402
+    CodexLogParser,
     LogParser,
     git_add_commit,
-    run_commission,
+    install_agents,
+    run_codex_first_officer,
     run_first_officer,
+    setup_fixture,
 )
 
 
-@pytest.mark.live_claude
-def test_checklist_e2e(test_project, model, effort):
-    """Commissions a full workflow then runs FO to verify ensign checklist compliance."""
-    t = test_project
-    snapshot = os.environ.get("CHECKLIST_SNAPSHOT") or None
-    # test_checklist historically defaulted to opus; respect it unless model is overridden from haiku.
-    model_for_run = model if model != "haiku" else "opus"
-
-    if snapshot:
-        print("--- Phase 1: Loading from snapshot (skipping commission) ---")
-        snap_path = Path(snapshot)
-        shutil.copytree(snap_path, t.test_dir, dirs_exist_ok=True)
-        t.test_project_dir = t.test_dir / "test-project"
-
-        workflow_dir = None
-        for d in t.test_project_dir.iterdir():
-            if d.is_dir() and (d / "README.md").is_file() and d.name != ".claude" and d.name != ".git":
-                workflow_dir = d
-                break
-
-        assert workflow_dir is not None, "snapshot must contain a workflow directory"
-
-        for entity_file in sorted(workflow_dir.glob("*.md")):
-            if entity_file.name == "README.md":
-                continue
-            with open(entity_file, "a") as f:
-                f.write("""
-
-## Acceptance Criteria
-
-1. The output file contains the word "hello"
-2. The output file is valid UTF-8
-""")
-            git_add_commit(t.test_project_dir, "setup: add acceptance criteria to entity")
+def _extract_checklist_items(agent_prompt: str) -> list[str]:
+    items: list[str] = []
+    in_checklist = False
+    for raw in agent_prompt.splitlines():
+        line = raw.strip()
+        if line.lower().startswith("### completion checklist"):
+            in_checklist = True
+            continue
+        if in_checklist and line.startswith("### "):
             break
+        m = re.match(r"^\d+\.\s+(.*)$", line)
+        if in_checklist and m:
+            items.append(m.group(1).strip())
+    return items
 
-        t.pass_("loaded snapshot")
-        print()
-    else:
-        print("--- Phase 1: Commission test workflow (this takes ~30-60s) ---")
-        prompt = """/spacedock:commission
 
-All inputs for this workflow:
-- Mission: Track tasks through stages
-- Entity: A task
-- Stages: backlog → work → done
-- Approval gates: none
-- Seed entities:
-  1. test-checklist — Verify checklist protocol works (score: 25/25)
-- Location: ./checklist-test/
+def _last_stage_report(entity_text: str) -> str:
+    # Keep it simple: the ensign protocol is append-only; the last section is authoritative.
+    parts = re.split(r"(?m)^##\s+Stage Report", entity_text)
+    if len(parts) <= 1:
+        return ""
+    return parts[-1]
 
-Skip interactive questions and confirmation — use these inputs directly. Make reasonable assumptions for anything not specified. Do NOT run the pilot phase — just generate the files and stop."""
 
-        run_commission(t, prompt, extra_args=["--model", model_for_run, "--effort", effort])
+@pytest.mark.live_claude
+@pytest.mark.live_codex
+def test_checklist_e2e(test_project, runtime, model, effort):
+    """Verify checklist protocol via fixture (claude + codex)."""
+    t = test_project
 
-        print("[Commission Output]")
-        entity_file = t.test_project_dir / "checklist-test" / "test-checklist.md"
-        assert entity_file.is_file(), "commission must produce test-checklist.md"
-        t.pass_("commission produced test-checklist.md")
-        t.pass_("first-officer agent ships with plugin (no local copy needed)")
+    print("--- Phase 1: Set up test project from fixture ---")
+    workflow_dir = setup_fixture(t, "checklist-pipeline", "checklist-pipeline")
+    if runtime == "claude":
+        install_agents(t, include_ensign=True)
+    git_add_commit(t.test_project_dir, "setup: checklist protocol fixture")
 
-        with open(entity_file, "a") as f:
-            f.write("""
+    entity_main = workflow_dir / "checklist-task.md"
+    entity_archive = workflow_dir / "_archive" / "checklist-task.md"
+    t.check("fixture includes checklist-task entity", entity_main.is_file())
+    print()
 
-## Acceptance Criteria
-
-1. The output file contains the word "hello"
-2. The output file is valid UTF-8
-""")
-        git_add_commit(t.test_project_dir, "commission: initial workflow with acceptance criteria")
-        print()
-
-    print("--- Phase 2: Run first officer (this takes ~60-120s) ---")
-    run_first_officer(
-        t,
-        "Process all entities through the workflow. Process one entity through one stage, then stop.",
-        extra_args=["--max-budget-usd", "2.00", "--model", model_for_run, "--effort", effort],
+    print(f"--- Phase 2: Run first officer ({runtime}) ---")
+    prompt = (
+        f"Process only the entity `checklist-task` through the workflow at {workflow_dir}/. "
+        "Process one entity through one stage, then stop."
     )
+    if runtime == "claude":
+        fo_exit = run_first_officer(
+            t,
+            prompt,
+            agent_id="spacedock:first-officer",
+            extra_args=["--max-budget-usd", "2.00", "--model", model, "--effort", effort],
+        )
+        if fo_exit != 0:
+            print(f"  (first officer exit code {fo_exit} — may be expected under budget caps)")
+    else:
+        # Bounded stop: once the worker has written a stage report accounting for
+        # checklist items, the test outcome is determined.
+        def stop_ready(_log_path: Path) -> bool:
+            path = entity_archive if entity_archive.is_file() else entity_main
+            if not path.is_file():
+                return False
+            text = path.read_text()
+            if "## Stage Report" not in text:
+                return False
+            return bool(re.search(r"(?m)^- (DONE|SKIPPED|FAILED):", text))
+
+        fo_exit = run_codex_first_officer(
+            t,
+            "checklist-pipeline",
+            agent_id="spacedock:first-officer",
+            run_goal=prompt,
+            timeout_s=900,
+            stop_checker=stop_ready,
+        )
+        t.check("Codex launcher exited cleanly", fo_exit == 0)
 
     print("--- Phase 3: Validation ---")
-    log = LogParser(t.log_dir / "fo-log.jsonl")
-    log.write_agent_prompt(t.log_dir / "agent-prompt.txt")
-    log.write_fo_texts(t.log_dir / "fo-texts.txt")
-
-    agent_prompt = log.agent_prompt()
-    fo_text = "\n".join(log.fo_texts())
-    entity_main = t.test_project_dir / "checklist-test" / "test-checklist.md"
-    entity_archive = t.test_project_dir / "checklist-test" / "_archive" / "test-checklist.md"
-    entity_text = ""
-    if entity_archive.is_file():
-        entity_text = entity_archive.read_text()
-    elif entity_main.is_file():
-        entity_text = entity_main.read_text()
+    if runtime == "claude":
+        log = LogParser(t.log_dir / "fo-log.jsonl")
+        log.write_agent_prompt(t.log_dir / "agent-prompt.txt")
+        log.write_fo_texts(t.log_dir / "fo-texts.txt")
+        agent_prompt = log.agent_prompt()
+    else:
+        log = CodexLogParser(t.log_dir / "codex-fo-log.txt")
+        agent_prompt = ""
+        # Prefer structured collab tool calls when available; fall back to raw-text scan.
+        collab_prompts = "\n".join(
+            (call.get("prompt") or "")
+            for call in log.collab_tool_calls()
+            if call.get("tool") in {"spawn", "spawn_agent"}
+        )
+        for text in (collab_prompts, log.full_text()):
+            if "### Completion checklist" in text:
+                agent_prompt = text
+                break
 
     print()
     print("[Ensign Dispatch Prompt]")
-    t.check("dispatch prompt contains Completion checklist section",
-            bool(re.search(r"Completion checklist|completion checklist", agent_prompt, re.IGNORECASE)))
-    shared_core_path = Path(__file__).resolve().parent.parent / "skills" / "ensign" / "references" / "ensign-shared-core.md"
-    shared_core_text = shared_core_path.read_text()
-    t.check("shared-core documents DONE/SKIPPED/FAILED semantics",
-            bool(re.search(r"DONE:.*SKIPPED:.*FAILED:", shared_core_text, re.DOTALL)))
-    # Current FO behavior references the entity file path rather than inlining the
-    # full acceptance criteria prose into the Agent() prompt. Accept either: AC
-    # text appears inline in the prompt, or the prompt points at an entity file
-    # whose body contains the AC text.
-    entity_rel = ""
-    try:
-        entity_rel = str(entity_main.relative_to(t.test_project_dir))
-    except ValueError:
-        entity_rel = ""
-    prompt_refs_entity = (
-        str(entity_main) in agent_prompt
-        or str(entity_archive) in agent_prompt
-        or (entity_rel and entity_rel in agent_prompt)
-        or bool(re.search(r"Read the entity file at .*checklist-test/test-checklist\.md", agent_prompt))
-    )
-    ac_text_present = bool(re.search(r"hello|UTF-8", entity_text, re.IGNORECASE))
     t.check(
-        "dispatch prompt includes entity acceptance criteria (inline or via entity reference)",
-        bool(re.search(r"hello|UTF-8", agent_prompt, re.IGNORECASE)) or (prompt_refs_entity and ac_text_present),
+        "dispatch prompt contains Completion checklist section",
+        bool(re.search(r"Completion checklist|completion checklist", agent_prompt, re.IGNORECASE)),
     )
-    t.check("dispatch prompt includes stage requirement items",
-            bool(re.search(r"deliverable|summary", agent_prompt, re.IGNORECASE)))
+
+    shared_core_path = (
+        Path(__file__).resolve().parent.parent
+        / "skills"
+        / "ensign"
+        / "references"
+        / "ensign-shared-core.md"
+    )
+    shared_core_text = shared_core_path.read_text()
+    t.check(
+        "shared-core documents DONE/SKIPPED/FAILED semantics",
+        bool(re.search(r"DONE:.*SKIPPED:.*FAILED:", shared_core_text, re.DOTALL)),
+    )
+
+    checklist_items = _extract_checklist_items(agent_prompt)
+    t.check("ensign prompt contains at least one checklist item", len(checklist_items) > 0)
 
     print()
-    print("[First Officer Checklist Review]")
-    # Per shared-core's Stage Report Protocol, the ensign writes a
-    # `## Stage Report: {stage}` section into the entity body with every
-    # dispatched item marked DONE/SKIPPED/FAILED; the FO reviews this and
-    # acknowledges via narration (e.g. "processed ... through ... stage",
-    # "completion signal received", "ensign reported completion"). Accept
-    # either surface as evidence the checklist review occurred.
-    stage_report_present = bool(
-        re.search(r"##\s+Stage Report", entity_text, re.IGNORECASE)
-        and re.search(r"\b(DONE|SKIPPED|FAILED):", entity_text)
-    )
-    fo_ack_present = bool(
-        re.search(
-            r"(processed.*through|completion signal|reported completion|appended stage report|checklist review|items reported|\d+\s+done.*\d+\s+skipped.*\d+\s+failed)",
-            fo_text,
-            re.IGNORECASE | re.DOTALL,
-        )
-    )
+    print("[Entity Stage Report]")
+    entity_path = entity_archive if entity_archive.is_file() else entity_main
+    t.check("entity exists (active or archived)", entity_path.is_file())
+    entity_text = entity_path.read_text() if entity_path.is_file() else ""
+    stage_report_text = _last_stage_report(entity_text)
+
+    # The protocol requires a Stage Report that accounts for the dispatch checklist
+    # items via DONE/SKIPPED/FAILED entries. Explicitly reject checkbox bullets.
+    t.check("entity body contains a Stage Report section", bool(stage_report_text))
     t.check(
-        "first officer performed checklist review (stage report in entity body or FO ack in narration)",
-        stage_report_present or fo_ack_present,
+        "stage report uses DONE/SKIPPED/FAILED markers (no checkbox bullets)",
+        bool(re.search(r"(?m)^- (DONE|SKIPPED|FAILED):", stage_report_text))
+        and not bool(re.search(r"(?m)^- \\[[xX ]\\]", stage_report_text)),
     )
-    t.check("dispatch prompt has structured completion message template",
-            bool(re.search(r"### Checklist|### Summary", agent_prompt, re.IGNORECASE)))
+    t.check("stage report includes Summary subsection", "### Summary" in stage_report_text)
+
+    for item in checklist_items:
+        t.check(f"stage report accounts for checklist item: {item}", item in stage_report_text)
+
+    # Sanity: the stage's deliverable should exist.
+    out_path = t.test_project_dir / "checklist-pipeline" / "output.txt"
+    t.check("output file created", out_path.is_file())
 
     t.finish()
+
