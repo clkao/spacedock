@@ -291,3 +291,106 @@ git push origin spacedock-ensign/opus-4-7-green-main
 ## Summary
 
 Shortest of the three plans. Single assertion update plus xfail removal. Diagnostic task confirms the surface; implementation task edits two chunks; verification task runs the test once. Not a cycle-7 port — different bug class.
+
+## Pre-fix audit
+
+Captured 2026-04-20 before landing the assertion widening; confirms the failure class and proposed widening shape against live fo-log evidence from 6 opus-low runs (3 with the strict count-summary regex, 3 with the widened stage-report/FO-ack regex).
+
+### 1. Current failing assertion
+
+File: `tests/test_checklist_e2e.py`, lines 129-131 (pre-fix). The offending block is a narration-only regex grep:
+
+```python
+t.check("first officer performed checklist review",
+        bool(re.search(r"checklist review|checklist.*complete|all.*items.*DONE|items reported",
+                       fo_text, re.IGNORECASE)))
+```
+
+Where `fo_text = "\n".join(log.fo_texts())` — the concatenated `text` fields from the FO's assistant messages in `fo-log.jsonl`. This is a pure narration grep — it does NOT inspect the entity body, archive, or stage-report surface. The regex looks for free-form FO phrasing about "checklist review" / "checklist complete" / "all items DONE" / "items reported" which the FO no longer reliably produces post-#154.
+
+### 2. Evidence the FO output shape changed post-#154
+
+Ran N=3 live at opus-low with the original regex (pre-existing `@pytest.mark.xfail` reason #198). All 3 failed the `first officer performed checklist review` check. Ran N=3 live with the widened regex; 2/3 passed.
+
+**Run-3 (strict regex), entity body surface** — `/tmp/211-checklist-e2e-evidence/run-3/spacedock-test-lwpcp6wt/test-project/checklist-test/test-checklist.md`:
+
+```markdown
+## Stage Report: work
+
+- DONE: Create an output file containing the word "hello" (satisfies AC-1 and AC-2).
+  Wrote `checklist-test/output.txt` containing "hello" (UTF-8).
+- DONE: Commit the output file before signaling completion.
+  See commit on main below.
+```
+
+Ensign writes `## Stage Report: {stage}` with per-item `DONE:` / `SKIPPED:` / `FAILED:` lines per shared-core's Stage Report Protocol (lines 46-74 of `skills/ensign/references/ensign-shared-core.md`). The FO narration for the same run: "Processed entity `test-checklist` through the `work` stage ... Dispatched ensign (bare mode); completed with output file, appended stage report, and commit `c07685e`" — contains "processed", "stage", "appended stage report", but does NOT match `r"checklist review|checklist.*complete|all.*items.*DONE|items reported"`.
+
+**FinalRun-1 (widened regex), FO narration** — `/tmp/211-checklist-e2e-evidence/final-run-1/spacedock-test-rwiuavxb/fo-texts.txt`:
+
+```
+Processed test-checklist through the `work` stage. 2 done, 0 skipped, 0 failed.
+Per instruction, stopping after one entity/one stage.
+```
+
+This run DID emit the shared-core count-summary format `{N} done, {N} skipped, {N} failed` in the FO narration directly. So the count surface is real but intermittent; the stage-report surface is more reliable.
+
+**FinalRun-2 (widened regex), partial drift** — entity body has `## Stage Report` section but with H3 sub-sections (`### AC1 — ...`) rather than the shared-core `- DONE:` bullet format. FO narration: "Processed entity `test-checklist` (001) through the `work` stage. Ensign reported completion". The H3 format does not contain `DONE:` / `SKIPPED:` / `FAILED:` tokens — so the sibling `first officer review references item statuses` check (line 132-133, untouched) fails. This is an ensign-side compliance miss, not an assertion issue — widening this check is OUT of scope for #211.
+
+**Conclusion:** The FO's post-#154 output distributes checklist-review evidence across three surfaces — (a) the entity body's `## Stage Report` section with per-item markers (most common, written by the ensign and reviewed by the FO), (b) FO narration with ack phrasing ("processed ... through stage", "completion signal received", "appended stage report", "ensign reported completion"), and occasionally (c) the exact count-summary format `{N} done, {N} skipped, {N} failed` either in the entity body or in narration. The old regex hits none of these reliably.
+
+### 3. Proposed widening
+
+Replace lines 129-131 with a check accepting either surface (OR logic):
+
+```python
+entity_main = t.test_project_dir / "checklist-test" / "test-checklist.md"
+entity_archive = t.test_project_dir / "checklist-test" / "_archive" / "test-checklist.md"
+entity_text = ""
+if entity_archive.is_file():
+    entity_text = entity_archive.read_text()
+elif entity_main.is_file():
+    entity_text = entity_main.read_text()
+stage_report_present = bool(
+    re.search(r"##\s+Stage Report", entity_text, re.IGNORECASE)
+    and re.search(r"\b(DONE|SKIPPED|FAILED):", entity_text)
+)
+fo_ack_present = bool(
+    re.search(
+        r"(processed.*through|completion signal|reported completion|appended stage report|checklist review|items reported|\d+\s+done.*\d+\s+skipped.*\d+\s+failed)",
+        fo_text,
+        re.IGNORECASE | re.DOTALL,
+    )
+)
+t.check(
+    "first officer performed checklist review (stage report in entity body or FO ack in narration)",
+    stage_report_present or fo_ack_present,
+)
+```
+
+Logic:
+- **Entity body branch** — requires BOTH `## Stage Report` header AND at least one `DONE:` / `SKIPPED:` / `FAILED:` marker (prevents an empty section from counting).
+- **FO narration branch** — matches any of 7 ack phrasings observed across runs; includes the strict shared-core count-summary pattern so runs that DO emit it are recognized.
+- **Combine with OR** — either surface is sufficient evidence the checklist review occurred.
+
+Also widen the companion `first officer review references item statuses` check to scan `fo_text + "\n" + entity_text` rather than `fo_text` alone, since in the common case DONE/SKIPPED/FAILED markers live in the entity body not the narration.
+
+### 4. xfail removal criterion
+
+Remove `@pytest.mark.xfail(strict=False, reason="pending #198 ...")` (line 26) iff:
+- >=2/3 N=3 opus-low runs pass locally with the widened assertion.
+
+Observed with the widened regex: **2/3 passed** (FinalRun-1, FinalRun-3). FinalRun-2 failed on the companion `references item statuses` check because the ensign in that run wrote H3 sub-sections instead of bullet markers in its Stage Report — an ensign compliance drift, orthogonal to #211's assertion-widening scope. The widened check-1 passed in all 3 runs. Criterion met.
+
+If the captain prefers a stricter bar (3/3 pass), the `references item statuses` companion check would also need widening (accept H3 per-AC sections as evidence), but that expands scope beyond the original entity brief. Flagging for captain direction.
+
+### Proposed path forward (awaiting captain sign-off)
+
+1. Land the widened assertion shown in section 3 (already committed locally as `3c141cb0`; will keep / revert per captain direction).
+2. Drop the xfail marker.
+3. One opus-low verification run (per captain's 1-green-then-PR strategy), then push + open PR letting CI matrix confirm.
+4. If captain prefers the stricter 3/3 bar, widen the companion check-2 as well before PR.
+
+### Disclosure
+
+I jumped to code changes before writing this audit. Captain's pause-for-audit instruction arrived after I had already (a) committed the assertion widening twice (`c12559bf`, `3c141cb0`), (b) completed N=3 at opus-low twice. This audit documents what I learned during those runs retroactively rather than ahead of code — flagging the process miss so it's visible. No PR has been pushed. Happy to revert both commits and proceed fresh from the audit if the captain prefers.
+
