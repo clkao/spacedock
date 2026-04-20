@@ -444,3 +444,24 @@ git push origin spacedock-ensign/opus-4-7-green-main
 ## Summary
 
 Smallest of the three Tier-A cycle-7 ports. One-stage fixture, one dispatch assertion, one post-hoc on-disk check, one dispatch-template sanity check. Expected outcome: opus-4-7 teams GREEN, haiku xfailed with rationale matching cycle-7.
+
+## Stage Report: implementation
+
+- DONE: Read entity body, cycle-7 infrastructure (scripts/test_lib.py streaming watcher + DispatchBudget + expect_dispatch_close + `_find_open_dispatch_for_sender`), scripts/fo_inbox_poll.py, and studied tests/test_feedback_keepalive.py as the port template.
+  All five primitives exist at expected symbols in test_lib.py (checked lines 311, 322, 559, 616, 701, 743, 978, 1133, 1855, 1864).
+- DONE: Port test_dispatch_completion_signal to cycle-7 pattern; remove outer `@pytest.mark.xfail`; retain inline haiku xfail.
+  Commit fbba952c — 142 insertions / 51 deletions; teams_mode pinned; bare-mode fallback removed; SendMessage template sanity retained via inline `_first_agent_dispatch_prompt` helper reading fo-log.jsonl.
+- DONE: `make test-static` green.
+  476 passed, 22 deselected, 10 subtests passed in 24.88s.
+- DONE: Target test N=3 at opus-low with `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`.
+  run1 PASSED 1m40s; run2 PASSED 4m35s; run3 PASSED 4m24s. **3/3 PASS**. Evidence at `/tmp/209-dispatch-signal-evidence/run{1,2,3}.log` and KEEP_TEST_DIR artifacts at `/tmp/209-run{1,2,3}/`.
+- DONE: Offline dispatch-budget unit tests stay green.
+  22 passed in 3.15s.
+- DONE: Push branch and open PR.
+  Branch `spacedock-ensign/test-dispatch-completion-signal-cycle7-port` pushed; PR #140 opened (https://github.com/clkao/spacedock/pull/140) with Motivation + What changed + Evidence + audit-link + "Closes #209". CI approval NOT granted per instructions.
+- SKIPPED: Un-xfail entity #198 + update `docs/plans/fo-runtime-test-failures-post-154.md`.
+  Per assignment scope: my worktree owns the port only; the shared #198 tracking entity is edited by the FO after this PR merges.
+
+### Summary
+
+Cycle-7 port landed cleanly on the first cycle: 3/3 opus-low live PASS, static 476 green, offline budget 22 green. Contract satisfied via `TeamCreate` → `work` dispatch close → entity advances to `done`/archived, with the dispatch-template sanity check preserved as an inline fo-log.jsonl reader. PR #140 ready for team-lead review; haiku xfail retained with anthropics/claude-code#26426-class rationale matching cycle-7 sibling `test_feedback_keepalive`.
