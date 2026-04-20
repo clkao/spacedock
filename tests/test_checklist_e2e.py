@@ -20,10 +20,6 @@ from test_lib import (  # noqa: E402
 )
 
 
-# #154 reclassified the original `pending #154` xfail here: this test reads no static FO content,
-# so the content-home refresh is irrelevant. The 1/9 live failure is runtime-behavior drift (FO no
-# longer emits checklist-review text during post-dispatch review) tracked by #198.
-@pytest.mark.xfail(strict=False, reason="pending #198 — runtime FO checklist-review emission drift; see docs/plans/fo-runtime-test-failures-post-154.md")
 @pytest.mark.live_claude
 def test_checklist_e2e(test_project, model, effort):
     """Commissions a full workflow then runs FO to verify ensign checklist compliance."""
@@ -126,11 +122,24 @@ Skip interactive questions and confirmation — use these inputs directly. Make 
 
     print()
     print("[First Officer Checklist Review]")
-    t.check("first officer performed checklist review",
-            bool(re.search(r"checklist review|checklist.*complete|all.*items.*DONE|items reported",
-                           fo_text, re.IGNORECASE)))
+    # Per shared-core, the FO's checklist review produces a count summary
+    # `{N} done, {N} skipped, {N} failed`. Post-#154 this is written into the
+    # entity body's stage report rather than into free-form narration. Accept
+    # either surface: the entity file (main or archived) OR the FO narration.
+    entity_main = t.test_project_dir / "checklist-test" / "test-checklist.md"
+    entity_archive = t.test_project_dir / "checklist-test" / "_archive" / "test-checklist.md"
+    entity_text = ""
+    if entity_archive.is_file():
+        entity_text = entity_archive.read_text()
+    elif entity_main.is_file():
+        entity_text = entity_main.read_text()
+    count_pattern = re.compile(r"\d+\s+done.*\d+\s+skipped.*\d+\s+failed", re.IGNORECASE | re.DOTALL)
+    t.check(
+        "first officer performed checklist review (count summary in entity body or narration)",
+        bool(count_pattern.search(entity_text)) or bool(count_pattern.search(fo_text)),
+    )
     t.check("first officer review references item statuses",
-            bool(re.search(r"DONE|SKIPPED|FAILED", fo_text, re.IGNORECASE)))
+            bool(re.search(r"DONE|SKIPPED|FAILED", fo_text + "\n" + entity_text, re.IGNORECASE)))
     t.check("dispatch prompt has structured completion message template",
             bool(re.search(r"### Checklist|### Summary", agent_prompt, re.IGNORECASE)))
 
