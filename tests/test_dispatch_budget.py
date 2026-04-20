@@ -390,6 +390,37 @@ def test_expect_dispatch_close_name_match_skips_other_dispatches(tmp_path):
     assert len(watcher.dispatch_records) == 2
 
 
+def test_expect_dispatch_close_name_match_is_case_insensitive(tmp_path):
+    """Substring match in expect_dispatch_close ignores case on both sides."""
+    budget = DispatchBudget(soft_s=30.0, hard_s=60.0, shutdown_grace_s=5.0)
+    watcher, _proc, log = _make_watcher(tmp_path, budget)
+
+    _write_line(log, _agent_dispatch("du_1", description="Implementation stage"))
+    _write_line(log, _agent_dispatch("du_2", description="Dispatch implementation"))
+
+    def _close_first():
+        time.sleep(0.1)
+        _write_line(log, _agent_tool_result("du_1"))
+
+    threading.Thread(target=_close_first, daemon=True).start()
+
+    record = watcher.expect_dispatch_close(
+        overall_timeout_s=2.0, ensign_name="implementation", label="impl close a"
+    )
+    assert record.ensign_name == "Implementation stage"
+
+    def _close_second():
+        time.sleep(0.1)
+        _write_line(log, _agent_tool_result("du_2"))
+
+    threading.Thread(target=_close_second, daemon=True).start()
+
+    record = watcher.expect_dispatch_close(
+        overall_timeout_s=2.0, ensign_name="IMPLEMENTATION", label="impl close b"
+    )
+    assert record.ensign_name == "Dispatch implementation"
+
+
 def test_expect_dispatch_close_oldest_when_no_name(tmp_path):
     """Without ensign_name, expect_dispatch_close returns the first-closed dispatch."""
     budget = DispatchBudget(soft_s=30.0, hard_s=60.0, shutdown_grace_s=5.0)
