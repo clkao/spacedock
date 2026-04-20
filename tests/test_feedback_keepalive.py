@@ -89,26 +89,29 @@ def test_feedback_keepalive(test_project, model, effort):
     abs_workflow = t.test_project_dir / "keepalive-pipeline"
     prompt = f"Process all tasks through the workflow at {abs_workflow}/ to terminal completion."
 
-    # Headless runtime guardrail: claude -p mode does not deliver inter-turn idle
-    # notifications from teammates. After dispatching an ensign, the FO's next
-    # turn begins on a bare `system init` with no inbox content. Without this
-    # hint, opus-4-7-low hallucinates that the ensign is stuck and emits
-    # premature shutdown_request. This is a runtime-environmental constraint,
-    # not workflow coaching.
+    # Keep-alive sentinel: under `claude -p`, a turn ending with text-only
+    # emits stop_reason=end_turn and closes the prompt cycle; the next cycle
+    # starts with fresh context and opus-4-7-low hallucinates reasons to tear
+    # down the team. This sentinel file forces every idle turn to end with a
+    # tool_use (stop_reason=tool_use) instead of text-only, preserving the
+    # cycle until the test harness signals workflow completion.
+    keepalive_done = t.test_project_dir / ".fo-keepalive-done"
     headless_hint = (
         f"The spacedock plugin directory is at `{t.repo_root}`. Use it "
         f"directly; do NOT run `find / -name claude-team` — the binaries you "
         f"need are `{t.repo_root}/skills/commission/bin/status` and "
         f"`{t.repo_root}/skills/commission/bin/claude-team`.\n\n"
-        "You are running in `claude -p` headless single-entity mode. "
-        "The runtime will NOT deliver inter-turn idle notifications from "
-        "teammates; your next turn begins when a real ensign event arrives. "
-        "After dispatching an ensign, end your turn immediately with no text "
-        "and no tool calls. Do not emit `shutdown_request`, `TeamDelete`, or "
-        "Bash `sleep` while awaiting an ensign's completion signal. The "
-        "ensign completion signal is a user-role message starting with `Done:` "
-        "delivered via the team inbox, or a `system task_notification` with "
-        "`status: completed`. Until one of those arrives, wait silently."
+        f"HEADLESS KEEP-ALIVE RULE. You are running in `claude -p` headless "
+        f"mode. The file `{keepalive_done}` signals end-of-workflow. Until "
+        f"that file exists, every turn MUST end with a tool_use, not with "
+        f"text. When your only work is to wait for an ensign's completion "
+        f"signal, end the turn by running the Bash tool with command "
+        f"`test -f {keepalive_done}` as a no-op keep-alive probe. Do NOT "
+        f"emit `SendMessage(shutdown_request)`, `TeamDelete`, or any other "
+        f"teardown action while awaiting an ensign. The ensign completion "
+        f"signal is a user-role message starting with `Done:` delivered via "
+        f"the team inbox. Once all ensigns have completed and the workflow "
+        f"is done, you may end with text."
     )
 
     with run_first_officer_streaming(
@@ -150,6 +153,11 @@ def test_feedback_keepalive(test_project, model, effort):
             label="SendMessage to implementation ensign (feedback reuse)",
         )
         print("[OK] feedback routed via SendMessage to kept-alive implementation ensign")
+
+        # Workflow contract satisfied — release the FO's keep-alive sentinel
+        # so it can emit its final end_turn and exit cleanly.
+        keepalive_done.touch()
+        print(f"[OK] keep-alive sentinel {keepalive_done.name} touched")
 
         w.expect_exit(timeout_s=SUBPROCESS_EXIT_BUDGET_S)
 
