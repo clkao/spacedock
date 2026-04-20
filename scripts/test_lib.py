@@ -290,9 +290,13 @@ def _isolated_claude_env() -> dict[str, str] | None:
     if not real_home:
         return None
     token_path = Path(real_home) / ".claude" / "benchmark-token"
-    token = ""
-    if token_path.is_file():
+    # Operator machines may have a locked-down ~/.claude (or a sandboxed HOME)
+    # that raises PermissionError on stat/read; treat that as "no token" so
+    # offline/static tests don't crash.
+    try:
         token = token_path.read_text().strip()
+    except OSError:
+        token = ""
     if token:
         clean_home = tempfile.mkdtemp(prefix="spacedock-clean-home-")
         env = _clean_env()
