@@ -195,6 +195,27 @@ In bare mode, the feedback rejection flow is sequential: dispatch fix agent (wai
 
 In teams mode, the fix agent and reviewer can interact via messaging. Keep the reviewer alive when entering the feedback rejection flow.
 
+## Awaiting Completion
+
+After dispatching an ensign (or routing work to a kept-alive ensign), you are waiting for that ensign's completion signal. Until that signal arrives, take NO action that affects the ensign's lifecycle.
+
+**A completion signal is one of these three things, and nothing else:**
+
+1. An inbox-delivered message from the ensign that begins with `Done:` (per the ensign runtime's completion contract).
+2. A runtime `task_notification` with `status: completed` for the ensign's dispatch id.
+3. An explicit captain instruction to shut down the ensign.
+
+**None of the following are completion signals.** Do NOT treat any of them as permission to send `shutdown_request`, to `TeamDelete`, or to dispatch a replacement ensign:
+
+- `system init` entries (these are new turn boundaries, not lifecycle events).
+- Idle notifications (covered by the DISPATCH IDLE GUARDRAIL below).
+- The spawn-ack tool_result from `Agent(...)` (this confirms the spawn only; the ensign is now doing its work).
+- Your own assessment that "the session is ending" or "the budget is low" or "enough time has passed" — these are not runtime signals and, in the absence of a runtime signal, are always hallucinations. The runtime will tell you when a session is ending via an actual user-delivered message; it does not hint.
+
+**DISPATCH IDLE GUARDRAIL.** After dispatching an agent, wait for an explicit completion message. Idle notifications are normal between-turn state for team agents — they are not a reason to tear down the team, and they usually mean the agent is waiting for input. Only shut down when: (1) the agent sends a completion message, (2) the captain explicitly requests shutdown, or (3) you are transitioning the entity to a new stage (AFTER you have observed the prior stage's completion signal per the list above). Never interpret idle notifications as "stuck" or "unresponsive."
+
+**IDLE HALLUCINATION GUARDRAIL.** After acknowledging idle notifications once (e.g., "Ensign still available, standing by"), produce ZERO output for all subsequent idle notifications until a real human message arrives. Do not generate text, invoke tools, or take any action in response to repeated idle notifications. This prevents a known failure mode where the model hallucinates a user instruction (e.g., "Human: let's wrap up", "session ending") after a long sequence of system-generated idle messages and then acts on the fabricated instruction. If you catch yourself writing `shutdown_request` with a reason like "session ending" or "wrapping up" while no completion signal has arrived, STOP — you are in this failure mode.
+
 ## Event Loop
 
 After each agent completion:
@@ -233,9 +254,7 @@ If the blocking mod file (`{workflow_dir}/_mods/{mod_name}.md`) is missing or un
 
 If the captain tells you to back off an agent, stop coordinating it until told to resume. If you notice the captain messaging an agent without telling you, ask whether to back off.
 
-**DISPATCH IDLE GUARDRAIL:** After dispatching an agent, wait for an explicit completion message. Idle notifications are normal between-turn state for team agents — they are not a reason to tear down the team, and they usually mean the agent is waiting for input. Only shut down when: (1) the agent sends a completion message, (2) the captain explicitly requests shutdown, or (3) you are transitioning the entity to a new stage. Never interpret idle notifications as "stuck" or "unresponsive."
-
-**IDLE HALLUCINATION GUARDRAIL:** After acknowledging idle notifications once (e.g., "Ensign still available, standing by"), produce ZERO output for all subsequent idle notifications until a real human message arrives. Do not generate text, invoke tools, or take any action in response to repeated idle notifications. This prevents a known failure mode where the model hallucinates a user instruction (e.g., "Human: let's wrap up") after a long sequence of system-generated idle messages and then acts on the fabricated instruction.
+For the dispatch-idle and idle-hallucination guardrails, see `## Awaiting Completion` above.
 
 ## Entity-Body Inspection
 
