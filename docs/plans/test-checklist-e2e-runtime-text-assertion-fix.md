@@ -543,3 +543,19 @@ Codex CI was failing because the Codex dispatch prompt used `Completion checklis
 ### Summary
 
 Codex worker prompts sometimes rendered `Completion checklist (linchpins):` and sometimes mixed checklist bullets with adjacent “Additional stage rules” bullets, which made the checklist E2E brittle. The Codex runtime now prescribes a plain checklist heading, and the checklist E2E parses only the checklist block and verifies stage-report accounting via stable anchors so it remains portable across small prompt reflows.
+
+
+## Stage Report: implementation (cycle 8)
+
+- DONE: Fingerprint the remaining Codex CI failure via `gh api` job logs + downloaded artifacts
+  Job `72228264253` (run `24695826486`, head `7fd7cbe3`) still failed `tests/test_checklist_e2e.py::test_checklist_e2e_codex` because the worker prompt used an `Execution requirements:` section immediately after the checklist; the checklist parser did not treat that as an end marker, so it incorrectly collected those requirement bullets as checklist items.
+  Evidence: downloaded the run artifact `runtime-live-e2e-codex-live` and inspected `spacedock-test-8ozfs9fe/codex-fo-log.txt` — the `Execution requirements:` bullets were being asserted as checklist items.
+- DONE: Make the reproduced codex-live failure green by stopping checklist parsing at `Execution requirements:`
+  `tests/test_checklist_e2e.py::_extract_checklist_items` now stops on `Execution requirements:` in addition to the existing end markers. Commit `6f296ba9`.
+- DONE: Verification evidence
+  `KEEP_TEST_DIR=1 uv run pytest tests/test_checklist_e2e.py::test_checklist_e2e_codex -m live_codex --runtime codex -q` → **1 passed**.
+  `make test-static` → **485 passed, 25 deselected, 10 subtests passed**.
+
+### Summary
+
+Codex CI was still failing due to a specific post-checklist heading (`Execution requirements:`) not being recognized as the checklist terminator. The checklist E2E now treats it as an end marker, so only the true checklist items are required to be covered by the stage report.
