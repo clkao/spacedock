@@ -185,10 +185,10 @@
   },
   "active": "342d56225b1d3538",
   "lastOpenFiles": [
+    "docs/plans/_archive/test-dispatch-completion-signal-cycle7-port.md",
     "docs/plans/test-reuse-dispatch-cycle7-port.md",
     "docs/plans/test-dispatch-completion-signal-cycle7-port.md",
     "docs/plans/_archive/test-reuse-dispatch-cycle7-port.md",
-    "docs/plans/_archive/test-dispatch-completion-signal-cycle7-port.md",
     "tests/test_fo_bootstrap_teamcreate_discipline.py",
     "tests/test_dispatch_budget.py",
     "scripts/fo_inbox_poll.py",
