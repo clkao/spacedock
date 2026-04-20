@@ -1526,3 +1526,31 @@ Per captain's note: `test_merge_hook_guardrail` until `7f44763a` had no mode-mar
 ### Summary
 
 Cycle-9 ports the cycle-7 teams-mode scaffolding to `test_merge_hook_guardrail.py` and drops the racy FO-stream hook-fired assertion in favor of the authoritative Phase-3 filesystem check. Two discrete commits (`7f44763a`, `34dc1f0b`). `make test-static` 475/475. **Local opus-low teams-mode N=3: 3/3 PASS** (242s, 252s, 250s) — target ≥2/3 exceeded. Haiku N=3 skipped per captain guidance (haiku-low has its own #200-class drift outside cycle-9 scope). The no-marker/CI-env-forcing drift class flagged for captain follow-up tracker.
+
+## Stage Report: implementation (cycle 11 — CI opus fixes from cycle-10 diagnosis)
+
+Two narrow fixes from cycle-10's fo-log diagnosis of the opus-low CI reds.
+
+### Commits
+
+- `e13bfa57` fix: #203 cycle-11 add 'work' to inbox-poll anchor stage tuple
+  - `scripts/test_lib.py::_find_open_dispatch_for_sender` line 1252
+  - Tuple now: `("implementation", "validation", "analysis", "design", "work")`
+  - Closes merge_hook watcher-hang: single-stage workflows terminal-stage `work` was absent, so inbox-poll close anchor silently failed to match, causing the watcher to wait for `task_notification` past the hook-fired Bash.
+  - Cycle-9's `34dc1f0b` defensive change (drop racy FO-stream hook-fired expect) kept — defense in depth.
+- `9c18efa6` fix: #203 cycle-11 make standing_teammate entity-body ECHO write explicit in fixture prompt
+  - `tests/fixtures/standing-teammate/001-echo-roundtrip.md` ~line 16
+  - Prompt now explicitly requires ensign to append captured "ECHO: ..." reply to entity file body on disk (via Edit) and commit before SendMessage Done.
+  - Rationale: stage-report-to-entity-body is a TEST artifact requirement (fixture-specific), not a standing-teammate usage default — fixture prompt must ask for it explicitly or ensigns won't naturally write it. No change to shared-core discipline or FO dispatch template.
+
+### test-static
+
+`make test-static`: **475 passed, 22 deselected, 10 subtests passed in 24.11s**. No behavioral regression from the two edits.
+
+### Push
+
+`git push origin spacedock-ensign/opus-4-7-green-main`: `99fae03c..9c18efa6` — non-forced fast-forward, succeeded.
+
+### Next
+
+Captain to approve CI-E2E-OPUS + CI-E2E via REST API for verification. No ensign action pending CI signal.
