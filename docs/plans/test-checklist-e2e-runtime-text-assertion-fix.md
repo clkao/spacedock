@@ -509,3 +509,18 @@ Closed all three chained defects identified in cycle-5 triage: (B) ported the `#
 ### Summary
 
 PASSED with two captain-addressable non-blockers. Cycle-5 commits (`d944cd5c`, `4667a905`, `9ff8ad01`) all match their commit messages and close the three chained defects as claimed. `make test-static` green at 479 passed. Helper-path E2E 2/2 PASS (106.77s, 64.41s), meeting the "at least 2 consecutive" bar. Break-glass-path E2E 1/2 PASS (75.22s PASS; 84.83s FAIL on `### Summary` subsection miss — orthogonal ensign drift, not a cycle-5 regression). AC-5 resolution note in `fo-runtime-test-failures-post-154.md` is the sole confirmed audit gap and was pre-flagged by the dispatch prompt as captain-addressable post-validation.
+
+
+## Stage Report: implementation (cycle 6)
+
+- DONE: Fingerprint the remaining PR #142 Codex CI failure via `gh api` + downloaded artifacts
+  `gh api repos/clkao/spacedock/actions/jobs/72199126707/logs` shows `FAILED tests/test_checklist_e2e.py::test_checklist_e2e_codex` with failing check `ensign prompt contains at least one checklist item`. Downloaded `runtime-live-e2e-codex-live` artifacts via `gh run download 24687044622 -n runtime-live-e2e-codex-live -R clkao/spacedock` and inspected `spacedock-test-wdiwakng/codex-fo-log.txt` to confirm the worker prompt header was `Completion checklist (linchpins):` and the block terminator was `Requirements:`.
+- DONE: Make the reproduced codex-live failure green by widening checklist parsing
+  `tests/test_checklist_e2e.py::_extract_checklist_items` now recognizes `Completion checklist (linchpins):` and stops on either `Instructions:` or `Requirements:`. Commit `9da15973`.
+- DONE: Verification evidence
+  `uv run pytest tests/test_checklist_e2e.py::test_checklist_e2e_codex -m live_codex --runtime codex -q` → **1 passed**.
+  `make test-static` → **484 passed, 25 deselected, 10 subtests passed**.
+
+### Summary
+
+Codex CI was failing because the Codex dispatch prompt used `Completion checklist (linchpins):`, which the checklist extractor did not treat as a section header. Parsing is now robust to that header and to `Requirements:` as the end marker, so the Codex E2E test should no longer be sensitive to that prompt-shape variation.
