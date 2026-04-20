@@ -567,3 +567,22 @@ Run: `git push origin spacedock-ensign/opus-4-7-green-main`
 ## Summary
 
 This plan ports `test_reuse_dispatch` onto the cycle-7 streaming watcher + inbox-poll keep-alive pattern that made `test_feedback_keepalive` green at opus-4-7 teams. Scope is narrowly the test + its fixture (one-character fixture edit to drop the validation gate). No shared-core prose changes; no harness modifications. Execution is four small tasks (fixture edit, test rewrite, live verification, stage report). Expected outcome: opus-4-7 teams GREEN, haiku xfailed with rationale matching cycle-7.
+
+## Stage Report: implementation
+
+- DONE: Un-gate fixture validation stage
+  Commit 10e6aa75; verified single consumer via `grep -rn reuse-pipeline tests/`
+- DONE: Rewrite test_reuse_dispatch.py on cycle-7 template
+  Commit e4df21ab; 167+/97- line delta; streaming watcher + DispatchBudget + expect_dispatch_close + inbox-poll keepalive; `@pytest.mark.teams_mode` pin; outer `@pytest.mark.xfail` removed; haiku-only inline xfail retained
+- DONE: make test-static green
+  476 passed, 22 deselected, 10 subtests passed (baseline unchanged)
+- DONE: offline dispatch-budget unit tests green
+  21 passed (tests/test_dispatch_budget.py)
+- DONE: opus-low N=3 live verification
+  3/3 PASS — run1 215.69s, run2 220.32s, run3 290.69s; evidence at /tmp/208-reuse-dispatch-evidence/run{1,2,3}.log; test dirs preserved at /tmp/reuse-r{1,2,3}/
+- DONE: haiku xfail rationale aligned with cycle-7
+  Inline `pytest.xfail` guard for `claude-haiku-4-5`/`haiku`; rationale cites anthropics/claude-code#26426 class
+
+### Summary
+
+Ported test_reuse_dispatch.py to the cycle-7 streaming watcher + inbox-poll keepalive pattern, mirroring test_feedback_keepalive.py. Dropped the incidental `gate: true` on the reuse-pipeline validation stage (the reuse contract is analysis→implementation SendMessage + fresh validation redispatch; the gate has no captain under `claude -p`). Live verification at opus-low teams mode is 3/3 PASS, well above the ≥2/3 bar. No changes to shared infrastructure (scripts/test_lib.py, scripts/fo_inbox_poll.py, shared-core prose).
