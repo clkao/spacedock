@@ -1099,3 +1099,63 @@ Is the structural pivot (replace FO-stream ensign-internal tool_use assertions w
 - **C.** Switch the test to `@pytest.mark.bare_mode` — the current test is `@pytest.mark.teams_mode`, but echo-agent requires teams mode (standing-teammate concept only exists in teams). Not viable.
 
 Proceeding with B unless captain redirects.
+
+## Cycle-8 step-2: merge_hook per-stage enumeration + budget proposal
+
+**Scope:** `tests/test_merge_hook_guardrail.py` only. Bare-mode test (no `@pytest.mark.teams_mode`) — the Agent tool_result carries the ensign's Done payload synchronously (`scripts/test_lib.py:1344 _looks_like_bare_done`). No InboxPoller (#26426) dependency. The cycle-7 inbox-poll + keep-alive sentinel workaround is teams-mode-only scaffolding and does NOT apply here. Porting "cycle-7 pattern" means porting the `expect_dispatch_close` + `DispatchBudget(soft, hard)` + bounded subprocess-exit shape — not the inbox-poll script.
+
+### Test shape today
+
+Two claude-FO subprocess invocations (Phase-2 and Phase-5), one per fixture variant. Each drives the FO through a pipeline that dispatches exactly one ensign:
+
+- **Phase-2 (`hook_expected=True`)** — fixture with a `_mods/test-hook.md` registered. Ensign runs the pipeline, the merge hook fires (writes `_merge-hook-fired.txt`), then the ensign archives the entity.
+- **Phase-5 (`hook_expected=False`)** — fixture with no `_mods/`. Ensign runs the pipeline, takes the default local-merge path, archives.
+
+### Stages per FO invocation
+
+| # | Stage | Anchor in fo-log stream | Current budget | Proposed budget |
+|---|---|---|---|---|
+| A | FO bootstrap → ensign Agent() dispatch tool_use emitted | assistant `tool_use` where `name=="Agent" & subagent_type=="spacedock:ensign"` | `expect(..., timeout_s=180)` (line 55) | absorbed into stage C's overall budget (no separate assertion) |
+| B | merge hook fires (Phase-2 only) | assistant `tool_use` where `name=="Bash" & command` contains `_merge-hook-fired.txt` | `expect(..., timeout_s=300)` (line 63) | `expect(..., timeout_s=90)` — asserted between A and C, must fire during the ensign's work |
+| C | ensign dispatch close | user `tool_result` for the Agent tool_use_id with non-spawn-ack payload (bare mode) | not asserted; implicit in `expect_exit` | `expect_dispatch_close(overall_timeout_s=150, dispatch_budget_s=120)` |
+| D | FO subprocess exit | `proc.wait` returns | `expect_exit(timeout_s=300)` (line 68) | `expect_exit(timeout_s=45)` in try/except with NOTE on post-contract overrun (cycle-7 round-6d precedent) |
+
+### Dispatch-level budgets
+
+At the `run_first_officer_streaming` level: pass `dispatch_budget=DispatchBudget(soft_s=30.0, hard_s=150.0, shutdown_grace_s=10.0)`.
+
+Rationale: cycle-3 post-#204 Phase-1 fo-log (`/tmp/203-postfix-low-evidence/merge_hook_guardrail-run1-fo-log.jsonl`) shows the clean-path dispatch elapsed at opus-low is ~71s (Agent tool_use at `16:31:01Z` → tool_result at `16:32:12Z`), with the hook-fired Bash tool_use landing ~46s into the dispatch. 30s soft surfaces a warning on slow dispatches; 150s hard gives ~2x headroom over the clean path while catching the 300s-wallclock-wall failure mode long before the subprocess wall.
+
+### Stage-C budget derivation
+
+`overall_timeout_s=150` — from-now budget that absorbs FO bootstrap (~55s on opus-low per run1 evidence) plus dispatch elapsed (~71s) plus slack. `dispatch_budget_s=120` — the dispatch's own elapsed cap (Agent tool_use → Agent tool_result). 120s is firmly above the clean ~71s but well below the 300s failure mode. If this proves too tight at haiku or under CI host variance, raise to 180 as a targeted follow-up.
+
+### Stage-D budget derivation
+
+`timeout_s=45` — after the dispatch closes, the FO only needs to emit a short terminal summary (archival already happened inside the ensign). In observed clean runs the FO exits within 15-25s of dispatch close. 45s gives headroom. Post-contract overrun is caught via try/except with NOTE (cycle-7 round-6d precedent: contract assertions already passed, don't fail the test on a cleanup wall).
+
+### Constants for test body
+
+```
+PER_DISPATCH_OVERALL_S   = 150   # stage C expect_dispatch_close overall wall
+PER_DISPATCH_BUDGET_S    = 120   # stage C dispatch_budget (elapsed cap)
+MERGE_HOOK_FIRED_S       = 90    # stage B expect wall (Phase-2 only)
+SUBPROCESS_EXIT_BUDGET_S = 45    # stage D expect_exit wall
+```
+
+With `DispatchBudget(soft_s=30.0, hard_s=150.0, shutdown_grace_s=10.0)` on the stream. Note `hard_s=150` matches stage-C's `dispatch_budget_s=120` with a 30s gap — the `expect_dispatch_close` StepTimeout fires first at 120s, and the watcher's own hard-kill at 150s is the safety net if for some reason the assertion loop does not raise.
+
+### What's explicitly NOT in this port
+
+- No `@pytest.mark.teams_mode` pin. Bare mode is correct for this test's contract (single-ensign pipeline, no cycle-2 feedback reuse).
+- No `scripts/fo_inbox_poll.py` invocation. Not needed in bare mode.
+- No keep-alive sentinel file. The `-p` cycle-close hallucination loop that motivated the sentinel fires when the FO is waiting on an inbox-delivered teammate message; here the FO gets its completion synchronously via the Agent tool_result.
+- No `--append-system-prompt` hint. Bare-mode Agent() does not need the inbox-polling discipline.
+
+### Commits expected
+
+1. Budget proposal added to entity file (this commit).
+2. Port `expect_dispatch_close` + `DispatchBudget` + bounded `expect_exit` into `_run_claude_merge_case` with the constants above.
+3. Verify `make test-static` stays green (no test_dispatch_budget regressions). No new code commit if clean.
+
+Step-4 (opus-low N=3) runs after the port commits land.
