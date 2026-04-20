@@ -1520,14 +1520,14 @@ class FOStreamWatcher:
         while True:
             self._drain_entries()
             for record in self.dispatch_records[baseline:]:
-                if ensign_name is None or ensign_name in record.ensign_name:
+                if ensign_name is None or ensign_name.lower() in record.ensign_name.lower():
                     return _assert_budget(record)
             baseline = len(self.dispatch_records)
 
             if self.proc.poll() is not None:
                 self._drain_entries()
                 for record in self.dispatch_records[baseline:]:
-                    if ensign_name is None or ensign_name in record.ensign_name:
+                    if ensign_name is None or ensign_name.lower() in record.ensign_name.lower():
                         return _assert_budget(record)
                 raise StepFailure(
                     f"FO subprocess exited (code={self.proc.returncode}) "
