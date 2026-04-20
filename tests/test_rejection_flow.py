@@ -215,23 +215,28 @@ def test_rejection_flow(test_project, model, effort):
     records = w.dispatch_records
     print(f"  dispatch records: {[(r.ensign_name, round(r.elapsed, 1)) for r in records]}")
 
-    # Dispatch count analysis. Accept either:
-    #   3 Agents (impl, validation, impl-fix) — reuse path: validation re-review via SendMessage
-    #   4 Agents (impl, validation, impl-fix, validation-recheck) — fresh path
-    # Per #141 the reuse path is preferred; we don't enforce it strictly
-    # because the context-budget check is a legitimate branch to fresh.
+    # Post-hoc count is a secondary signal — the contract lives in the
+    # in-stream expect(...) calls above. The watcher stops capturing new
+    # Agent() tool_uses once the keep-alive sentinel is touched, so any
+    # post-sentinel dispatch (e.g. validation cycle-2 via fresh Agent when
+    # the FO picks fresh-dispatch over SendMessage reuse) does NOT appear
+    # in dispatch_records. Accept >=2 captured: impl + validation-c1 is
+    # the minimum, reuse-path runs may also capture impl-fix before the
+    # sentinel depending on ordering.
     t.check(
-        "FO emitted 3 or 4 ensign Agent() dispatches (impl + validation + impl-fix +/- validation-recheck)",
-        len(records) in (3, 4),
+        "FO captured >=2 in-stream ensign Agent() dispatches before keep-alive sentinel",
+        len(records) >= 2,
     )
 
     print()
     print("[Rejection Signal Present]")
     entity_main = t.test_project_dir / "rejection-pipeline" / "buggy-add-task.md"
+    entity_archive = t.test_project_dir / "rejection-pipeline" / "_archive" / "buggy-add-task.md"
     worktrees_dir = t.test_project_dir / ".worktrees"
+    archive_text = entity_archive.read_text() if entity_archive.is_file() else ""
     t.check(
         "reviewer stage report contains REJECTED recommendation",
-        rejection_signal_present("rejection-pipeline", "buggy-add-task", entity_main, worktrees_dir, "", ""),
+        rejection_signal_present("rejection-pipeline", "buggy-add-task", entity_main, worktrees_dir, archive_text, ""),
     )
 
     print()
