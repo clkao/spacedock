@@ -90,6 +90,44 @@ def _agent_tool_result(tool_use_id: str, text: str = "Done: stage complete.") ->
     }
 
 
+def _teams_spawn_ack(tool_use_id: str, agent_id: str = "spacedock-ensign-x") -> dict:
+    """Teams-mode spawn-ack tool_result — fires immediately after Agent() spawn.
+
+    This is NOT a completion signal and MUST NOT close a tracked dispatch.
+    """
+    return {
+        "type": "user",
+        "message": {
+            "content": [
+                {
+                    "type": "tool_result",
+                    "tool_use_id": tool_use_id,
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": (
+                                f"Spawned successfully.\n"
+                                f"agent_id: {agent_id}\n"
+                                f"name: {agent_id}"
+                            ),
+                        }
+                    ],
+                }
+            ],
+        },
+    }
+
+
+def _task_notification_completed(tool_use_id: str) -> dict:
+    """Teams-mode task_notification with status=completed (real completion signal)."""
+    return {
+        "type": "system",
+        "subtype": "task_notification",
+        "tool_use_id": tool_use_id,
+        "status": "completed",
+    }
+
+
 def _send_message(to: str = "team-lead", body: str = "Done: impl-task completed.") -> dict:
     """Teams-mode SendMessage — NOT a close anchor; only tool_result closes."""
     return {
@@ -427,3 +465,56 @@ def test_dispatch_records_accumulates_across_closes(tmp_path):
 
     assert [r.ensign_name for r in watcher.dispatch_records] == ["a", "b"]
     assert all(r.elapsed >= 0.0 for r in watcher.dispatch_records)
+
+
+def test_teams_spawn_ack_does_not_close_dispatch(tmp_path):
+    """Teams-mode spawn-ack tool_result ('Spawned successfully. agent_id: ...') MUST NOT close.
+
+    In teams mode the Agent tool_result fires on spawn, not completion. Closing
+    on spawn-ack would make every dispatch show elapsed~0 and mask real slowness.
+    """
+    budget = DispatchBudget(soft_s=10.0, hard_s=30.0, shutdown_grace_s=5.0)
+    watcher, _proc, log = _make_watcher(tmp_path, budget)
+
+    _write_line(log, _agent_dispatch("du_1", description="teams-impl"))
+    _write_line(log, _teams_spawn_ack("du_1"))
+    watcher._drain_entries()
+
+    assert len(watcher._open_dispatches) == 1
+    assert watcher.dispatch_records == []
+
+
+def test_teams_task_notification_completed_closes_dispatch(tmp_path):
+    """Teams-mode close anchor: system entry with subtype=task_notification, status=completed."""
+    budget = DispatchBudget(soft_s=30.0, hard_s=60.0, shutdown_grace_s=5.0)
+    watcher, _proc, log = _make_watcher(tmp_path, budget)
+
+    _write_line(log, _agent_dispatch("du_1", description="teams-dispatch"))
+    _write_line(log, _teams_spawn_ack("du_1"))
+    _write_line(log, _task_notification_completed("du_1"))
+    watcher._drain_entries()
+
+    assert watcher._open_dispatches == {}
+    assert len(watcher.dispatch_records) == 1
+    assert watcher.dispatch_records[0].ensign_name == "teams-dispatch"
+
+
+def test_task_notification_in_progress_does_not_close(tmp_path):
+    """Only status=completed closes; intermediate task_notifications must be ignored."""
+    budget = DispatchBudget(soft_s=30.0, hard_s=60.0, shutdown_grace_s=5.0)
+    watcher, _proc, log = _make_watcher(tmp_path, budget)
+
+    _write_line(log, _agent_dispatch("du_1"))
+    _write_line(
+        log,
+        {
+            "type": "system",
+            "subtype": "task_notification",
+            "tool_use_id": "du_1",
+            "status": "running",
+        },
+    )
+    watcher._drain_entries()
+
+    assert len(watcher._open_dispatches) == 1
+    assert watcher.dispatch_records == []

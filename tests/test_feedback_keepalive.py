@@ -1,5 +1,5 @@
 # ABOUTME: E2E test for the feedback-to keepalive rule in the first-officer template.
-# ABOUTME: Asserts strict Path-A shape (impl dispatch -> validation dispatch -> second impl dispatch) with per-dispatch budgets.
+# ABOUTME: Pinned to teams_mode; asserts TeamCreate + impl dispatch + validation dispatch + SendMessage feedback reuse.
 
 from __future__ import annotations
 
@@ -24,34 +24,44 @@ from test_lib import (  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
-IMPL_OVERALL_S = 180
-VALIDATION_OVERALL_S = 180
-FEEDBACK_OVERALL_S = 240
 
-PER_DISPATCH_BUDGET_S = 45
+PER_STAGE_OVERALL_S = 45
+PER_DISPATCH_BUDGET_S = 30
 
-SUBPROCESS_EXIT_BUDGET_S = 120
+SUBPROCESS_EXIT_BUDGET_S = 60
+
+
+def _is_tool_use(entry: dict, name: str) -> dict | None:
+    if entry.get("type") != "assistant":
+        return None
+    msg = entry.get("message") or {}
+    for block in (msg.get("content") or []):
+        if (
+            isinstance(block, dict)
+            and block.get("type") == "tool_use"
+            and block.get("name") == name
+        ):
+            return block
+    return None
+
+
+def _is_send_message_to(entry: dict, recipient_substr: str) -> bool:
+    block = _is_tool_use(entry, "SendMessage")
+    if not block:
+        return False
+    inp = block.get("input") or {}
+    return recipient_substr in str(inp.get("to", ""))
+
+
+def _is_team_create(entry: dict) -> bool:
+    return _is_tool_use(entry, "TeamCreate") is not None
 
 
 @pytest.mark.live_claude
-def test_feedback_keepalive(test_project, model, effort, request):
-    """FO drives Path-A (impl -> validation rejects -> re-dispatch impl) with per-dispatch budgets."""
+@pytest.mark.teams_mode
+def test_feedback_keepalive(test_project, model, effort):
+    """FO drives teams-mode keepalive: TeamCreate -> impl ensign -> validation ensign -> SendMessage reuse (not fresh Agent)."""
     t = test_project
-
-    team_mode_opt = request.config.getoption("--team-mode")
-    if team_mode_opt in ("teams", "bare"):
-        resolved_team_mode = team_mode_opt
-    else:
-        import os as _os
-        _env = _os.environ.get("CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS", "").strip().lower()
-        resolved_team_mode = "teams" if _env in ("1", "true") else "bare"
-    if resolved_team_mode == "bare" and model == "claude-haiku-4-5":
-        pytest.xfail(
-            reason=(
-                "pending #200 — haiku-bare FO tool-shape discipline "
-                "(subagent_type=None validation, SendMessage nested in Agent prompt)"
-            )
-        )
 
     print("--- Phase 1: Set up test project from fixture ---")
     setup_fixture(t, "keepalive-pipeline", "keepalive-pipeline")
@@ -77,17 +87,20 @@ def test_feedback_keepalive(test_project, model, effort, request):
         )
 
     abs_workflow = t.test_project_dir / "keepalive-pipeline"
-    prompt = f"Process all tasks through the workflow at {abs_workflow}/ to terminal completion. Drive every dispatchable task through its stages until the entity reaches the done stage."
+    prompt = f"Process all tasks through the workflow at {abs_workflow}/ to terminal completion."
 
     with run_first_officer_streaming(
         t,
         prompt,
         agent_id="spacedock:first-officer",
         extra_args=["--model", model, "--effort", effort, "--max-budget-usd", "5.00"],
-        dispatch_budget=DispatchBudget(soft_s=60.0, hard_s=300.0, shutdown_grace_s=30.0),
+        dispatch_budget=DispatchBudget(soft_s=15.0, hard_s=60.0, shutdown_grace_s=10.0),
     ) as w:
+        w.expect(_is_team_create, timeout_s=PER_STAGE_OVERALL_S, label="TeamCreate emitted")
+        print("[OK] TeamCreate emitted (teams mode engaged)")
+
         impl_record = w.expect_dispatch_close(
-            overall_timeout_s=IMPL_OVERALL_S,
+            overall_timeout_s=PER_STAGE_OVERALL_S,
             dispatch_budget_s=PER_DISPATCH_BUDGET_S,
             ensign_name="implementation",
             label="implementation dispatch close",
@@ -95,29 +108,35 @@ def test_feedback_keepalive(test_project, model, effort, request):
         print(f"[OK] implementation dispatch closed in {impl_record.elapsed:.1f}s")
 
         validation_record = w.expect_dispatch_close(
-            overall_timeout_s=VALIDATION_OVERALL_S,
+            overall_timeout_s=PER_STAGE_OVERALL_S,
             dispatch_budget_s=PER_DISPATCH_BUDGET_S,
             ensign_name="validation",
             label="validation dispatch close",
         )
         print(f"[OK] validation dispatch closed in {validation_record.elapsed:.1f}s")
 
-        feedback_record = w.expect_dispatch_close(
-            overall_timeout_s=FEEDBACK_OVERALL_S,
-            dispatch_budget_s=PER_DISPATCH_BUDGET_S,
-            ensign_name="implementation",
-            label="feedback-cycle implementation dispatch close",
+        # Keepalive contract: cycle-2 feedback routing MUST be SendMessage to the
+        # still-alive implementation ensign, NOT a fresh Agent() dispatch.
+        w.expect(
+            lambda e: _is_send_message_to(e, "implementation"),
+            timeout_s=PER_STAGE_OVERALL_S,
+            label="SendMessage to implementation ensign (feedback reuse)",
         )
-        print(f"[OK] feedback-cycle implementation dispatch closed in {feedback_record.elapsed:.1f}s")
+        print("[OK] feedback routed via SendMessage to kept-alive implementation ensign")
 
         w.expect_exit(timeout_s=SUBPROCESS_EXIT_BUDGET_S)
 
     print("--- Phase 3: Validation ---")
     records = w.dispatch_records
     print(f"  dispatch records: {[(r.ensign_name, round(r.elapsed, 1)) for r in records]}")
-    t.check("FO emitted exactly three ensign dispatches", len(records) == 3)
-    t.check("all dispatches closed under the per-dispatch budget",
-            all(r.elapsed <= PER_DISPATCH_BUDGET_S for r in records))
+    t.check(
+        "FO emitted exactly two ensign Agent() dispatches (impl + validation; feedback via SendMessage)",
+        len(records) == 2,
+    )
+    t.check(
+        "all dispatches closed under the per-dispatch budget",
+        all(r.elapsed <= PER_DISPATCH_BUDGET_S for r in records),
+    )
 
     print()
     print("[Static Template Checks]")

@@ -1189,6 +1189,35 @@ class FOStreamWatcher:
         self._update_dispatch_budgets(entries)
         return entries
 
+    @staticmethod
+    def _looks_like_bare_done(content_val: object) -> bool:
+        """Return True if an Agent tool_result carries a bare-mode completion.
+
+        Bare-mode Agent() tool_result is the sub-worker's Done payload (list of
+        text/tool blocks summarizing the run). Teams-mode Agent() tool_result
+        is just a spawn-ack string containing "Spawned successfully" plus the
+        agent_id. This discriminator keys on the spawn-ack's distinctive text.
+        """
+        if isinstance(content_val, str):
+            return "Spawned successfully" not in content_val
+        if isinstance(content_val, list):
+            for b in content_val:
+                if isinstance(b, dict):
+                    t = b.get("text", "") if b.get("type") == "text" else ""
+                    if "Spawned successfully" in t:
+                        return False
+            return True
+        return True
+
+    def _close_dispatch(self, dispatch_id: str, now: float) -> None:
+        closing = self._open_dispatches.pop(dispatch_id)
+        self.dispatch_records.append(
+            DispatchRecord(
+                ensign_name=closing.ensign_name,
+                elapsed=now - closing.start,
+            )
+        )
+
     def _update_dispatch_budgets(self, entries: list[dict]) -> None:
         """Track ensign dispatches and enforce soft/hard budgets.
 
@@ -1222,11 +1251,15 @@ class FOStreamWatcher:
                     )
                     continue
 
-            # Close: user tool_result whose tool_use_id matches a tracked
-            # open dispatch. Works in both modes: in bare mode the Agent
-            # call returns its result synchronously; in teams mode Claude
-            # Code emits the matching tool_result when the teammate's
-            # worker returns.
+            # Close anchor differs by mode:
+            # - bare mode: the user tool_result for the Agent tool_use_id carries the
+            #   teammate's Done: payload directly (synchronous Agent() return).
+            # - teams mode: the user tool_result fires on spawn-ack, not on completion.
+            #   The true completion signal is a system entry with
+            #   subtype="task_notification", status="completed", and tool_use_id
+            #   matching the originating Agent call.
+            #
+            # We match both anchors; whichever lands first closes the dispatch.
             if entry.get("type") == "user":
                 message = entry.get("message")
                 if isinstance(message, dict):
@@ -1236,14 +1269,17 @@ class FOStreamWatcher:
                             and result_block.get("type") == "tool_result"
                         ):
                             tuid = str(result_block.get("tool_use_id") or "")
-                            if tuid in self._open_dispatches:
-                                closing = self._open_dispatches.pop(tuid)
-                                self.dispatch_records.append(
-                                    DispatchRecord(
-                                        ensign_name=closing.ensign_name,
-                                        elapsed=now - closing.start,
-                                    )
-                                )
+                            content_val = result_block.get("content")
+                            if tuid in self._open_dispatches and self._looks_like_bare_done(content_val):
+                                self._close_dispatch(tuid, now)
+            elif (
+                entry.get("type") == "system"
+                and entry.get("subtype") == "task_notification"
+                and entry.get("status") == "completed"
+            ):
+                tuid = str(entry.get("tool_use_id") or "")
+                if tuid in self._open_dispatches:
+                    self._close_dispatch(tuid, now)
 
         for disp in self._open_dispatches.values():
             elapsed = now - disp.start
