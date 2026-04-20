@@ -17,6 +17,7 @@ from test_lib import (  # noqa: E402
     LogParser,
     git_add_commit,
     install_agents,
+    plugin_location_hint,
     run_codex_first_officer,
     run_first_officer,
     setup_fixture,
@@ -49,10 +50,20 @@ def _last_stage_report(entity_text: str) -> str:
     return parts[-1]
 
 
-@pytest.mark.live_claude
-@pytest.mark.live_codex
-def test_checklist_e2e(test_project, runtime, model, effort):
-    """Verify checklist protocol via fixture (claude + codex)."""
+def _run_checklist_scenario(
+    test_project,
+    runtime,
+    model,
+    effort,
+    *,
+    claude_extra_args: list[str] | None = None,
+):
+    """Shared checklist-protocol harness for both claude and codex runtimes.
+
+    `claude_extra_args` is forwarded to `run_first_officer` so callers can
+    inject `--append-system-prompt` hints (see the helper-path entrypoint
+    below, which pins the plugin directory).
+    """
     t = test_project
 
     print("--- Phase 1: Set up test project from fixture ---")
@@ -72,11 +83,14 @@ def test_checklist_e2e(test_project, runtime, model, effort):
         "Process one entity through one stage, then stop."
     )
     if runtime == "claude":
+        extra = ["--max-budget-usd", "2.00", "--model", model, "--effort", effort]
+        if claude_extra_args:
+            extra.extend(claude_extra_args)
         fo_exit = run_first_officer(
             t,
             prompt,
             agent_id="spacedock:first-officer",
-            extra_args=["--max-budget-usd", "2.00", "--model", model, "--effort", effort],
+            extra_args=extra,
         )
         if fo_exit != 0:
             print(f"  (first officer exit code {fo_exit} — may be expected under budget caps)")
@@ -170,3 +184,49 @@ def test_checklist_e2e(test_project, runtime, model, effort):
     t.check("output file created", out_path.is_file())
 
     t.finish()
+
+
+@pytest.mark.live_claude
+def test_checklist_e2e_helper_path(test_project, runtime, model, effort):
+    """Helper-path: pin the plugin directory so the FO runs `claude-team build`.
+
+    Without the plugin-path hint, a low-effort FO can skip `claude-team build`
+    entirely and fall through to the break-glass template. Injecting
+    `plugin_location_hint` via `--append-system-prompt` resolves the helper
+    binaries for the FO so it takes the fully-featured dispatch path that
+    `cmd_build` produces, including the `### Stage report` block.
+    """
+    if runtime != "claude":
+        pytest.skip("helper-path test exercises the claude `-p` append-system-prompt path")
+    t = test_project
+    hint = plugin_location_hint(t.repo_root)
+    _run_checklist_scenario(
+        test_project,
+        runtime,
+        model,
+        effort,
+        claude_extra_args=["--append-system-prompt", hint],
+    )
+
+
+@pytest.mark.live_claude
+def test_checklist_e2e_break_glass_path(test_project, runtime, model, effort):
+    """Break-glass path: no plugin-path hint, exercises the fallback template.
+
+    With no plugin-path hint, a low-effort FO may skip `claude-team build` and
+    assemble the Agent() dispatch from the Break-Glass Manual Dispatch template
+    in `claude-first-officer-runtime.md`. Post-#211 that template carries the
+    `### Stage report` block verbatim from `cmd_build`, so the dispatched
+    ensign still produces a compliant Stage Report.
+    """
+    if runtime != "claude":
+        pytest.skip("break-glass-path test exercises the claude `-p` manual-dispatch path")
+    _run_checklist_scenario(test_project, runtime, model, effort)
+
+
+@pytest.mark.live_codex
+def test_checklist_e2e_codex(test_project, runtime, model, effort):
+    """Codex-runtime checklist protocol check (spawn_agent dispatch)."""
+    if runtime != "codex":
+        pytest.skip("codex-runtime test")
+    _run_checklist_scenario(test_project, runtime, model, effort)
