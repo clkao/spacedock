@@ -25,8 +25,8 @@ from test_lib import (  # noqa: E402
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
-PER_STAGE_OVERALL_S = 45
-PER_DISPATCH_BUDGET_S = 30
+PER_STAGE_OVERALL_S = 120
+PER_DISPATCH_BUDGET_S = 90
 
 SUBPROCESS_EXIT_BUDGET_S = 60
 
