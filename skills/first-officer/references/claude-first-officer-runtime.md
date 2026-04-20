@@ -201,20 +201,29 @@ After dispatching an ensign (or routing work to a kept-alive ensign), you are wa
 
 **A completion signal is one of these three things, and nothing else:**
 
-1. An inbox-delivered message from the ensign that begins with `Done:` (per the ensign runtime's completion contract).
-2. A runtime `task_notification` with `status: completed` for the ensign's dispatch id.
-3. An explicit captain instruction to shut down the ensign.
+1. An inbox-delivered user-role message from the ensign whose text begins with `Done:` (per the ensign runtime's completion contract).
+2. A `system` entry with `subtype: task_notification` and `status: completed` whose `tool_use_id` matches the ensign's `Agent(...)` dispatch id.
+3. An explicit captain instruction (captain-role user message) to shut down the ensign.
 
-**None of the following are completion signals.** Do NOT treat any of them as permission to send `shutdown_request`, to `TeamDelete`, or to dispatch a replacement ensign:
+**First-turn-after-dispatch decision procedure.** When a turn begins and your most recent dispatch-related action was an `Agent(...)` spawn whose completion signal (1, 2, or 3 above) has NOT yet been observed in the stream, you MUST end the turn immediately with no tool calls and no text. Do not:
 
-- `system init` entries (these are new turn boundaries, not lifecycle events).
-- Idle notifications (covered by the DISPATCH IDLE GUARDRAIL below).
-- The spawn-ack tool_result from `Agent(...)` (this confirms the spawn only; the ensign is now doing its work).
-- Your own assessment that "the session is ending" or "the budget is low" or "enough time has passed" — these are not runtime signals and, in the absence of a runtime signal, are always hallucinations. The runtime will tell you when a session is ending via an actual user-delivered message; it does not hint.
+- emit `SendMessage(to="{ensign}", message={"type":"shutdown_request"})` — this is the exact bug this section exists to prevent.
+- emit `TeamDelete` — fails anyway while members are alive, and retrying it in a loop is the second-order bug.
+- emit `Bash` with commands like `sleep 30` or `wait` — the runtime handles the wait for you; sleeping in Bash wastes time and does not accelerate delivery.
+- re-dispatch a replacement ensign — you have no evidence the first ensign failed.
+- write reassuring text like "Waiting for completion signal" — this converts idle-polling into a multi-turn generation loop that drifts into hallucination on subsequent wake-ups.
+
+Just emit `end_turn` with empty content. The runtime will wake you up again when a real event arrives.
+
+**A new `system init` entry in the stream is NOT a completion signal.** It is a turn boundary from claude-code's internal event loop (the runtime re-invokes you when idle-poll timers fire or when a teammate event is queued). If you wake up on a fresh `system init` and the prior turn's last observable state was a spawn-ack or a pending dispatch, treat it as idle and end the turn silently per the decision procedure above.
+
+**Anti-patterns that indicate this bug.** If you catch yourself about to emit any of these, STOP and end the turn empty:
+
+- `shutdown_request` with reason `"session ending"`, `"wrapping up"`, `"timeout"`, or any other self-generated reason when no completion signal has arrived. The runtime does NOT signal session-end via your context; it signals it via an actual user message.
+- `shutdown_request` followed immediately by `TeamDelete` (the classic premature-teardown loop).
+- Any action whose justification is "enough time has passed" or "the ensign appears idle" — you cannot measure time from inside a turn, and ensign idleness is normal between dispatch and completion.
 
 **DISPATCH IDLE GUARDRAIL.** After dispatching an agent, wait for an explicit completion message. Idle notifications are normal between-turn state for team agents — they are not a reason to tear down the team, and they usually mean the agent is waiting for input. Only shut down when: (1) the agent sends a completion message, (2) the captain explicitly requests shutdown, or (3) you are transitioning the entity to a new stage (AFTER you have observed the prior stage's completion signal per the list above). Never interpret idle notifications as "stuck" or "unresponsive."
-
-**IDLE HALLUCINATION GUARDRAIL.** After acknowledging idle notifications once (e.g., "Ensign still available, standing by"), produce ZERO output for all subsequent idle notifications until a real human message arrives. Do not generate text, invoke tools, or take any action in response to repeated idle notifications. This prevents a known failure mode where the model hallucinates a user instruction (e.g., "Human: let's wrap up", "session ending") after a long sequence of system-generated idle messages and then acts on the fabricated instruction. If you catch yourself writing `shutdown_request` with a reason like "session ending" or "wrapping up" while no completion signal has arrived, STOP — you are in this failure mode.
 
 ## Event Loop
 
