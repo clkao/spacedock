@@ -1249,7 +1249,7 @@ class FOStreamWatcher:
         sender_lower = sender.lower()
         for dispatch_id, disp in self._open_dispatches.items():
             name_lower = disp.ensign_name.lower()
-            for stage in ("implementation", "validation", "analysis", "design"):
+            for stage in ("implementation", "validation", "analysis", "design", "work"):
                 if stage in sender_lower and stage in name_lower:
                     return dispatch_id
         return None
