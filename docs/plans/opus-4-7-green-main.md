@@ -1259,15 +1259,32 @@ The captain's cycle-8 brief direction — "port cycle-7 pattern … inbox-poll +
 - **StepTimeout at 150s surfaces faster** than the old 300s wall (run3 failed at 156s instead of 378s+).
 - **Test_static stays green** at 475/475.
 
-Partial port. Captain directive "per-stage timeout tightening FIRST" was honored and produced real diagnostic improvement; the follow-on keep-alive + inbox-poll port was ruled out in step-2 on a wrong premise and is NOT in this cycle's commits. A cycle-9 should re-apply the feedback_keepalive pattern to merge_hook (headless append-system-prompt hint with inbox-poll script + sentinel file + inbox-poll close anchor) to rescue the 2/3 and 3/3 runs.
+Partial port. Captain directive "per-stage timeout tightening FIRST" was honored and produced real diagnostic improvement; the follow-on keep-alive + inbox-poll port was ruled out in step-2 on a wrong premise and is NOT in this cycle's commits.
+
+### Addendum: bare-mode N=3 comparison (post-stage-report)
+
+Re-ran opus-low N=3 with `unset CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` + `--team-mode=bare` to distinguish "test needs teams scaffolding" from "test is inherently flaky at opus-low regardless of mode." Evidence at `opus-low-bare-run{4,5,6}*` in the same dir.
+
+| Run | Wallclock | Mode | Result | Failure signature |
+|---|---|---|---|---|
+| 4 | 222s | bare | **FAIL** | `FAIL: merge hook fired marker exists`. Phase-2 dispatch closed in 11.9s (very fast — ensign did work but skipped hook), then FO exceeded 45s SUBPROCESS_EXIT budget. Two ensign dispatches (L26 work + L47 finalize); neither wrote `_merge-hook-fired.txt`. |
+| 5 | 194s | bare | **PASS** | 9/9 checks; clean end-to-end. |
+| 6 | 182s | bare | **FAIL** | `StepFailure: FO subprocess exited (code=0) before step 'merge-hook ensign dispatch close' matched`. fo-nomods log shows Phase-5 FO did the WHOLE workflow directly (Edit + Bash commit + Edit + archive Bash) **without dispatching a spacedock:ensign at all** — real-behavior contract drift where the FO at opus-low decides the work is trivial enough to do inline, bypassing the ensign. Phase-2 dispatch closed cleanly at 16.3s. |
+
+**Tally:** bare-mode 1/3, teams-mode 1/3. The tight-budgets port is mode-agnostic: same 1/3 pass rate in both. What's actually flaking differs by mode:
+- **teams-mode:** #26426-class fresh-context teardown hallucination interrupts the ensign mid-work.
+- **bare-mode:** opus-low sometimes solves the workflow inline without dispatching the ensign (a different real-behavior contract violation — the FO should route work through spacedock:ensign per the workflow shape).
+
+**Mode control mechanism (for future reference):** `tests/conftest.py:41-47` — teams mode is engaged when `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` (env, set by default in my shell) OR `--team-mode=teams` is passed. `unset CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS && --team-mode=bare` forces bare. Step-2's "merge_hook is bare-mode" assumption was based on reading the test file for markers (no `@pytest.mark.teams_mode` pin) without checking the runtime mode, which is determined by env+flag regardless of markers. A test without a mode-marker runs under whichever mode the invocation selects.
 
 ### For the next cycle
 
-1. Add teams-mode `@pytest.mark.teams_mode` marker (confirms runtime intent).
-2. Port the full cycle-7 scaffolding from `test_feedback_keepalive.py:124-164` (keep-alive sentinel, inbox-poll Bash hint, `--append-system-prompt` headless discipline, poll-script invocation).
-3. Keep the tight dispatch budgets from this cycle.
-4. Re-run N=3 opus-low. Target 2/3.
+1. **Decide mode policy.** Does this test intend to run under teams, bare, or both? The FO's behavior differs by mode (teams: TeamCreate + teams-spawn + task_notification; bare: synchronous Agent + task_notification). The current "no marker" state means it runs under whatever the CI matrix picks — `make test-live-claude-opus` runs teams by default (env set in my shell; confirm CI invocation). Picking one mode and pinning it narrows the flake surface.
+2. **If teams-mode is the target:** port the full cycle-7 scaffolding from `test_feedback_keepalive.py:124-164` — keep-alive sentinel, inbox-poll Bash hint, `--append-system-prompt` headless discipline, poll-script invocation, inbox-poll close anchor. That's what greened feedback_keepalive.
+3. **If bare-mode is the target:** the failure is different — opus-low sometimes bypasses the ensign dispatch. That's an FO-contract issue (bootstrap hint, `--append-system-prompt` reminding the FO that the workflow requires dispatching the spacedock:ensign for the work stage). Different fix than teams-mode.
+4. **Keep the tight dispatch budgets** from this cycle either way — they gave diagnostic wins (structured failure classification) regardless of mode.
+5. Re-run N=3 opus-low. Target 2/3.
 
 ### Summary
 
-Tight per-stage budgets ported from cycle-7 to `test_merge_hook_guardrail.py` (commits `0116050e`, `5498ddbe`), `make test-static` green (475/475), opus-low N=3 yielded 1/3 PASS — **below the ≥2/3 target**. Root cause of reds: merge_hook is teams-mode (not bare-mode as step-2 assumed), and under `claude -p` the FO hallucinates teardown across fresh-context `system init` cycles, interrupting the ensign mid-work. The cycle-7 keep-alive + inbox-poll scaffolding was NOT ported this cycle due to the step-2 scoping error; a cycle-9 should apply it. No haiku N=3 (step-5 gated on opus-low green). STOPPING cleanly per step-4 brief directive.
+Tight per-stage budgets ported from cycle-7 to `test_merge_hook_guardrail.py` (commits `0116050e`, `5498ddbe`), `make test-static` green (475/475). **opus-low N=3 teams-mode: 1/3 PASS; opus-low N=3 bare-mode: 1/3 PASS — both below the ≥2/3 target.** Root cause differs by mode: teams-mode hits the #26426-class fresh-context teardown hallucination (same as feedback_keepalive); bare-mode hits an FO-contract skip where opus-low solves the workflow inline without dispatching spacedock:ensign. The cycle-7 keep-alive + inbox-poll scaffolding is the right fix for teams-mode (and was NOT ported this cycle due to the step-2 scoping error); bare-mode needs a different fix (dispatch-discipline prompt hint). Cycle-9 should pick a mode pin first, then apply the mode-appropriate scaffolding. No haiku N=3 (step-5 gated on opus-low green). STOPPING cleanly per step-4 brief directive.
