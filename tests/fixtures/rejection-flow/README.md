@@ -11,14 +11,12 @@ stages:
   states:
     - name: backlog
       initial: true
-      gate: true
     - name: implementation
       worktree: true
     - name: validation
       worktree: true
       fresh: true
       feedback-to: implementation
-      gate: true
     - name: done
       terminal: true
 ---
