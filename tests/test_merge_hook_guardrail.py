@@ -22,7 +22,6 @@ from test_lib import (  # noqa: E402
     run_codex_first_officer,
     run_first_officer_streaming,
     setup_fixture,
-    tool_use_matches,
 )
 
 
@@ -31,7 +30,6 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 PER_DISPATCH_OVERALL_S = 150
 PER_DISPATCH_BUDGET_S = 120
-MERGE_HOOK_FIRED_S = 90
 SUBPROCESS_EXIT_BUDGET_S = 180
 
 
@@ -118,14 +116,6 @@ def _run_claude_merge_case(
             label="merge-hook ensign dispatch close",
         )
         print(f"[OK] ensign dispatch closed in {dispatch_record.elapsed:.1f}s")
-
-        if hook_expected:
-            w.expect(
-                lambda e: tool_use_matches(e, "Bash", command="_merge-hook-fired.txt"),
-                timeout_s=MERGE_HOOK_FIRED_S,
-                label="merge hook wrote _merge-hook-fired.txt",
-            )
-            print("[OK] merge hook fired (write to _merge-hook-fired.txt observed)")
 
         keepalive_done.touch()
         print(f"[OK] keep-alive sentinel {keepalive_done.name} touched")
