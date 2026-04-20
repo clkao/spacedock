@@ -7,7 +7,7 @@ started: 2026-04-19T16:58:51Z
 completed:
 verdict:
 score: 0.85
-worktree:
+worktree: .worktrees/spacedock-ensign-fo-behavior-spec-and-coverage-matrix
 issue:
 pr:
 mod-block:
