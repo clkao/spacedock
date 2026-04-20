@@ -72,7 +72,7 @@ def test_feedback_keepalive(test_project, model, effort):
     # sentinel was designed to prevent. Opus-4-7 follows the discipline
     # (round-6d green at 4m36s); haiku does not. Haiku has no reasoning-effort
     # tiers, so the --effort flag does not change this behavior.
-    if model == "claude-haiku-4-5":
+    if model == "claude-haiku-4-5" or model == "haiku" or "haiku" in model.lower():
         pytest.xfail(
             reason=(
                 "pending haiku-teams keepalive — haiku-4-5 drops the "
