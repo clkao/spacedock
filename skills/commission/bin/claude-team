@@ -72,16 +72,20 @@ def _recent_team_evidence():
 def extract_stage_subsection(readme_path, stage_name):
     r"""Extract the full ### {stage_name} subsection from a workflow README.
 
-    Accepts both backtick-quoted (`### \`work\``) and bare (`### work`) headings
-    so fixtures and hand-authored workflows both parse cleanly.
+    Accepts backtick-quoted (`### \`work\``) and bare (`### work`) headings,
+    each optionally followed by a parenthetical annotation like
+    `### \`triaged\` (terminal)` — the annotation is informational; the
+    canonical truth source for terminal/middle/etc. is the YAML frontmatter.
     """
     with open(readme_path, 'r') as f:
         text = f.read()
     lines = text.splitlines()
+    heading_re = re.compile(
+        rf'^###\s+`?{re.escape(stage_name)}`?(?:\s+\([^)]*\))?\s*$'
+    )
     start = None
-    accepted_headings = (f'### `{stage_name}`', f'### {stage_name}')
     for i, line in enumerate(lines):
-        if line.strip() in accepted_headings:
+        if heading_re.match(line.strip()):
             start = i
             break
     if start is None:
