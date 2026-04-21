@@ -117,3 +117,26 @@ Replaced the exact-string heading tuple in `extract_stage_subsection` with a com
 - Commit `0d769cb2` — `fix(#138): claude-team build tolerate trailing parenthetical in stage heading`
 - Commit `1e3b7a8f` — `test(#138): cover stage-heading regex against backtick + parenthetical variants`
 - Branch `spacedock-ensign/claude-team-build-stage-heading-parenthetical` (local, unpushed; FO owns push + PR via pr-merge mod hook)
+
+## Stage Report: validation
+
+### Summary
+Cross-checked the #212 implementation against all four acceptance criteria. Regex swap at `skills/commission/bin/claude-team:83-85` matches the spec shape exactly. Seven unit tests in `TestExtractStageSubsection` + one subprocess e2e test in `TestBuildStageHeadingParentheticalE2E` cover all AC-1 heading forms, both AC-2 rejection cases, and the literal JSON payload from GitHub issue #138's repro. `make test-static` reports 510 passed / 1 failed; the lone failure is the known out-of-scope #213 (codex plugin manifest version bump pre-existing from 0.10.0 release commit). **Recommendation: PASSED.**
+
+### Checklist accounting
+- DONE: `unset CLAUDECODE && make test-static` run from the worktree root. Observed 510 passed, 25 deselected, 10 subtests passed, plus the expected pre-existing failure `test_codex_plugin_manifest_matches_approved_contract` (out-of-scope per #213 — manifest version 0.10.0 vs expected 0.9.6, pre-existing from CL's 0d2d7a45 release commit).
+- DONE: AC cross-check against the entity's `## Acceptance criteria` section:
+  - **AC-1** (regex matches 5 heading forms): verified against the committed regex at `skills/commission/bin/claude-team:83-85` — `rf'^###\s+`?{re.escape(stage_name)}`?(?:\s+\([^)]*\))?\s*$'` — and the 5 unit tests `test_matches_backtick_bare_heading` / `test_matches_bare_heading` / `test_matches_backtick_heading_with_parenthetical` / `test_matches_bare_heading_with_parenthetical` / `test_matches_backtick_heading_with_arbitrary_parenthetical` at `tests/test_claude_team.py:1880-1923`. Each asserts `.startswith(...)` against the expected heading line and that the next sibling `###` section is excluded. All 5 passed in the run.
+  - **AC-2** (rejects unrelated/partial names): verified by `test_rejects_nonexistent_stage` (line 1925) and `test_rejects_partial_match` (line 1930) — the prefix case `'wor'` vs `### \`work\`` correctly returns None because the regex anchors on `{re.escape(stage_name)}` followed by optional `` ` `` then either paren or EOL. Both passed.
+  - **AC-3** (test-static green): 510 passed; 1 failure (#213) is pre-existing and out of scope. Delta +8 new tests (7 unit + 1 e2e) matches the implementation ensign's claim.
+  - **AC-4** (issue repro succeeds end-to-end): verified by `TestBuildStageHeadingParentheticalE2E::test_build_accepts_triaged_terminal_heading` at `tests/test_claude_team.py:1940-1999`. Test writes a `README.md` with `### \`triaged\` (terminal)` + `### \`new\``, a minimal entity, and pipes a JSON payload whose fields (`schema_version`, `entity_path`, `workflow_dir`, `stage: "triaged"`, `checklist`, `team_name`, `feedback_context`, `scope_notes`, `bare_mode`, `is_feedback_reflow`) match the issue body verbatim. Invocation goes through `run_build` (line 640-648) which is a real `subprocess.run` of `claude-team build`. Assertion on `result.returncode == 0` and the triaged subsection body text appearing in the emitted prompt. Passed.
+- DONE: PASSED recommendation with rationale — all four AC verified with cited evidence, committed code matches the proposed regex shape, the lone test failure is the pre-filed out-of-scope #213.
+
+### Evidence
+- Committed regex: `skills/commission/bin/claude-team:83-85` — compiled once per call, matched against `line.strip()`, section-end sentinel (`### ` / `## `) and trailing-blank-line trim preserved unchanged.
+- Test classes: `tests/test_claude_team.py:1844` (`TestExtractStageSubsection`, 7 tests) and `tests/test_claude_team.py:1937` (`TestBuildStageHeadingParentheticalE2E`, 1 test).
+- Full test-static counts: 510 passed / 1 failed (#213 out-of-scope) / 25 deselected / 10 subtests passed in 24.58s.
+- Implementation commits verified: `0d769cb2` (regex swap) + `1e3b7a8f` (tests), plus `834fc7a2` (cycle-1 stage report) on branch `spacedock-ensign/claude-team-build-stage-heading-parenthetical`.
+
+### Recommendation
+**PASSED.** All four AC have cited evidence matching the implementation ensign's claims. Known `#213` codex manifest failure is pre-existing and explicitly out of scope for this entity.
