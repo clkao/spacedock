@@ -233,8 +233,16 @@ def _run_checklist_scenario(
     t.finish()
 
 
+_HAIKU_XFAIL_REASON = (
+    "pending #200 — haiku-bare FO guardrail weaknesses; ensign omits ### Summary / "
+    "uses malformed Completion Checklist heading at low effort. Opus/low is the "
+    "fitness check for this test; see claude-live-opus on CI run 24695826486 for "
+    "strict-PASS evidence."
+)
+
+
 @pytest.mark.live_claude
-def test_checklist_e2e_helper_path(test_project, runtime, model, effort):
+def test_checklist_e2e_helper_path(request, test_project, runtime, model, effort):
     """Helper-path: pin the plugin directory so the FO runs `claude-team build`.
 
     Without the plugin-path hint, a low-effort FO can skip `claude-team build`
@@ -245,6 +253,8 @@ def test_checklist_e2e_helper_path(test_project, runtime, model, effort):
     """
     if runtime != "claude":
         pytest.skip("helper-path test exercises the claude `-p` append-system-prompt path")
+    if model == "haiku":
+        request.applymarker(pytest.mark.xfail(strict=False, reason=_HAIKU_XFAIL_REASON))
     t = test_project
     hint = plugin_location_hint(t.repo_root)
     _run_checklist_scenario(
@@ -257,7 +267,7 @@ def test_checklist_e2e_helper_path(test_project, runtime, model, effort):
 
 
 @pytest.mark.live_claude
-def test_checklist_e2e_break_glass_path(test_project, runtime, model, effort):
+def test_checklist_e2e_break_glass_path(request, test_project, runtime, model, effort):
     """Break-glass path: no plugin-path hint, exercises the fallback template.
 
     With no plugin-path hint, a low-effort FO may skip `claude-team build` and
@@ -268,6 +278,8 @@ def test_checklist_e2e_break_glass_path(test_project, runtime, model, effort):
     """
     if runtime != "claude":
         pytest.skip("break-glass-path test exercises the claude `-p` manual-dispatch path")
+    if model == "haiku":
+        request.applymarker(pytest.mark.xfail(strict=False, reason=_HAIKU_XFAIL_REASON))
     _run_checklist_scenario(test_project, runtime, model, effort)
 
 
