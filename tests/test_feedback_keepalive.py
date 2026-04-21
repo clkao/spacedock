@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 from test_lib import (  # noqa: E402
     DispatchBudget,
     emit_skip_result,
+    headless_inbox_polling_hint,
     git_add_commit,
     install_agents,
     probe_claude_runtime,
@@ -123,34 +124,8 @@ def test_feedback_keepalive(test_project, model, effort):
     # keeps the cycle open (stop_reason=tool_use) and gives the FO the
     # information the missing InboxPoller would have provided.
     keepalive_done = t.test_project_dir / ".fo-keepalive-done"
-    poll_script = t.repo_root / "scripts" / "fo_inbox_poll.py"
     seen_file = t.test_project_dir / ".fo-inbox-seen"
-    headless_hint = (
-        f"The spacedock plugin directory is at `{t.repo_root}`. Use it "
-        f"directly; do NOT run `find / -name claude-team` — the binaries you "
-        f"need are `{t.repo_root}/skills/commission/bin/status` and "
-        f"`{t.repo_root}/skills/commission/bin/claude-team`.\n\n"
-        f"HEADLESS INBOX-POLLING RULE. You are running in `claude -p` headless "
-        f"mode. Per anthropics/claude-code#26426, inbox-delivered teammate "
-        f"messages accumulate on disk at `$HOME/.claude/teams/{{team_name}}/"
-        f"inboxes/team-lead.json` but are NOT surfaced to your stream. The "
-        f"workaround is to surface them yourself via an external polling "
-        f"script.\n\n"
-        f"Until the sentinel file `{keepalive_done}` exists, every turn "
-        f"MUST end with a Bash tool_use (not text) that runs the poll "
-        f"script:\n\n"
-        f"    python3 {poll_script} --home \"$HOME\" --pattern 'Done:' "
-        f"--timeout 5 --seen-file {seen_file}\n\n"
-        f"The script blocks up to 5 seconds waiting for a new inbox "
-        f"message whose text contains 'Done:'. Its stdout contains the "
-        f"teammate message (or is empty on timeout, in which case repeat). "
-        f"Treat any 'from: spacedock-ensign-...' block with 'text: Done: "
-        f"... completed {{stage}}' as the teammate's completion signal for "
-        f"that stage — proceed to the next workflow step per shared-core "
-        f"discipline. Never emit `SendMessage(shutdown_request)`, "
-        f"`TeamDelete`, or other teardown while awaiting an ensign. Once "
-        f"the workflow reaches terminal completion, you may end with text."
-    )
+    headless_hint = headless_inbox_polling_hint(t.repo_root, keepalive_done, seen_file)
 
     with run_first_officer_streaming(
         t,

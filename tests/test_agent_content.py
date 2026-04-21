@@ -146,6 +146,19 @@ def test_codex_runtime_docs_cover_merge_hook_finalize_path():
     assert "repository-wide search" in text
 
 
+def test_codex_runtime_docs_prescribe_plain_completion_checklist_heading():
+    """Contract: codex worker prompts must not invent parenthetical checklist headings like
+    'Completion checklist (linchpins):' — keep the emitted heading plain and stable.
+    """
+    text = read_text("skills/first-officer/references/codex-first-officer-runtime.md")
+    assert "### Completion checklist" in text, (
+        "Codex runtime must prescribe the exact `### Completion checklist` heading for worker prompts"
+    )
+    assert re.search(r"no\s+parenthetical|do\s+not\s+add\s+parenthetical|no\s+extra\s+descriptors", text, re.IGNORECASE), (
+        "Codex runtime must forbid parenthetical or descriptor suffixes in the checklist heading"
+    )
+
+
 def test_codex_ensign_runtime_doc_mentions_skill_relative_bootstrap_resolution():
     text = read_text("skills/ensign/references/codex-ensign-runtime.md")
     assert "active `SKILL.md`" in text

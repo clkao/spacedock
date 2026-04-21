@@ -170,6 +170,10 @@ Pass these fields to a worker:
 
 If a `worktree_path` is present, `entity_path` should point to the entity file inside that worktree, not the main-branch copy.
 
+In the worker message, explicitly instruct the worker to append a `## Stage Report: {stage_name}` section to the entity body and to account for every checklist item with `DONE` / `SKIPPED` / `FAILED` entries (using the checklist item text verbatim when possible). Do not assume the worker will infer this from the stage definition alone.
+
+When you render the worker prompt, keep the checklist header plain and stable: use the exact heading `### Completion checklist` with no parenthetical and no extra descriptors.
+
 ## Codex Merge And Cleanup
 
 - Merge hooks live under `{workflow_dir}/_mods/*.md`.
