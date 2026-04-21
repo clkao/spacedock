@@ -5,13 +5,20 @@
 #
 # goal: Show one-line-per-{entity_label} workflow overview from YAML frontmatter.
 #
-# instruction: For every .md file in this directory (excluding README.md),
-#   extract slug (filename without .md), id, status, title, score, source from YAML frontmatter.
+# instruction: For every entity in this directory (excluding README.md),
+#   extract slug, id, status, title, score, source from YAML frontmatter.
 #   Print aligned table with columns: ID, SLUG, STATUS, TITLE, SCORE, SOURCE.
 #   Sorted by stage order ascending, then score descending.
-#   Default: scan only $DIR/*.md. With --archived, also scan $DIR/_archive/*.md.
+#   Default: scan entities at $DIR. With --archived, also scan $DIR/_archive/.
 #   With --next, read stage metadata from README frontmatter and output dispatchable entities.
 #   With --next-id, print only the next sequential ID across active and archived entities.
+#
+# Entity discovery: An entity is either a flat `{slug}.md` file OR a folder
+#   `{slug}/` containing an `index.md` file (folder-per-entity). Reserved
+#   subdirectories `_archive` and `_mods` are never treated as entity folders.
+#   When both `{slug}.md` and `{slug}/index.md` exist, the folder form wins
+#   and a warning is emitted on stderr. `--set` and `--archive` operate on
+#   whichever form holds the slug (folder form preferred when both present).
 #
 # --where filters: Supply one or more --where clauses to filter the output.
 #   Accepted forms (operators `=` and `!=` only, with or without spaces around the operator):
@@ -34,9 +41,12 @@
 #   fields render as blank. The two flags are mutually exclusive, and neither can be
 #   combined with --boot or --set.
 #
-# --archive <slug>: Move {workflow_dir}/{slug}.md to {workflow_dir}/_archive/{slug}.md,
-#   creating _archive/ if missing, stamping `archived: <ISO-8601 UTC>` in frontmatter
-#   before the move. Errors if the source is missing or the destination already exists.
+# --archive <slug>: Archive an entity, creating _archive/ if missing, and stamping
+#   `archived: <ISO-8601 UTC>` in the entity's frontmatter before the move.
+#   For flat entities: move {workflow_dir}/{slug}.md -> {workflow_dir}/_archive/{slug}.md.
+#   For folder entities: stamp {workflow_dir}/{slug}/index.md, then move the whole
+#   folder {workflow_dir}/{slug}/ -> {workflow_dir}/_archive/{slug}/.
+#   Errors if the source is missing or the destination already exists.
 #   Does not touch `completed`. Does not run git — the caller handles commits.
 #
 # YAML parsing: Read lines between the first and second "---" delimiters.
@@ -329,14 +339,108 @@ def parse_stages_with_defaults(filepath):
     return stages, defaults
 
 
+# Subdirectories that are never treated as entity folders. Keep in sync with
+# the rest of the status script and commission scaffolding.
+RESERVED_SUBDIRS = frozenset({'_archive', '_mods'})
+
+
+def discover_entity_files(directory):
+    """Return [(slug, entity_file_path), ...] for entities found in directory.
+
+    An entity is either:
+      - a flat file `{directory}/{slug}.md` (existing behavior), OR
+      - a folder `{directory}/{slug}/` containing an `index.md` (new form).
+
+    README.md is skipped. Reserved subdirectories (see RESERVED_SUBDIRS) and
+    subdirectories whose names start with '.' are never treated as entity
+    folders.
+
+    When a slug is present in BOTH the flat and folder form, the folder form
+    wins and a warning is emitted to stderr so the operator can resolve the
+    duplication. Results are sorted by slug so callers see a stable order.
+    """
+    if not os.path.isdir(directory):
+        return []
+
+    flat_paths = {}
+    folder_paths = {}
+
+    try:
+        entries = os.listdir(directory)
+    except OSError:
+        return []
+
+    for name in entries:
+        full = os.path.join(directory, name)
+        if os.path.isfile(full):
+            if name == 'README.md':
+                continue
+            if not name.endswith('.md'):
+                continue
+            if name.startswith('.'):
+                continue
+            slug = name[:-3]
+            flat_paths[slug] = full
+        elif os.path.isdir(full):
+            if name in RESERVED_SUBDIRS:
+                continue
+            if name.startswith('.'):
+                continue
+            index_path = os.path.join(full, 'index.md')
+            if os.path.isfile(index_path):
+                folder_paths[name] = index_path
+
+    slugs = sorted(set(flat_paths) | set(folder_paths))
+    entries_out = []
+    for slug in slugs:
+        if slug in folder_paths:
+            if slug in flat_paths:
+                print(
+                    f"Warning: entity '{slug}' has both {flat_paths[slug]} and "
+                    f"{folder_paths[slug]}; preferring folder form. Remove the "
+                    f"flat file to silence this warning.",
+                    file=sys.stderr,
+                )
+            entries_out.append((slug, folder_paths[slug]))
+        else:
+            entries_out.append((slug, flat_paths[slug]))
+    return entries_out
+
+
+def resolve_entity_path(directory, slug):
+    """Return the entity file path for a given slug, or None if absent.
+
+    Folder form (`{slug}/index.md`) takes precedence over the flat form
+    (`{slug}.md`) when both exist, matching discover_entity_files. A warning
+    is emitted on the conflict. Returns None if neither form is present so
+    callers can render their own error.
+    """
+    flat_path = os.path.join(directory, slug + '.md')
+    folder_path = os.path.join(directory, slug, 'index.md')
+    flat_exists = os.path.isfile(flat_path)
+    folder_exists = os.path.isfile(folder_path)
+    if folder_exists:
+        if flat_exists:
+            print(
+                f"Warning: entity '{slug}' has both {flat_path} and "
+                f"{folder_path}; preferring folder form. Remove the flat file "
+                f"to silence this warning.",
+                file=sys.stderr,
+            )
+        return folder_path
+    if flat_exists:
+        return flat_path
+    return None
+
+
 def scan_entities(directory):
-    """Scan a directory for .md entity files (excluding README.md)."""
+    """Scan a directory for entity files (excluding README.md).
+
+    Supports both flat `{slug}.md` and folder-form `{slug}/index.md` entities.
+    See discover_entity_files for the resolution rule.
+    """
     entities = []
-    pattern = os.path.join(directory, '*.md')
-    for filepath in sorted(glob.glob(pattern)):
-        if os.path.basename(filepath) == 'README.md':
-            continue
-        slug = os.path.splitext(os.path.basename(filepath))[0]
+    for slug, filepath in discover_entity_files(directory):
         fields = parse_frontmatter(filepath)
         entity = {k: v for k, v in fields.items()}
         entity['slug'] = slug
@@ -346,29 +450,53 @@ def scan_entities(directory):
     return entities
 
 
-def resolve_active_entity_path(entity_path, git_root):
-    """Resolve to the active worktree copy when an entity is worktree-backed."""
+def _worktree_mirror_path(entity_path, pipeline_dir, git_root, worktree):
+    """Compute the worktree-side path mirroring entity_path under pipeline_dir.
+
+    Preserves entity form: a flat `{slug}.md` in pipeline_dir maps to
+    `{git_root}/{worktree}/{slug}.md`; a `{slug}/index.md` in pipeline_dir
+    maps to `{git_root}/{worktree}/{slug}/index.md`.
+    """
+    rel = os.path.relpath(entity_path, pipeline_dir)
+    return os.path.join(git_root, worktree, rel)
+
+
+def resolve_active_entity_path(entity_path, git_root, pipeline_dir=None):
+    """Resolve to the active worktree copy when an entity is worktree-backed.
+
+    When ``pipeline_dir`` is provided, the relative location of ``entity_path``
+    inside ``pipeline_dir`` is preserved in the worktree (so folder-form
+    entities at `{slug}/index.md` map to `{worktree}/{slug}/index.md`). When
+    omitted, the legacy basename-only resolution is used, which still works
+    for flat `{slug}.md` entities.
+    """
     fields = parse_frontmatter(entity_path)
     worktree = fields.get('worktree', '').strip()
     if not worktree:
         return entity_path
 
-    filename = os.path.basename(entity_path)
-    worktree_entity_path = os.path.join(git_root, worktree, filename)
+    if pipeline_dir is not None:
+        worktree_entity_path = _worktree_mirror_path(entity_path, pipeline_dir, git_root, worktree)
+    else:
+        filename = os.path.basename(entity_path)
+        worktree_entity_path = os.path.join(git_root, worktree, filename)
     if os.path.exists(worktree_entity_path):
         return worktree_entity_path
     return entity_path
 
 
-def load_active_entity_fields(entity_path, git_root):
+def load_active_entity_fields(entity_path, git_root, pipeline_dir=None):
     """Load entity fields from the active worktree copy, overlaying main metadata."""
     fields = parse_frontmatter(entity_path)
     worktree = fields.get('worktree', '').strip()
     if not worktree:
         return fields
 
-    filename = os.path.basename(entity_path)
-    worktree_entity_path = os.path.join(git_root, worktree, filename)
+    if pipeline_dir is not None:
+        worktree_entity_path = _worktree_mirror_path(entity_path, pipeline_dir, git_root, worktree)
+    else:
+        filename = os.path.basename(entity_path)
+        worktree_entity_path = os.path.join(git_root, worktree, filename)
     if not os.path.exists(worktree_entity_path):
         return fields
 
@@ -379,14 +507,13 @@ def load_active_entity_fields(entity_path, git_root):
 
 
 def scan_entities_active(directory, git_root):
-    """Scan entities, reading active worktree-backed entities from their worktree copy."""
+    """Scan entities, reading active worktree-backed entities from their worktree copy.
+
+    Supports both flat `{slug}.md` and folder-form `{slug}/index.md` entities.
+    """
     entities = []
-    pattern = os.path.join(directory, '*.md')
-    for filepath in sorted(glob.glob(pattern)):
-        if os.path.basename(filepath) == 'README.md':
-            continue
-        slug = os.path.splitext(os.path.basename(filepath))[0]
-        fields = load_active_entity_fields(filepath, git_root)
+    for slug, filepath in discover_entity_files(directory):
+        fields = load_active_entity_fields(filepath, git_root, pipeline_dir=directory)
         entity = {k: v for k, v in fields.items()}
         entity['slug'] = slug
         for key in ('id', 'status', 'title', 'score', 'source', 'worktree'):
@@ -1049,16 +1176,38 @@ def apply_filters(entities, filters):
 
 
 def run_archive(pipeline_dir, slug, force=False):
-    """Move {pipeline_dir}/{slug}.md to {pipeline_dir}/_archive/{slug}.md.
+    """Archive an entity, supporting both flat and folder forms.
+
+    Flat: moves {pipeline_dir}/{slug}.md -> {pipeline_dir}/_archive/{slug}.md.
+    Folder: stamps {pipeline_dir}/{slug}/index.md with `archived:`, then moves
+      the whole folder {pipeline_dir}/{slug}/ -> {pipeline_dir}/_archive/{slug}/.
 
     Stamps `archived: <ISO-8601 UTC>` in the frontmatter before moving, using
     the same `update_frontmatter()` insert-if-missing path that `--set` uses.
     Does not touch `completed`. Does not run git — the caller handles commits.
     Errors if the source is missing or the destination already exists.
     """
-    source_path = os.path.join(pipeline_dir, slug + '.md')
-    if not os.path.exists(source_path):
-        print(f'Error: entity not found: {slug}.md', file=sys.stderr)
+    flat_path = os.path.join(pipeline_dir, slug + '.md')
+    folder_root = os.path.join(pipeline_dir, slug)
+    folder_index = os.path.join(folder_root, 'index.md')
+    flat_exists = os.path.isfile(flat_path)
+    folder_exists = os.path.isfile(folder_index)
+
+    if folder_exists:
+        if flat_exists:
+            print(
+                f"Warning: entity '{slug}' has both {flat_path} and "
+                f"{folder_index}; preferring folder form. Remove the flat file "
+                f"to silence this warning.",
+                file=sys.stderr,
+            )
+        is_folder = True
+        source_path = folder_index
+    elif flat_exists:
+        is_folder = False
+        source_path = flat_path
+    else:
+        print(f'Error: entity not found: {slug}', file=sys.stderr)
         sys.exit(1)
 
     # Mod-block guard: refuse archival while mod-block is active
@@ -1089,10 +1238,17 @@ def run_archive(pipeline_dir, slug, force=False):
             sys.exit(1)
 
     archive_dir = os.path.join(pipeline_dir, '_archive')
-    dest_path = os.path.join(archive_dir, slug + '.md')
-    if os.path.exists(dest_path):
-        print(f'Error: already archived: {slug}.md', file=sys.stderr)
-        sys.exit(1)
+
+    if is_folder:
+        dest_path = os.path.join(archive_dir, slug)
+        if os.path.exists(dest_path):
+            print(f'Error: already archived: {slug}/', file=sys.stderr)
+            sys.exit(1)
+    else:
+        dest_path = os.path.join(archive_dir, slug + '.md')
+        if os.path.exists(dest_path):
+            print(f'Error: already archived: {slug}.md', file=sys.stderr)
+            sys.exit(1)
 
     os.makedirs(archive_dir, exist_ok=True)
 
@@ -1103,7 +1259,10 @@ def run_archive(pipeline_dir, slug, force=False):
         print('Error: ' + str(e), file=sys.stderr)
         sys.exit(1)
 
-    os.rename(source_path, dest_path)
+    if is_folder:
+        os.rename(folder_root, dest_path)
+    else:
+        os.rename(source_path, dest_path)
     print(f'archived: {dest_path}')
 
 
@@ -1356,12 +1515,14 @@ def main():
 
         slug, updates = set_result
         force = '--force' in args
-        main_entity_path = os.path.join(pipeline_dir, slug + '.md')
-        if not os.path.exists(main_entity_path):
-            print(f'Error: entity not found: {slug}.md', file=sys.stderr)
+        main_entity_path = resolve_entity_path(pipeline_dir, slug)
+        if main_entity_path is None:
+            print(f'Error: entity not found: {slug}', file=sys.stderr)
             sys.exit(1)
         git_root = find_git_root(pipeline_dir)
-        entity_path = resolve_active_entity_path(main_entity_path, git_root)
+        entity_path = resolve_active_entity_path(
+            main_entity_path, git_root, pipeline_dir=pipeline_dir
+        )
 
         # Mod-block guard: refuse terminal transitions while mod-block is active.
         # Also refuse terminal transitions combined with clearing mod-block in the

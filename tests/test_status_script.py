@@ -2695,5 +2695,348 @@ class TestMergeHookTerminalGuard(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
 
 
+def make_folder_entity(tmpdir, slug, content):
+    """Create a folder-form entity: {tmpdir}/{slug}/index.md with the given content."""
+    folder = os.path.join(tmpdir, slug)
+    os.makedirs(folder, exist_ok=True)
+    with open(os.path.join(folder, 'index.md'), 'w') as f:
+        f.write(content)
+    return folder
+
+
+def _read_frontmatter(filepath):
+    """Read frontmatter from a file, returning a dict of fields."""
+    fields = {}
+    in_fm = False
+    with open(filepath, 'r') as f:
+        for line in f:
+            line = line.rstrip('\n')
+            if line == '---':
+                if in_fm:
+                    break
+                in_fm = True
+                continue
+            if in_fm and ':' in line:
+                key, _, val = line.partition(':')
+                fields[key.strip()] = val.strip()
+    return fields
+
+
+class TestEntityAsFolder(unittest.TestCase):
+    """Test first-class entity-as-folder support (issue #99).
+
+    An entity may now live either as a flat `{slug}.md` file or as a folder
+    `{slug}/` containing `index.md`. Reserved subdirectories (`_archive`,
+    `_mods`) are never treated as entity folders.
+    """
+
+    def setUp(self):
+        self._script_dir = tempfile.mkdtemp()
+        self.script_path = build_status_script(self._script_dir)
+
+    def tearDown(self):
+        os.unlink(self.script_path)
+        os.rmdir(self._script_dir)
+
+    # ---------- Discovery: mixed flat + folder ----------
+
+    def test_default_overview_lists_folder_entity(self):
+        """Folder entity (`{slug}/index.md`) appears in the default overview."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            make_pipeline(tmpdir, README_WITH_STAGES)
+            make_folder_entity(tmpdir, 'folder-entity',
+                               entity('001', 'Folder Entity', 'backlog', '0.80'))
+            result = run_status(tmpdir, script_path=self.script_path)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn('folder-entity', result.stdout)
+            self.assertIn('Folder Entity', result.stdout)
+
+    def test_mixed_workflow_default_overview_shows_both(self):
+        """Flat and folder entities coexist in the default overview."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            make_pipeline(tmpdir, README_WITH_STAGES, {
+                'flat-entity.md': entity('001', 'Flat Entity', 'backlog', '0.90'),
+            })
+            make_folder_entity(tmpdir, 'folder-entity',
+                               entity('002', 'Folder Entity', 'backlog', '0.80'))
+            result = run_status(tmpdir, script_path=self.script_path)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn('flat-entity', result.stdout)
+            self.assertIn('folder-entity', result.stdout)
+
+    def test_folder_only_workflow_default_overview(self):
+        """Folder-only workflow: all entities still appear."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            make_pipeline(tmpdir, README_WITH_STAGES)
+            make_folder_entity(tmpdir, 'post-one',
+                               entity('001', 'Post One', 'backlog', '0.70'))
+            make_folder_entity(tmpdir, 'post-two',
+                               entity('002', 'Post Two', 'ideation', '0.90'))
+            result = run_status(tmpdir, script_path=self.script_path)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            lines = result.stdout.strip().split('\n')
+            # header + separator + 2 rows
+            self.assertEqual(len(lines), 4, result.stdout)
+            self.assertIn('post-one', result.stdout)
+            self.assertIn('post-two', result.stdout)
+
+    def test_next_includes_folder_entity(self):
+        """--next includes folder entities that are dispatchable."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            make_pipeline(tmpdir, README_WITH_STAGES)
+            make_folder_entity(tmpdir, 'folder-entity',
+                               entity('001', 'Folder Entity', 'backlog', '0.80'))
+            result = run_status(tmpdir, '--next', script_path=self.script_path)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn('folder-entity', result.stdout)
+
+    def test_next_id_counts_folder_entities(self):
+        """--next-id considers folder entities' ids."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            make_pipeline(tmpdir, README_WITH_STAGES, {
+                'flat-a.md': entity('003', 'Flat A', 'backlog', '0.40'),
+            })
+            make_folder_entity(tmpdir, 'folder-b',
+                               entity('007', 'Folder B', 'backlog', '0.70'))
+            result = run_status(tmpdir, '--next-id', script_path=self.script_path)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout.strip(), '008')
+
+    def test_boot_reports_folder_entities(self):
+        """--boot renders folder entities in the DISPATCHABLE section."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            make_pipeline(tmpdir, README_WITH_STAGES)
+            make_folder_entity(tmpdir, 'folder-entity',
+                               entity('001', 'Folder Entity', 'backlog', '0.80'))
+            result = run_status(tmpdir, '--boot', script_path=self.script_path)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            # NEXT_ID accounts for the folder entity id=001 -> next 002.
+            self.assertIn('NEXT_ID: 002', result.stdout)
+            # Folder entity dispatchable row is present.
+            self.assertIn('folder-entity', result.stdout)
+
+    def test_where_filter_applies_to_folder_entities(self):
+        """--where matches on folder-entity fields."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            make_pipeline(tmpdir, README_WITH_STAGES)
+            make_folder_entity(tmpdir, 'folder-entity',
+                               entity('001', 'Folder Entity', 'backlog', '0.80'))
+            make_folder_entity(tmpdir, 'folder-other',
+                               entity('002', 'Folder Other', 'ideation', '0.80'))
+            result = run_status(tmpdir, '--where', 'status=backlog',
+                                script_path=self.script_path)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn('folder-entity', result.stdout)
+            self.assertNotIn('folder-other', result.stdout)
+
+    # ---------- Reserved subdirectories ----------
+
+    def test_reserved_archive_subdir_not_treated_as_entity(self):
+        """A `_archive/` directory must never surface as an entity."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            make_pipeline(
+                tmpdir,
+                README_WITH_STAGES,
+                entities={'flat-a.md': entity('001', 'Flat A', 'backlog', '0.50')},
+                archived={'old.md': entity('002', 'Old', 'done', '0.80')},
+            )
+            result = run_status(tmpdir, script_path=self.script_path)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            # `_archive` should never appear as a slug in the overview.
+            self.assertNotIn('_archive', result.stdout)
+            self.assertIn('flat-a', result.stdout)
+
+    def test_reserved_mods_subdir_not_treated_as_entity(self):
+        """A `_mods/` directory must never surface as an entity."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            make_pipeline(tmpdir, README_WITH_STAGES, {
+                'flat-a.md': entity('001', 'Flat A', 'backlog', '0.50'),
+            })
+            # Create a `_mods/` with an index.md — it must still be treated as
+            # reserved, not as a `_mods` entity.
+            mods_dir = os.path.join(tmpdir, '_mods')
+            os.makedirs(mods_dir)
+            with open(os.path.join(mods_dir, 'index.md'), 'w') as f:
+                f.write('---\nname: not-an-entity\n---\n')
+            result = run_status(tmpdir, script_path=self.script_path)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            # Only the flat entity shows in the SLUG column.
+            self.assertIn('flat-a', result.stdout)
+            # `_mods` must not appear as a slug (rely on the row format —
+            # the substring must not match an ID or slug cell).
+            for line in result.stdout.strip().split('\n')[2:]:
+                cells = line.split()
+                self.assertNotIn('_mods', cells)
+
+    # ---------- Conflict: both flat and folder present ----------
+
+    def test_conflict_prefers_folder_and_warns(self):
+        """When both flat and folder exist, folder wins and stderr warns."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            make_pipeline(tmpdir, README_WITH_STAGES, {
+                'dup.md': entity('001', 'Flat Copy', 'backlog', '0.10'),
+            })
+            make_folder_entity(tmpdir, 'dup',
+                               entity('001', 'Folder Copy', 'backlog', '0.90'))
+            result = run_status(tmpdir, script_path=self.script_path)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            # The folder copy's title wins.
+            self.assertIn('Folder Copy', result.stdout)
+            self.assertNotIn('Flat Copy', result.stdout)
+            # Warning on stderr, not stdout.
+            self.assertIn("entity 'dup'", result.stderr)
+            self.assertIn('preferring folder', result.stderr)
+            # Exactly one row in the overview (dedup by slug).
+            data_rows = [
+                line for line in result.stdout.strip().split('\n')[2:]
+                if 'dup' in line
+            ]
+            self.assertEqual(len(data_rows), 1, result.stdout)
+
+    # ---------- --set on a folder entity ----------
+
+    def test_set_on_folder_entity_writes_to_index(self):
+        """--set writes to `{slug}/index.md`, not a sibling file."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            make_pipeline(tmpdir, README_WITH_STAGES)
+            make_folder_entity(tmpdir, 'folder-entity',
+                               entity('001', 'Folder Entity', 'backlog', '0.80'))
+            result = run_status(tmpdir, '--set', 'folder-entity', 'status=ideation',
+                                script_path=self.script_path)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            # index.md updated
+            fields = _read_frontmatter(
+                os.path.join(tmpdir, 'folder-entity', 'index.md'))
+            self.assertEqual(fields['status'], 'ideation')
+            # No sibling `folder-entity.md` created
+            self.assertFalse(
+                os.path.exists(os.path.join(tmpdir, 'folder-entity.md')))
+
+    def test_set_on_missing_folder_entity_errors(self):
+        """--set on a slug with neither flat nor folder form errors."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            make_pipeline(tmpdir, README_WITH_STAGES)
+            result = run_status(tmpdir, '--set', 'no-such', 'status=ideation',
+                                script_path=self.script_path)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('entity not found', result.stderr)
+
+    def test_set_prefers_folder_when_both_forms_exist(self):
+        """--set on a conflicting slug writes to the folder copy and warns."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            make_pipeline(tmpdir, README_WITH_STAGES, {
+                'dup.md': entity('001', 'Flat Copy', 'backlog', '0.10'),
+            })
+            make_folder_entity(tmpdir, 'dup',
+                               entity('001', 'Folder Copy', 'backlog', '0.90'))
+            result = run_status(tmpdir, '--set', 'dup', 'status=ideation',
+                                script_path=self.script_path)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            folder_fields = _read_frontmatter(
+                os.path.join(tmpdir, 'dup', 'index.md'))
+            flat_fields = _read_frontmatter(os.path.join(tmpdir, 'dup.md'))
+            self.assertEqual(folder_fields['status'], 'ideation')
+            self.assertEqual(flat_fields['status'], 'backlog')
+            self.assertIn('preferring folder', result.stderr)
+
+    # ---------- --archive on a folder entity ----------
+
+    def test_archive_folder_entity_moves_whole_directory(self):
+        """--archive on a folder entity moves the whole folder into _archive/."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            make_pipeline(tmpdir, README_WITH_STAGES)
+            folder = make_folder_entity(
+                tmpdir, 'folder-entity',
+                entity('001', 'Folder Entity', 'done', '0.80'))
+            # Add an artifact next to index.md to verify the whole folder moves.
+            with open(os.path.join(folder, 'draft-v1.md'), 'w') as f:
+                f.write('# draft v1\n')
+
+            result = run_status(tmpdir, '--archive', 'folder-entity',
+                                script_path=self.script_path)
+            self.assertEqual(result.returncode, 0, result.stderr)
+
+            # Original folder gone
+            self.assertFalse(os.path.exists(folder))
+            # Archived folder present with both files
+            archived_folder = os.path.join(tmpdir, '_archive', 'folder-entity')
+            self.assertTrue(os.path.isdir(archived_folder))
+            self.assertTrue(os.path.isfile(os.path.join(archived_folder, 'index.md')))
+            self.assertTrue(os.path.isfile(os.path.join(archived_folder, 'draft-v1.md')))
+            # No stray sibling .md file created in _archive
+            self.assertFalse(
+                os.path.exists(os.path.join(tmpdir, '_archive', 'folder-entity.md')))
+
+    def test_archive_folder_entity_stamps_archived_in_index(self):
+        """--archive stamps `archived:` into the inner index.md before moving."""
+        import re
+        with tempfile.TemporaryDirectory() as tmpdir:
+            make_pipeline(tmpdir, README_WITH_STAGES)
+            make_folder_entity(tmpdir, 'folder-entity',
+                               entity('001', 'Folder Entity', 'done', '0.80'))
+            result = run_status(tmpdir, '--archive', 'folder-entity',
+                                script_path=self.script_path)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            archived_index = os.path.join(
+                tmpdir, '_archive', 'folder-entity', 'index.md')
+            fields = _read_frontmatter(archived_index)
+            self.assertIn('archived', fields)
+            self.assertRegex(
+                fields['archived'],
+                r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$',
+            )
+
+    def test_archive_folder_entity_errors_when_destination_exists(self):
+        """--archive refuses to clobber an existing folder under _archive/."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            make_pipeline(tmpdir, README_WITH_STAGES)
+            make_folder_entity(tmpdir, 'folder-entity',
+                               entity('001', 'Folder Entity', 'done', '0.80'))
+            # Pre-create the destination folder.
+            archive_dest = os.path.join(tmpdir, '_archive', 'folder-entity')
+            os.makedirs(archive_dest)
+            with open(os.path.join(archive_dest, 'index.md'), 'w') as f:
+                f.write('---\nid: 001\n---\nold\n')
+
+            result = run_status(tmpdir, '--archive', 'folder-entity',
+                                script_path=self.script_path)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('already archived', result.stderr)
+            # Source still present (not clobbered).
+            self.assertTrue(os.path.isfile(
+                os.path.join(tmpdir, 'folder-entity', 'index.md')))
+
+    def test_archived_flag_lists_folder_archive(self):
+        """--archived picks up folder-archived entities via `_archive/{slug}/index.md`."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            make_pipeline(
+                tmpdir,
+                README_WITH_STAGES,
+                entities={'active.md': entity('001', 'Active', 'backlog', '0.50')},
+            )
+            # Pre-create an archived folder entity.
+            archived_dir = os.path.join(tmpdir, '_archive', 'old-folder')
+            os.makedirs(archived_dir)
+            with open(os.path.join(archived_dir, 'index.md'), 'w') as f:
+                f.write(entity('002', 'Old Folder', 'done', '0.60'))
+
+            result = run_status(tmpdir, '--archived',
+                                script_path=self.script_path)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn('old-folder', result.stdout)
+            self.assertIn('active', result.stdout)
+
+
+class TestStatusDocstringEntityFolder(unittest.TestCase):
+    """Static check: the status script header must document entity-as-folder."""
+
+    def test_docstring_mentions_folder_form(self):
+        with open(TEMPLATE_PATH, 'r') as f:
+            content = f.read()
+        # The script header must describe the folder-form discovery rule.
+        self.assertIn('index.md', content)
+        self.assertIn('folder-per-entity', content)
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -235,7 +235,12 @@ stages:
 
 ## File Naming
 
-Each {entity_label} is a markdown file named `{slug}.md` — lowercase, hyphens, no spaces. Example: `my-feature-idea.md`.
+Each {entity_label} lives as either:
+
+- a flat markdown file `{slug}.md` (default — use this unless the entity produces many artifacts), or
+- a folder `{slug}/` containing `index.md` as the canonical entity file, when the {entity_label} produces per-stage artifacts (draft versions, transcripts, outputs) that belong alongside the tracker.
+
+Slugs are lowercase, hyphens, no spaces. Example: `my-feature-idea.md` or `my-feature-idea/index.md`. The status scanner recognizes both forms; `--set` and `--archive` resolve the slug either way, and folder entities archive as a whole folder into `_archive/{slug}/`.
 
 ## Schema
 
