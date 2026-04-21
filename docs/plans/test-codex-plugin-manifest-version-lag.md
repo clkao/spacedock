@@ -1,13 +1,13 @@
 ---
 id: "213"
 title: "test_codex_plugin_manifest_matches_approved_contract lags behind version bumps"
-status: implementation
+status: done
 source: "#212 ensign's make test-static run observed `test_codex_plugin_manifest_matches_approved_contract` failing on main — pre-existing from the local `0d2d7a45 release: bump version to spacedock@0.10.0` commit (CL, 2026-04-20 20:11 PDT). Plugin manifests updated to 0.10.0; test assertion at `tests/test_codex_plugin_packaging.py:35` still pins `== \"0.9.6\"`."
 started: 2026-04-21T04:08:04Z
-completed:
-verdict:
+completed: 2026-04-21T04:14:04Z
+verdict: PASSED
 score: 0.45
-worktree: .worktrees/spacedock-ensign-test-codex-plugin-manifest-version-lag
+worktree: 
 issue:
 pr:
 mod-block:
