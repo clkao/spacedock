@@ -234,10 +234,8 @@ def _run_checklist_scenario(
 
 
 _HAIKU_XFAIL_REASON = (
-    "pending #200 — haiku-bare FO guardrail weaknesses; ensign omits ### Summary / "
-    "uses malformed Completion Checklist heading at low effort. Opus/low is the "
-    "fitness check for this test; see claude-live-opus on CI run 24695826486 for "
-    "strict-PASS evidence."
+    "pending #200 — haiku-bare FO guardrail weaknesses; ensign omits "
+    "### Summary / drops verbatim checklist item text at low effort"
 )
 
 
