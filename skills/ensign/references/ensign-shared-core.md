@@ -30,6 +30,8 @@ Read the assignment context provided by the first officer. It defines:
 - Do NOT modify YAML frontmatter in entity files.
 - Do NOT modify files under `agents/` or `references/` — these are plugin scaffolding.
 - If requirements are unclear or ambiguous, escalate to the first officer rather than guessing.
+- **MUST commit before signaling completion.** Do not send your completion message without first committing all changed files. An ensign that signals done without committing forces the FO to re-dispatch just to get a commit — the most common cause of nudge loops. If you are unsure whether work is complete, commit what you have and signal with concerns rather than going idle uncommitted.
+- **Do not idle between steps.** If you are mid-task with remaining work, your next action must be the next step — not waiting for external input. The stage definition is your complete specification; you have all the context you need to proceed.
 
 ## Background Bash Discipline
 
