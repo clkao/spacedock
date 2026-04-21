@@ -77,3 +77,16 @@ Ideation should pick between Options A/B/C (my lean: B — single-source-of-trut
 - Observed during #212 ensign's `make test-static` run, 2026-04-21
 - Local `0d2d7a45 release: bump version to spacedock@0.10.0` (CL, 2026-04-20 20:11 PDT) is the trigger commit (currently unpushed)
 - `tests/test_codex_plugin_packaging.py:35` is the failing assertion site
+
+## Stage Report: implementation
+
+- DONE: `scripts/release.sh` updates `tests/test_codex_plugin_packaging.py` version assertion as part of step 1 (the version-bump commit).
+  Commit b8b7d3a6 adds an inline Python re.subn block (scripts/release.sh:115-124) that stamps the version and loud-fails on `n != 1`; `$PACKAGING_TEST` is appended to the step-1 `git add` list (scripts/release.sh:126).
+- DONE: Retroactive fix: `tests/test_codex_plugin_packaging.py:35` changes from `== "0.9.6"` to `== "0.10.0"` to match the current `.codex-plugin/plugin.json` version.
+  Commit 7efba38f — single-line assertion update; nothing else in the file touched.
+- DONE: Verification: `unset CLAUDECODE && make test-static` green; `test_codex_plugin_manifest_matches_approved_contract` passes.
+  Final run: 511 passed, 25 deselected, 10 subtests passed in 24.12s. Current local main baseline was 510 passing + 1 failing — retroactive fix flips that one to green for 511 total.
+
+### Summary
+
+Landed Option C as directed: `scripts/release.sh` gained one inline-Python stamp step (matching the existing JSON-bump style) that rewrites the hardcoded `assert manifest["version"] == "..."` line during the version-bump commit, and the test file was updated to `"0.10.0"` to unblock main immediately. The stamp block uses `\g<1>`/`\g<2>` named backrefs to avoid the `\1` + multi-digit version ambiguity (caught during sanity-check — `\1$VERSION` turned `\10.10.0` into an invalid group 10 reference), and the `n != 1` guard load-bearingly fails loudly if the assertion shape ever changes. Test count matches dispatch expectation (≥511 = #212 baseline 510 + 1 flipped).
