@@ -578,3 +578,41 @@ Codex CI was still failing due to a specific post-checklist heading (`Execution 
 ### Summary
 
 Cycle 9 closes the remaining claude CI non-green states by xfailing haiku on the two checklist E2E entrypoints with reason `pending #200`. Haiku drift is a known class we do not fix in this PR; xfail preserves CI green on the haiku jobs while keeping the strict-PASS gate on opus and codex intact. Cycle 8 (`6f296ba9`) + cycle 9 (`34c82ae2`) together close the codex parser gap and the haiku bookkeeping gap. Opus/low is the fitness check for #211 and remains enforcing.
+
+
+### Cycle 9 addendum — shared-core citations + haiku artifact reference
+
+Captain re-confirmed direction: the `### Summary` subsection check and the verbatim-checklist-item check are not over-constraint — both are protocol contract in `skills/ensign/references/ensign-shared-core.md` `## Stage Report Protocol`. Quoting the exact structure block:
+
+```
+## Stage Report: {stage_name}
+
+- DONE: {item text}
+  {one-line evidence or reference}
+...
+
+### Summary
+
+{2-3 sentences: what was done, key decisions, anything notable}
+```
+
+And from Rules in the same section:
+
+- "every checklist item must appear"
+- "use the checklist item text verbatim for `{item text}` when possible (copy/paste)"
+
+Both the `### Summary` subsection and the verbatim `{item text}` requirement are mandated by shared-core. The test's checks at `tests/test_checklist_e2e.py:219` (Summary) and `tests/test_checklist_e2e.py:221-227` (verbatim with code-span/keyword anchors as relaxation) correctly mirror the protocol. Haiku-bare violates shared-core by (a) omitting `### Summary` and (b) paraphrasing checklist items instead of copying verbatim. That violation is a #200-class FO/ensign guardrail weakness, NOT a test-constraint bug.
+
+Local haiku break-glass artifact from pre-xfail repro at `--runtime claude --model haiku --effort low`:
+
+- Test dir: `/var/folders/h1/vnssm1dj6ks4nzzvx8y29yjm0000gn/T/tmpl5nihxio/`
+- Wallclock: 98.66s, 3/13 checks failed pre-xfail.
+- `agent-prompt.txt` — dispatched prompt had `### Completion Checklist` (correct contract shape) with three items: (1) `Create output.txt with "hello" content (satisfies AC-1)`, (2) `Record evidence in entity body of what was accomplished`, (3) `Append Stage Report with checklist accounting per protocol`.
+- `test-project/checklist-pipeline/checklist-task.md` stage report — bullets used AC text (`Create checklist-pipeline/output.txt containing the word hello` / `The output file is valid UTF-8`) rather than checklist item text; no `### Summary` subsection. Confirms haiku's drift class.
+- Post-xfail repro at same model/effort: `1 xfailed in 97.59s` (verified `request.applymarker` fires correctly).
+
+Flag for captain (optional follow-up, not part of #211): checklist item 3 in that dispatch prompt is self-referential — `Append Stage Report with checklist accounting per protocol`. A checklist item whose completion evidence IS the stage report itself can only be verbatim-quoted inside its own artifact, which is a minor circularity in the FO-generated checklist design. That sits adjacent to #206 (FO-checklist content quality). Not actionable here, captain's call on whether to file.
+
+### Summary (addendum)
+
+`### Summary` and verbatim item text are shared-core contract per `## Stage Report Protocol`, not test-side over-constraint. Haiku drift is #200-class and xfailed (`strict=False, reason="pending #200 — haiku-bare FO guardrail weaknesses"`) on both helper-path and break-glass entrypoints via `request.applymarker` when `model == "haiku"`. Opus/low PASS on run 24695826486 for both tests is the fitness check this PR delivers. Commits on origin: `6f296ba9` (codex parser) + `34c82ae2` (xfail haiku).
