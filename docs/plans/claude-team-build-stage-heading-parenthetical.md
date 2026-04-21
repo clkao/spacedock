@@ -102,3 +102,18 @@ Estimated cost: near-zero (offline static, no live-runtime needed). Fits in `mak
 - GitHub issue #138 (this PR will close it)
 - `skills/commission/bin/claude-team:72-97` — target function
 - `tests/test_claude_team.py` — test home
+
+## Stage Report: implementation
+
+### Summary
+Replaced the exact-string heading tuple in `extract_stage_subsection` with a compiled regex that accepts `### \`stage\``, `### stage`, and each form optionally followed by a ` (...)` parenthetical annotation. Added 7 unit tests + 1 subprocess e2e test covering all AC-1 heading forms, both AC-2 rejection cases, and the literal JSON repro from GitHub issue #138.
+
+### Checklist accounting
+- DONE: `skills/commission/bin/claude-team::extract_stage_subsection` replaces the exact-string tuple match with `heading_re = re.compile(rf'^###\s+`?{re.escape(stage_name)}`?(?:\s+\([^)]*\))?\s*$')` compiled once and matched against `line.strip()`. Backtick-quoted form, bare form, and trailing `(...)` parenthetical annotations all match; non-matches still return None. Section-end sentinel logic (next `### ` or `## `) and trailing-blank-line trim preserved unchanged.
+- DONE: `tests/test_claude_team.py` gains a new class `TestExtractStageSubsection` asserting the 5 AC-1 heading forms match correctly and the 2 AC-2 rejection cases (nonexistent name, partial-match name when full is present) return None. Additionally a small e2e test invokes `claude-team build` as a subprocess with a temp fixture carrying `### \`triaged\` (terminal)` + the exact JSON payload from GitHub #138's repro; exits 0 and stdout contains the triaged subsection. (The e2e test lives in a sibling class `TestBuildStageHeadingParentheticalE2E` for test-discovery cleanliness; both classes are in the same file.)
+- DONE: `make test-static` green at ≥ 486 passed (was 485 on main post-#211; expect +1 from the new e2e test + ~6 from the new unit class). No CI live jobs required. Observed: 510 passed (delta +8 new tests above the 485 baseline; 7 unit + 1 e2e). One unrelated failure `test_codex_plugin_manifest_matches_approved_contract` pre-exists on main from the `release: bump version to spacedock@0.10.0` commit and is out of scope for this entity.
+
+### Deliverables
+- Commit `0d769cb2` — `fix(#138): claude-team build tolerate trailing parenthetical in stage heading`
+- Commit `1e3b7a8f` — `test(#138): cover stage-heading regex against backtick + parenthetical variants`
+- Branch `spacedock-ensign/claude-team-build-stage-heading-parenthetical` (local, unpushed; FO owns push + PR via pr-merge mod hook)
