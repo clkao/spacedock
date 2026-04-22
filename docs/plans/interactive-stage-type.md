@@ -1,9 +1,9 @@
 ---
 id: "215"
 title: Interactive stage type for captain-performed work
-status: backlog
+status: ideation
 source: captain session 2026-04-21
-started:
+started: 2026-04-22T05:26:49Z
 completed:
 verdict:
 score:
