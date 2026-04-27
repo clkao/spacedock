@@ -45,6 +45,8 @@ Routed reuse should:
 3. mark the worker active again
 4. wait for the new completion before using it as evidence
 
+For the first Pi slice, this reopened same-session follow-up is an acceptable reuse model. Do not require a continuously live background worker just to satisfy reuse semantics.
+
 Do not treat the existence of an older completed Pi session turn as proof that the follow-up routed work has completed.
 
 ## Working Directory
@@ -62,3 +64,7 @@ For the first Pi slice, report operator-facing progress in the same high-level l
 - shutting down worker label when no later routing remains
 
 The stage report in the entity file remains the source of truth for completion and gate review.
+
+## Optimization Path
+
+Once reopened-session reuse is proven behaviorally, a preferred optimization path is to move reusable Pi workers to SDK-managed keep-alive sessions inside the FO runtime. That should reduce repeated process/session startup overhead without changing the FO-visible contract.

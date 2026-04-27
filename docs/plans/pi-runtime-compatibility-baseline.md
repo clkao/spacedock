@@ -70,7 +70,7 @@ The runtime should expose a Spacedock-owned worker-handle model even if Pi itsel
    - The FO remains anchored at repo root.
    - Worktree-backed worker stages run with the worktree as their cwd.
 
-The likely Pi mapping is one Pi session per worker. Fresh dispatch creates or opens a worker session and sends a fully self-contained assignment. Wait drives that session until idle/completion. Reuse reopens the same session and sends the follow-up assignment. Shutdown is recorded explicitly in thin Spacedock workflow metadata even if the underlying Pi session file still exists.
+The likely Pi mapping is one Pi session per worker. Fresh dispatch creates or opens a worker session and sends a fully self-contained assignment. Wait drives that session until idle/completion. Reuse reopens the same session and sends the follow-up assignment. For the first slice, this reopened same-session follow-up counts as valid worker reuse even if Pi is not yet managed as a continuously live background worker. Shutdown is recorded explicitly in thin Spacedock workflow metadata even if the underlying Pi session file still exists.
 
 Architecturally, this suggests:
 
@@ -141,6 +141,7 @@ The riskiest technical edges are:
 - Reuse must track a new completion epoch/turn boundary so a reopened session does not accidentally reuse stale completion evidence.
 - Shutdown may need to be defined at the Spacedock metadata layer even if Pi does not expose a native per-worker kill primitive identical to other runtimes.
 - Interactive and batch invocation can use different transport surfaces, but they should share one runtime contract and one worker metadata model.
+- Reopened-session reuse is acceptable for the first slice, but a later optimization path should prefer SDK-managed in-memory keep-alive sessions to reduce repeated process/session startup overhead.
 
 A reasonable implementation order is:
 
@@ -193,4 +194,4 @@ This pass established the initial Pi integration seam rather than full runtime b
 - per-run Pi session storage via `--session-dir {runner.test_dir}/pi-sessions`
 - a thin Spacedock-owned worker-label -> Pi-session mapping (`PiSessionRegistry`) that records workflow metadata and a `completion_epoch` on top of Pi's native session persistence
 
-What is still missing is the reusable live worker loop beyond the gate preflight: a real Pi-dispatched ensign session for same-session follow-up, routed follow-up on that same Pi session, and explicit shutdown proof for a reused worker.
+What is still missing is the reusable worker loop beyond the gate preflight: a real Pi-dispatched ensign session for same-session follow-up, routed follow-up on that same Pi session, and explicit shutdown proof for a reused worker. For now, reopened-session reuse is the intended proving path; SDK-managed keep-alive sessions are the preferred follow-up optimization once behavior is proven.
