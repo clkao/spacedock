@@ -170,3 +170,28 @@ This ideation pass reframes #147 as a minimum-runtime baseline problem rather th
 - Cycle 1 — validation gate rejected after dual review. Findings routed back to `implementation`.
   - Reviewer consensus flagged three serious issues: Pi FO path is not actually wired to `PiWorkerRuntime` / `PiSessionRegistry`; `PiWorkerRuntime.shutdown()` is metadata-only and does not shut down live/background workers; Pi ensign runtime docs conflict with the non-interactive reopen-by-session model.
   - Additional findings included concurrent reuse of an already-active worker session, missing session-path fallback in reuse, and non-atomic registry persistence.
+
+## Stage Report: implementation
+
+- DONE: Added first-slice Pi runtime contract surfaces for the FO, ensign, and pytest runtime selection.
+  Evidence: `skills/first-officer/SKILL.md`, `skills/ensign/SKILL.md`, `skills/first-officer/references/pi-first-officer-runtime.md`, `skills/ensign/references/pi-ensign-runtime.md`, and `tests/conftest.py` now advertise/accept Pi.
+- DONE: Added an initial Pi harness entry that uses Pi JSON mode, explicit skill loading, and per-run session storage.
+  Evidence: `scripts/test_lib.py` now provides `build_pi_first_officer_invocation_prompt()` and `run_pi_first_officer()`, and `tests/test_pi_runtime_harness.py` verifies the assembled command shape uses `pi --mode json --print --session-dir ... --skill ...`.
+- DONE: Added a minimal session-backed worker registry scaffold for Pi reuse/shutdown bookkeeping.
+  Evidence: `scripts/pi_session_registry.py` defines `WorkerSessionRecord` and `PiSessionRegistry`, and `tests/test_pi_session_registry.py` verifies metadata round-trip, active-again epoch bumps, and shutdown/unroutable behavior.
+- FAILED: Live Pi workflow execution is not proven yet.
+  Evidence: `tests/test_gate_guardrail.py --runtime pi` is not wired yet, and the current harness has no Pi log parser or completion/gate assertions beyond command-shape tests.
+- SKIPPED: Same-worker live routed follow-up and explicit shutdown on a real Pi session.
+  Evidence: the registry scaffold exists, but no live Pi worker dispatch/reuse cycle exercises it yet.
+
+### Implementation Summary
+
+This pass established the initial Pi integration seam rather than full runtime behavior. The current constructs are:
+
+- a Pi FO launcher based on `pi --mode json --print`
+- explicit skill loading via `--skill {repo}/skills/first-officer`
+- per-run Pi session storage via `--session-dir {runner.test_dir}/pi-sessions`
+- a Spacedock-owned session registry (`PiSessionRegistry`) that maps FO worker labels to Pi session metadata and a `completion_epoch`
+
+What is still missing is the live worker loop: a real Pi-dispatched ensign session, waiting/parsing of completion events, routed follow-up on the same Pi session, and gate-preflight proof in `tests/test_gate_guardrail.py --runtime pi`.
+
