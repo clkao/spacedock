@@ -1,7 +1,7 @@
 ---
 id: 216
 title: "Codex FO runtime: add preemptible wait mode for subagent completions"
-status: validation
+status: implementation
 source: "GitHub issue #148, 2026-04-27 - local mitigation for openai/codex#15723 completion wakeup limitation"
 started: 2026-04-27T18:27:05Z
 completed:
@@ -219,3 +219,10 @@ Implemented the Codex preemptible wait contract locally in the FO runtime docs a
 Validation selected the static/parser commands called out by the entity and the stable offline suite from `tests/README.md`. Live Codex E2E was not run because the entity states it is optional for this slice unless real interactive interruption handling is claimed; the implementation claims static plus deterministic transcript coverage.
 
 Recommendation: PASSED
+
+### Feedback Cycles
+
+- Cycle 1 (2026-04-27): Captain rejected the validation gate despite a PASSED recommendation. Required changes:
+  - Do not make detailed wait-instruction prose a first-class implementation or test target; Codex should already provide the basic interrupt affordance.
+  - Focus the implementation and tests on continuous waiting behavior after interruption: preserve the wait set, process the interruption, and resume waiting for unresolved ensigns unless the captain says pause or stop.
+  - Avoid static tests that match user-facing prose. Prefer behavioral/parser fixtures that prove same-wait-set resume and FO-collected/uncollected state.
