@@ -179,6 +179,32 @@ def _assemble_skill_contract(
     return parts, trace
 
 
+def build_pi_first_officer_invocation_prompt(
+    workflow_dir: str | Path,
+    run_goal: str | None = None,
+    local_skill_path: str | Path | None = None,
+    local_plugin_root: str | Path | None = None,
+) -> str:
+    workflow_dir = Path(workflow_dir)
+    prompt = f"/skill:first-officer Manage the Pi workflow at `{workflow_dir}`."
+    if local_skill_path is not None:
+        prompt = (
+            f"{prompt}\n\n"
+            f"The local first-officer skill directory is `{Path(local_skill_path)}`."
+        )
+    if local_plugin_root is not None:
+        plugin_root = Path(local_plugin_root)
+        prompt = (
+            f"{prompt}\n\n"
+            f"The local Spacedock plugin directory is `{plugin_root}`; the status helper is "
+            f"`{plugin_root / 'skills' / 'commission' / 'bin' / 'status'}`."
+        )
+    if run_goal:
+        prompt = f"{prompt}\n\n{run_goal.strip()}"
+    return prompt
+
+
+
 def build_codex_first_officer_invocation_prompt(
     workflow_dir: str | Path,
     agent_id: str = "spacedock:first-officer",
@@ -729,7 +755,7 @@ def assembled_agent_content(runner: TestRunner, agent_name: str, runtime: str = 
     instructs the agent to read, so tests can check the full behavioral
     contract without running the agent.
     """
-    if runtime not in {"claude", "codex"}:
+    if runtime not in {"claude", "codex", "pi"}:
         raise ValueError(f"Unknown runtime: {runtime}")
     skill_root = runner.repo_root / "skills"
     if agent_name == "first-officer":
@@ -919,6 +945,73 @@ def run_first_officer_streaming(
             if not log_file.closed:
                 log_file.close()
             raise
+
+
+def run_pi_first_officer(
+    runner: TestRunner,
+    workflow_dir: str,
+    agent_id: str = "spacedock:first-officer",
+    run_goal: str | None = None,
+    extra_args: list[str] | None = None,
+    log_name: str = "pi-fo-log.jsonl",
+    timeout_s: int = 120,
+) -> int:
+    """Run the Pi first-officer skill via `pi --mode json`.
+
+    The first slice uses Pi's explicit skill-loading surface and JSON event
+    stream so the harness can evolve toward session-backed worker reuse without
+    inventing a separate Pi-only workflow contract.
+    """
+    log_path = runner.log_dir / log_name
+    workflow_path = (runner.test_project_dir / workflow_dir).resolve()
+    local_skill_path = runner.repo_root / "skills" / "first-officer"
+    prompt = build_pi_first_officer_invocation_prompt(
+        workflow_path,
+        run_goal=run_goal,
+        local_skill_path=local_skill_path,
+        local_plugin_root=runner.repo_root,
+    )
+    (runner.log_dir / "pi-fo-invocation.txt").write_text(prompt + "\n")
+
+    session_dir = runner.test_dir / "pi-sessions"
+    session_dir.mkdir(parents=True, exist_ok=True)
+
+    cmd = [
+        "pi",
+        "--mode",
+        "json",
+        "--print",
+        "--session-dir",
+        str(session_dir),
+        "--skill",
+        str(local_skill_path),
+        "--no-extensions",
+        "--no-prompt-templates",
+        prompt,
+    ]
+    if extra_args:
+        cmd[4:4] = list(extra_args)
+
+    with open(log_path, "w") as log_file:
+        try:
+            result = subprocess.run(
+                cmd,
+                stdout=log_file,
+                stderr=subprocess.STDOUT,
+                cwd=runner.test_project_dir,
+                timeout=timeout_s,
+                text=True,
+            )
+        except subprocess.TimeoutExpired:
+            print(f"\n  TIMEOUT: pi first officer exceeded {timeout_s}s limit")
+            return 124
+
+    print()
+    if result.returncode != 0:
+        print(f"WARNING: pi first officer exited with code {result.returncode}")
+
+    return result.returncode
+
 
 
 def run_codex_first_officer(

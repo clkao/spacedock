@@ -15,13 +15,13 @@ _SCRIPTS_DIR = _REPO_ROOT / "scripts"
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
-from test_lib import TestRunner, create_test_project, install_agents, run_first_officer, run_codex_first_officer  # noqa: E402
+from test_lib import TestRunner, create_test_project, install_agents, run_first_officer, run_codex_first_officer, run_pi_first_officer  # noqa: E402
 
 
 def pytest_addoption(parser):
     parser.addoption("--runtime", action="store", default="claude",
-                     choices=["claude", "codex"],
-                     help="Runtime under test for live E2E (claude or codex).")
+                     choices=["claude", "codex", "pi"],
+                     help="Runtime under test for live E2E (claude, codex, or pi).")
     parser.addoption("--model", action="store", default="haiku",
                      help="Model identifier for live runs (default: haiku).")
     parser.addoption("--effort", action="store", default="low",
@@ -139,7 +139,15 @@ def fo_run(test_project, runtime, model, effort):
                 agent_id=agent_id,
                 extra_args=list(extra_args or []),
             )
-        return run_codex_first_officer(
+        if runtime == "codex":
+            return run_codex_first_officer(
+                test_project,
+                workflow_dir,
+                agent_id=agent_id,
+                run_goal=run_goal or prompt,
+                extra_args=list(extra_args or []),
+            )
+        return run_pi_first_officer(
             test_project,
             workflow_dir,
             agent_id=agent_id,
