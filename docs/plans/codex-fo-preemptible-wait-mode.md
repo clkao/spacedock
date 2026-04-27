@@ -263,3 +263,31 @@ Recommendation: PASSED
 ### Summary
 
 Reworked the implementation around the captain's narrower behavior: interrupted FO waits resume on the same unresolved ensign handles unless the captain pauses/stops or creates a clarification blocker. Removed the runtime-doc prose tests and stripped the parser fixture/helper of the detailed wait-intent schema.
+
+## Stage Report: validation (cycle 3)
+
+- DONE: Applicable validation commands are selected from `tests/README.md`, rerun in the worktree, and reported with exact pass/fail results.
+  Evidence: `uv run --with pytest python tests/test_agent_content.py -q` -> 47 passed; `uv run --with pytest python -m pytest tests/test_test_lib_helpers.py -q` -> 19 passed; targeted prose/schema grep over runtime/tests/scripts -> no matches; `git diff --check` -> passed; `make test-static` -> 512 passed, 25 deselected, 10 subtests passed.
+- DONE: Every AC-1 through AC-6 is verified with concrete evidence or explicitly failed, including the feedback-cycle requirement to remove prose-doc tests and internal wait-state re-description.
+  Evidence: AC-1 through AC-6 are accounted for below against the current acceptance criteria and cycle-3 implementation.
+- DONE: The validation report gives a clear PASSED or REJECTED recommendation and preserves implementation ownership by not making unrequested fixes.
+  Evidence: No implementation files were changed during validation; this report appends only the validation evidence.
+
+### Acceptance Criteria
+
+- AC-1: PASSED. `skills/first-officer/references/codex-first-officer-runtime.md` contains a short `## Interrupted Waits` behavior rule: process non-stopping captain input, then resume `wait_agent` for the same unresolved ensigns; it does not define a detailed Codex wait-state schema.
+- AC-2: PASSED. `tests/test_test_lib_helpers.py::test_codex_log_parser_detects_preempted_multi_handle_wait_resume` asserts initial wait handles `["item_23", "item_42"]`, a user interruption, FO handling via `preempted_by_user_input`, and a resumed wait with the same `receiver_thread_ids`.
+- AC-3: PASSED. The same fixture includes a completion notification for `item_23` before the resumed wait, but `scripts/test_lib.py::CodexLogParser.interrupted_wait_sequences()` only marks handles collected after the later wait returns completed `agents_states`.
+- AC-4: PASSED. Runtime guidance states pause/stop do not resume waiting, and clarification blockers should ask for clarification rather than continuing to wait.
+- AC-5: PASSED. `tests/test_agent_content.py` no longer contains `test_codex_runtime_docs_define_preemptible_wait_mode_contract`; targeted grep over `skills/first-officer/references/codex-first-officer-runtime.md`, `tests/test_agent_content.py`, `tests/test_test_lib_helpers.py`, and `scripts/test_lib.py` found no replacement prose-doc/schema contract patterns.
+- AC-6: PASSED. The focused parser fixture proves resumed `wait_agent` collection on live handles; completion notification text is side-channel context and does not schedule a new FO turn or replace reconciliation.
+
+### Feedback-Cycle Verdict
+
+PASSED. The current runtime docs and current ACs avoid re-describing Codex's internal wait representation, and the implementation is the intended behavior amendment requested in cycle 2: handle non-stopping interruption, then resume waiting for the same unresolved ensigns unless paused/stopped or clarification-blocked. The old prose-doc test was removed, and behavioral/parser fixture evidence now carries the proof.
+
+### Summary
+
+Validation reproduced the targeted static/parser evidence and the stable offline suite selected from `tests/README.md`. Live Codex E2E was not run because the entity makes it optional unless deterministic interactive interruption handling is claimed; this implementation claims deterministic parser-fixture coverage.
+
+Recommendation: PASSED
