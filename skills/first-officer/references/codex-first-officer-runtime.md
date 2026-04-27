@@ -45,7 +45,7 @@ Split worker identity into:
 - `dispatch_agent_id`
 - `worker_key`
 
-For operator-facing status updates and routed follow-up messages, also keep a human-readable worker label. Use a stable `{entity_id}-{stage_key}/{display_name}` convention such as `130-impl/Herschel` or `130-validation/Herschel`. For dispatch, reuse, and shutdown updates, report that label alongside the logical id or thread handle; for ordinary wait-status prose, name the label and blocked reason while keeping raw runtime handles in internal wait intent, logs, and tests. Do not rely on opaque agent ids or incidental nicknames alone.
+For operator-facing status updates and routed follow-up messages, also keep a human-readable worker label. Use a stable `{entity_id}-{stage_key}/{display_name}` convention such as `130-impl/Herschel` or `130-validation/Herschel`. Report that label alongside the logical id or thread handle when useful, while keeping the runtime handle in internal wait intent, logs, and tests for same-handle verification. Do not rely on opaque agent ids or incidental nicknames alone.
 
 Every operator-facing dispatch, reuse, wait, and shutdown update must lead with the FO-owned worker label rather than a generic phrase like `the implementation worker`.
 
@@ -175,19 +175,7 @@ Entering preemptible wait requires recording a wait intent before the `wait_agen
 
 `Unresolved` means FO-uncollected, not necessarily still running. If a worker completes while the first officer is answering an interruption, that wait-set entry remains unresolved and FO-uncollected until the first officer resumes `wait_agent` on the same handle and collects/reconciles the completion evidence.
 
-Before waiting, emit concise operator-facing wait status that names every FO-owned worker label in the wait set and states the blocked reason. Ordinary wait-status prose must not print raw runtime handles such as UUIDs or `item_...` ids; runtime handles remain required in internal wait intent, logs, and tests so same-handle collection can be verified.
-
-Use this shape for wait status:
-
-```text
-Waiting on `048-implementation/Ensign feedback cycle 2` and `054-implementation/Ensign` before I can advance the blocked workflow state. You can send a message and hit Esc to interrupt safely; I’ll process the additional feedback and resume waiting for ensigns unless you tell me to pause or stop.
-```
-
-The exact leading clause can vary with the worker labels and blocked reason, but the safe-interruption hint must use this sentence exactly:
-
-```text
-You can send a message and hit Esc to interrupt safely; I’ll process the additional feedback and resume waiting for ensigns unless you tell me to pause or stop.
-```
+Before or while waiting, communicate the wait/resume state in ordinary operator-facing prose: which wait-set entries are blocking the next orchestration step, that non-stopping captain input will be handled, and that waiting will resume afterward. Keep the wording natural for the current turn; Codex already provides the basic user interruption affordance, so do not make a precise instruction sentence part of the runtime contract.
 
 Call `wait_agent` for every FO-uncollected runtime handle in the wait set. For a plural wait set, pass and preserve all handles together; do not drop or replace a handle unless the wait intent is explicitly paused, superseded, or clarified with the captain.
 

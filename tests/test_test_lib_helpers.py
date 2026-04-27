@@ -292,13 +292,7 @@ def test_codex_log_parser_detects_preempted_multi_handle_wait_resume(tmp_path):
             "item": {
                 "id": "msg_1",
                 "type": "agent_message",
-                "text": (
-                    "Waiting on `048-implementation/Ensign feedback cycle 2` and "
-                    "`054-implementation/Ensign` before I can advance the blocked "
-                    "workflow state. You can send a message and hit Esc to interrupt "
-                    "safely; I’ll process the additional feedback and resume waiting "
-                    "for ensigns unless you tell me to pause or stop."
-                ),
+                "text": "Waiting on the blocked implementation wait set before advancing.",
             },
         },
         {
@@ -314,19 +308,23 @@ def test_codex_log_parser_detects_preempted_multi_handle_wait_resume(tmp_path):
                             "worker_label": "048-implementation/Ensign feedback cycle 2",
                             "dispatch_agent_id": "spacedock:ensign",
                             "runtime_handle": "item_23",
-                            "entity": "048",
+                            "entity_path": "docs/plans/task-048.md",
+                            "entity_id": "048",
                             "stage_name": "implementation",
                             "blocked_reason": "blocked workflow state",
                             "collection_state": "FO-uncollected",
+                            "source": "same-handle reuse",
                         },
                         {
                             "worker_label": "054-implementation/Ensign",
                             "dispatch_agent_id": "spacedock:ensign",
                             "runtime_handle": "item_42",
-                            "entity": "054",
+                            "entity_path": "docs/plans/task-054.md",
+                            "entity_id": "054",
                             "stage_name": "implementation",
                             "blocked_reason": "blocked workflow state",
                             "collection_state": "FO-uncollected",
+                            "source": "fresh dispatch",
                         },
                     ]
                 },
@@ -382,6 +380,7 @@ def test_codex_log_parser_detects_preempted_multi_handle_wait_resume(tmp_path):
     sequence = parser.preemptible_wait_sequences()[0]
 
     assert sequence["initial_receiver_thread_ids"] == ["item_23", "item_42"]
+    assert sequence["initial_uncollected_thread_ids"] == ["item_23", "item_42"]
     assert sequence["resumed_receiver_thread_ids"] == ["item_23", "item_42"]
     assert sequence["preemption_outcome"] == "preempted_by_user_input"
     assert sequence["user_interruption_texts"] == [
@@ -389,15 +388,10 @@ def test_codex_log_parser_detects_preempted_multi_handle_wait_resume(tmp_path):
     ]
     assert sequence["completion_notifications_before_resume"] == ["item_23"]
     assert sequence["collected_completed_thread_ids"] == ["item_23", "item_42"]
+    assert sequence["fo_collected_thread_ids"] == ["item_23", "item_42"]
+    assert sequence["still_uncollected_thread_ids"] == []
     assert sequence["dropped_thread_ids"] == []
     assert sequence["replacement_thread_ids"] == []
-
-    wait_status = parser.agent_message_texts()[0]
-    assert "048-implementation/Ensign feedback cycle 2" in wait_status
-    assert "054-implementation/Ensign" in wait_status
-    assert "blocked workflow state" in wait_status
-    assert "item_23" not in wait_status
-    assert "item_42" not in wait_status
 
 
 def test_isolated_claude_env_injects_oauth_token_when_token_file_present(monkeypatch, tmp_path):

@@ -226,3 +226,16 @@ Recommendation: PASSED
   - Do not make detailed wait-instruction prose a first-class implementation or test target; Codex should already provide the basic interrupt affordance.
   - Focus the implementation and tests on continuous waiting behavior after interruption: preserve the wait set, process the interruption, and resume waiting for unresolved ensigns unless the captain says pause or stop.
   - Avoid static tests that match user-facing prose. Prefer behavioral/parser fixtures that prove same-wait-set resume and FO-collected/uncollected state.
+
+## Stage Report: implementation (cycle 2)
+
+- DONE: Detailed wait-instruction prose is no longer a static/prose-matching contract; runtime docs focus on behavior and wait-set continuity.
+  Evidence: `skills/first-officer/references/codex-first-officer-runtime.md` removes the exact interruption sentence and raw-handle prose rule, replacing them with behavioral wait/resume guidance.
+- DONE: Tests prove continuous waiting after interruption through parser/transcript behavior, not exact user-facing prose matching.
+  Evidence: `tests/test_agent_content.py` no longer checks exact wait-status wording; `tests/test_test_lib_helpers.py` and `scripts/test_lib.py` assert same-handle resume, initial FO-uncollected handles, FO-collected handles after resumed wait, and no dropped/replacement handles.
+- DONE: Verification evidence is recorded with commands and results.
+  Evidence: `uv run --with pytest python tests/test_agent_content.py -q` (49 passed), `uv run --with pytest python -m pytest tests/test_test_lib_helpers.py -q` (19 passed), and `git diff --check` (passed).
+
+### Summary
+
+Reworked the cycle 1 implementation to keep Codex preemptible wait behavioral rather than prose-driven. The runtime contract now centers on preserving and resuming the FO-uncollected wait set, and the fixture proof covers continuous waiting through interruption without relying on exact user-facing wait text.

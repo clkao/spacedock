@@ -212,26 +212,19 @@ def test_codex_runtime_docs_define_preemptible_wait_mode_contract():
         assert required in text
 
 
-def test_codex_runtime_docs_define_preemptible_wait_status_and_outcomes():
+def test_codex_runtime_docs_define_preemptible_wait_continuity_and_outcomes():
     text = read_text("skills/first-officer/references/codex-first-officer-runtime.md")
     wait_section = section_text(text, "## Codex Preemptible Wait Mode", (r"^## ",))
 
-    assert (
-        "You can send a message and hit Esc to interrupt safely; I’ll process the additional "
-        "feedback and resume waiting for ensigns unless you tell me to pause or stop."
-    ) in wait_section
-    assert re.search(r"name every.*worker label|worker label.*every", wait_section, re.IGNORECASE | re.DOTALL)
-    assert re.search(r"raw .*handle|handle .*raw", wait_section, re.IGNORECASE | re.DOTALL)
-    assert re.search(r"ordinary wait-status prose.*not.*raw", wait_section, re.IGNORECASE | re.DOTALL)
     assert re.search(r"unresolved.*FO-uncollected", wait_section, re.IGNORECASE | re.DOTALL)
     assert re.search(r"opportunistic evidence only", wait_section, re.IGNORECASE)
     assert re.search(r"autonomous first-officer turn", wait_section, re.IGNORECASE)
     assert re.search(r"resum.*wait_agent.*same handle", wait_section, re.IGNORECASE | re.DOTALL)
-
-    status_example = re.search(r"```text\n(Waiting on .+?)\n```", wait_section, re.DOTALL)
-    assert status_example is not None
-    assert "item_" not in status_example.group(1)
-    assert "handle" not in status_example.group(1).lower()
+    assert re.search(
+        r"preempted_by_user_input.*resume `wait_agent`.*FO-uncollected",
+        wait_section,
+        re.IGNORECASE | re.DOTALL,
+    )
 
     for outcome in (
         "completed",
