@@ -250,3 +250,31 @@ Reworked the cycle 1 implementation to keep Codex preemptible wait behavioral ra
 ### Summary
 
 Repaired the entity body so the accepted requirements match the captain feedback: exact wait-instruction wording is no longer a contract, while wait-set continuity remains the tested behavior. Runtime docs and tests were checked again and remain focused on preserving/resuming FO-uncollected waits rather than matching user-facing prose.
+
+## Stage Report: validation (cycle 2)
+
+- DONE: Applicable validation commands are selected from `tests/README.md`, rerun in the worktree, and reported with exact pass/fail results.
+  Evidence: `uv run --with pytest python tests/test_agent_content.py -q` -> 49 passed; `uv run --with pytest python -m pytest tests/test_test_lib_helpers.py -q` -> 19 passed; `git diff --check` -> passed; `make test-static` -> 514 passed, 25 deselected, 10 subtests passed.
+- DONE: Every AC-1 through AC-6 is verified with concrete evidence or explicitly failed, including the feedback-cycle requirement to avoid static user-facing prose matching.
+  Evidence: AC-1 through AC-6 are accounted for below; `rg` over `tests/test_agent_content.py`, `tests/test_test_lib_helpers.py`, and `scripts/test_lib.py` found no exact wait-instruction prose patterns.
+- DONE: The validation report gives a clear PASSED or REJECTED recommendation and preserves implementation ownership by not making unrequested fixes.
+  Evidence: No implementation files were changed; this validation edit appends only this entity report.
+
+### Acceptance Criteria
+
+- AC-1: PASSED. `skills/first-officer/references/codex-first-officer-runtime.md` defines `background worker`, `preemptible wait`, and `post-wait completion handling`; `tests/test_agent_content.py` asserts those states and the blocked-step/explicit-wait boundary.
+- AC-2: PASSED. The runtime wait-intent contract lists worker label, `dispatch_agent_id`, runtime handle, entity path/id, stage name, blocked reason, collection state, and source; `tests/test_test_lib_helpers.py` proves resumed waits reuse `["item_23", "item_42"]`.
+- AC-3: PASSED. Runtime docs communicate blocked wait/resume state while saying not to make a precise instruction sentence contractual; tests avoid exact user-facing wait wording and verify blocked wait-set behavior instead.
+- AC-4: PASSED. The parser fixture orders initial wait on `item_23`/`item_42`, user interruption, `preempted_by_user_input`, side-channel completion notification, resumed wait on the same FO-uncollected handles, and final collection with no dropped or replacement handles.
+- AC-5: PASSED. Static checks cover `completed`, `timed_out`, `failed`, `preempted_by_user_input`, `paused_by_user`, and `clarification_required`.
+- AC-6: PASSED. Runtime docs state completion notifications are opportunistic only and do not schedule an autonomous FO turn; parser helper only marks completion collected after resumed wait on live handles.
+
+### Feedback-Cycle Verdict
+
+PASSED. Detailed wait-instruction prose is not a contract or static prose-matching target; the surviving proof is behavioral/parser coverage for preserving the wait set, handling interruption, and resuming `wait_agent` for FO-uncollected entries unless paused/stopped or clarification-blocked.
+
+### Summary
+
+Validation reproduced the cited static and parser evidence, then ran the stable offline suite from `tests/README.md`. Live Codex E2E was not run because the entity treats it as optional unless deterministic interactive interruption handling is claimed, and this implementation claims static plus deterministic transcript coverage.
+
+Recommendation: PASSED
