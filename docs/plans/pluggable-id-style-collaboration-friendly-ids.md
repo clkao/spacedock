@@ -1,9 +1,9 @@
 ---
 id: 217
 title: "Pluggable id-style with collaboration-friendly generated IDs"
-status: backlog
+status: ideation
 source: "GitHub issue #150 (filed by CL, 2026-04-27)"
-started:
+started: 2026-04-27T21:32:17Z
 completed:
 verdict:
 score: 0.66
