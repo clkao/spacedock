@@ -45,7 +45,7 @@ Split worker identity into:
 - `dispatch_agent_id`
 - `worker_key`
 
-For operator-facing status updates and routed follow-up messages, also keep a human-readable worker label. Use a stable `{entity_id}-{stage_key}/{display_name}` convention such as `130-impl/Herschel` or `130-validation/Herschel`. Report that label alongside the logical id or thread handle; do not rely on opaque agent ids or incidental nicknames alone.
+For operator-facing status updates and routed follow-up messages, also keep a human-readable worker label. Use a stable `{entity_id}-{stage_key}/{display_name}` convention such as `130-impl/Herschel` or `130-validation/Herschel`. For dispatch, reuse, and shutdown updates, report that label alongside the logical id or thread handle; for ordinary wait-status prose, name the label and blocked reason while keeping raw runtime handles in internal wait intent, logs, and tests. Do not rely on opaque agent ids or incidental nicknames alone.
 
 Every operator-facing dispatch, reuse, wait, and shutdown update must lead with the FO-owned worker label rather than a generic phrase like `the implementation worker`.
 
@@ -53,7 +53,7 @@ Use patterns like:
 - `Dispatching `001-implementation/Ensign` (spacedock:ensign, handle: item_23) into the implementation worktree.`
 - `Routing follow-up to `001-implementation/Ensign` on existing handle item_23.`
 - ``001-implementation/Ensign` is active again on handle item_23; the routed follow-up is now this entity's critical path.`
-- `Waiting on `001-implementation/Ensign` (handle item_23) for the feedback-cycle completion.`
+- `Waiting on `001-implementation/Ensign` for the feedback-cycle completion before I can advance the blocked workflow state.`
 - `Shutting down `001-validation/Ensign` (handle item_32); no later routing remains.`
 
 If Codex returns an incidental nickname such as `Leibniz`, treat it as secondary metadata only. Do not lead with or rely on the nickname returned by `spawn_agent`.
@@ -153,6 +153,58 @@ When reusing a completed worker, the equivalent pattern is `send_input(<existing
 
 In interactive sessions, do not foreground `wait_agent` immediately after `spawn_agent` just because a worker was dispatched. Keep the worker in the background and continue the turn unless the next orchestration step is blocked on that worker result or the captain explicitly asks to wait.
 For bounded single-entity runs, immediate waiting after dispatch remains appropriate when completion is the point of the turn.
+
+## Codex Preemptible Wait Mode
+
+Codex has three distinct worker states:
+
+- **background worker** — a worker has been spawned or routed and is tracked, but the current interactive turn is not blocked on its result.
+- **preemptible wait** — the next orchestration step is blocked on one or more FO-uncollected worker results, or the captain explicitly asks to wait, and the first officer is intentionally calling `wait_agent`.
+- **post-wait completion handling** — `wait_agent` returned completion evidence, and the shared gate, feedback, reuse, merge, or shutdown rules decide the next workflow action.
+
+Entering preemptible wait requires recording a wait intent before the `wait_agent` call. The wait intent is a wait set, not a scalar handle. Each wait-set entry must include:
+
+- worker label
+- `dispatch_agent_id`
+- runtime handle
+- entity path/id
+- stage name
+- blocked reason
+- collection state: `FO-uncollected` or `FO-collected`
+- source: fresh dispatch or same-handle reuse after `send_input`
+
+`Unresolved` means FO-uncollected, not necessarily still running. If a worker completes while the first officer is answering an interruption, that wait-set entry remains unresolved and FO-uncollected until the first officer resumes `wait_agent` on the same handle and collects/reconciles the completion evidence.
+
+Before waiting, emit concise operator-facing wait status that names every FO-owned worker label in the wait set and states the blocked reason. Ordinary wait-status prose must not print raw runtime handles such as UUIDs or `item_...` ids; runtime handles remain required in internal wait intent, logs, and tests so same-handle collection can be verified.
+
+Use this shape for wait status:
+
+```text
+Waiting on `048-implementation/Ensign feedback cycle 2` and `054-implementation/Ensign` before I can advance the blocked workflow state. You can send a message and hit Esc to interrupt safely; I’ll process the additional feedback and resume waiting for ensigns unless you tell me to pause or stop.
+```
+
+The exact leading clause can vary with the worker labels and blocked reason, but the safe-interruption hint must use this sentence exactly:
+
+```text
+You can send a message and hit Esc to interrupt safely; I’ll process the additional feedback and resume waiting for ensigns unless you tell me to pause or stop.
+```
+
+Call `wait_agent` for every FO-uncollected runtime handle in the wait set. For a plural wait set, pass and preserve all handles together; do not drop or replace a handle unless the wait intent is explicitly paused, superseded, or clarified with the captain.
+
+Wait attempt outcomes are:
+
+- `completed` — `wait_agent` returned completion evidence and the first officer reconciled the affected wait-set entries.
+- `timed_out` — the explicit wait budget expired without completion evidence.
+- `failed` — `wait_agent` or the worker result failed.
+- `preempted_by_user_input` — captain input interrupted the wait while one or more wait-set entries remained FO-uncollected.
+- `paused_by_user` — the captain told the first officer to pause, stop, cancel, or change away from the blocked workflow target.
+- `clarification_required` — the interruption revealed missing information required before waiting can continue.
+
+When non-stopping captain input arrives while any wait-set entry is FO-uncollected, mark the current wait attempt as `preempted_by_user_input`. Answer or handle the captain's input under ordinary first-officer rules, then resume `wait_agent` for every still-FO-uncollected entry in the same prior wait set unless the captain told you to pause or stop.
+
+If the captain's input dispatches additional worker work that is now part of the same blocked next step, update the wait set, report the new worker labels in user-facing prose, and record the new handles internally before waiting again. If the input creates a missing-information blocker, switch the outcome to `clarification_required` and do not pretend the first officer is still waiting.
+
+Completion notifications during the interruption are opportunistic evidence only. They do not schedule an autonomous first-officer turn, they do not replace resumed collection, and they do not make a wait-set entry `FO-collected`. The authoritative collection path remains resumed `wait_agent` on the same handle for each FO-uncollected entry.
 
 ## Codex Worker Assignment Fields
 

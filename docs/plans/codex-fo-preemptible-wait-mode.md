@@ -182,3 +182,16 @@ Fleshed out the entity into a Codex-specific preemptible wait design. The plan k
 ### Summary
 
 Revised the ideation spec for the captain and staff review feedback. The wait hint is now precise and concise, ordinary prose avoids raw handles, and the testable behavior is plural wait-set preservation with FO-uncollected completion reconciliation.
+
+## Stage Report: implementation
+
+- DONE: Codex runtime guidance implements the approved preemptible-wait contract, including the precise Esc interruption hint, plural wait sets, FO-uncollected unresolved semantics, and raw-handle suppression in ordinary wait-status prose.
+  Evidence: `skills/first-officer/references/codex-first-officer-runtime.md` adds `## Codex Preemptible Wait Mode` and updates the ordinary wait-status example to omit raw handles.
+- DONE: Static and/or parser fixture coverage proves interruption-resume on the same FO-uncollected wait set, including a multi-handle case, without depending on unsupported Codex completion wakeups.
+  Evidence: `tests/test_agent_content.py`, `tests/test_test_lib_helpers.py`, and `scripts/test_lib.py` cover the contract plus a two-handle resumed wait after `preempted_by_user_input`; completion notification is only side-channel evidence.
+- DONE: Verification evidence is sufficient for independent validation: changed files, commands run, and any live-E2E deferral rationale are recorded in the stage report.
+  Evidence: Changed files are `docs/plans/codex-fo-preemptible-wait-mode.md`, `skills/first-officer/references/codex-first-officer-runtime.md`, `scripts/test_lib.py`, `tests/test_agent_content.py`, and `tests/test_test_lib_helpers.py`; commands run: `uv run --with pytest python tests/test_agent_content.py -q` (49 passed), `uv run --with pytest python -m pytest tests/test_test_lib_helpers.py -q` (19 passed), and `git diff --check` (passed). Live Codex E2E was not run because this task's accepted proof is static plus deterministic transcript coverage and unsupported completion wakeups must not be simulated as the authority.
+
+### Summary
+
+Implemented the Codex preemptible wait contract locally in the FO runtime docs and added deterministic test coverage for interrupted same-wait-set resume. The parser fixture proves a plural wait set resumes on the same FO-uncollected handles even when a completion notification appears during the interruption.

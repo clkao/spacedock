@@ -1837,6 +1837,106 @@ class CodexLogParser:
                     messages.append(str(state["message"]))
         return messages
 
+    def preemptible_wait_sequences(self) -> list[dict]:
+        """Return wait/preemption/resume sequences from Codex JSONL fixtures.
+
+        This helper intentionally models Codex completion notifications as
+        side-channel evidence: a sequence is only considered collected when a
+        later wait call returns completed agent states for the resumed handles.
+        """
+        sequences: list[dict] = []
+        pending: dict | None = None
+
+        for entry in self.json_entries:
+            item = entry.get("item", {})
+            if not isinstance(item, dict):
+                continue
+
+            item_type = item.get("type")
+            if item_type == "collab_tool_call" and item.get("tool") in {"wait", "wait_agent"}:
+                handles = self._receiver_thread_ids(item)
+                if not handles:
+                    continue
+                if pending and pending.get("preemption_outcome") == "preempted_by_user_input":
+                    completed = self._completed_thread_ids(item, handles)
+                    initial = pending["initial_receiver_thread_ids"]
+                    pending["resumed_receiver_thread_ids"] = handles
+                    pending["collected_completed_thread_ids"] = completed
+                    pending["dropped_thread_ids"] = [
+                        handle for handle in initial if handle not in handles
+                    ]
+                    pending["replacement_thread_ids"] = [
+                        handle for handle in handles if handle not in initial
+                    ]
+                    sequences.append(pending)
+                    pending = None
+                    continue
+
+                pending = {
+                    "initial_receiver_thread_ids": handles,
+                    "preemption_outcome": None,
+                    "user_interruption_texts": [],
+                    "completion_notifications_before_resume": [],
+                    "resumed_receiver_thread_ids": [],
+                    "collected_completed_thread_ids": [],
+                    "dropped_thread_ids": [],
+                    "replacement_thread_ids": [],
+                }
+                continue
+
+            text = item.get("text")
+            if not pending or not isinstance(text, str):
+                continue
+
+            if item_type == "user_message":
+                pending["user_interruption_texts"].append(text)
+            elif item_type == "agent_message":
+                if "preempted_by_user_input" in text:
+                    pending["preemption_outcome"] = "preempted_by_user_input"
+                if (
+                    pending.get("preemption_outcome") == "preempted_by_user_input"
+                    and "completion notification" in text.lower()
+                ):
+                    pending["completion_notifications_before_resume"].extend(
+                        self._thread_ids_from_text(text)
+                    )
+
+        return sequences
+
+    @staticmethod
+    def _receiver_thread_ids(item: dict) -> list[str]:
+        raw_handles = item.get("receiver_thread_ids", [])
+        if not isinstance(raw_handles, list):
+            return []
+        return [str(handle) for handle in raw_handles]
+
+    @staticmethod
+    def _completed_thread_ids(item: dict, handle_order: list[str]) -> list[str]:
+        states = item.get("agents_states", {})
+        if not isinstance(states, dict):
+            return []
+
+        completed: list[str] = []
+        for handle in handle_order:
+            state = states.get(handle)
+            if isinstance(state, dict) and state.get("status") == "completed":
+                completed.append(handle)
+        for handle, state in states.items():
+            handle_text = str(handle)
+            if handle_text in completed:
+                continue
+            if isinstance(state, dict) and state.get("status") == "completed":
+                completed.append(handle_text)
+        return completed
+
+    @staticmethod
+    def _thread_ids_from_text(text: str) -> list[str]:
+        ids: list[str] = []
+        for match in re.findall(r"\b(?:item|thread)[_-][A-Za-z0-9-]+\b", text):
+            if match not in ids:
+                ids.append(match)
+        return ids
+
     def write_text(self, output_path: Path | str):
         with open(output_path, "w") as f:
             f.write(self.full_text())
