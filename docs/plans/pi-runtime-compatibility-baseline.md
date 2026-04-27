@@ -182,8 +182,12 @@ This ideation pass reframes #147 as a minimum-runtime baseline problem rather th
   Evidence: `scripts/pi_session_registry.py` defines `WorkerSessionRecord` and `PiSessionRegistry`, and `tests/test_pi_session_registry.py` verifies metadata round-trip, active-again epoch bumps, and shutdown/unroutable behavior without introducing a second session system.
 - DONE: Live Pi gate-preflight workflow execution is now proven.
   Evidence: `tests/test_gate_guardrail.py --runtime pi -v` passes, `scripts/test_lib.py` now provides `PiLogParser`, and the gate test validates gate hold behavior plus explicit `gate review` / `waiting-for-approval` output from the Pi run.
-- SKIPPED: Same-worker live routed follow-up and explicit shutdown on a real Pi session.
-  Evidence: the thin label-to-session mapping exists, but no live Pi worker dispatch/reuse cycle exercises it yet.
+- DONE: Reopened-session Pi reuse is now proven for the first-slice same-worker semantics without adding new session-registry machinery.
+  Evidence: `tests/test_pi_reopened_session_reuse.py` drives three real `pi --mode json --print` turns against the same Pi session, first by session id and then by session file path. The assertions prove stable session identity, successful previous-turn recall, positive `cacheRead` on reopened turns, and growth of the same on-disk session file across follow-up turns.
+- SKIPPED: Explicit shutdown on a real reused Pi worker session remains metadata-only for this slice.
+  Evidence: Pi reopened-session reuse is now live-proven, but this slice still has no native per-session kill/close assertion beyond `PiSessionRegistry.mark_shutdown()` bookkeeping and the natural end of each non-interactive Pi invocation.
+- DONE: Validation commands were rerun after the reuse slice landed.
+  Evidence: `uv run pytest tests/test_pi_runtime_harness.py -q`, `uv run pytest tests/test_pi_reopened_session_reuse.py -q`, and `unset CLAUDECODE && uv run pytest tests/test_gate_guardrail.py --runtime pi -v` all passed in the assigned worktree.
 
 ### Implementation Summary
 
@@ -194,4 +198,12 @@ This pass established the initial Pi integration seam rather than full runtime b
 - per-run Pi session storage via `--session-dir {runner.test_dir}/pi-sessions`
 - a thin Spacedock-owned worker-label -> Pi-session mapping (`PiSessionRegistry`) that records workflow metadata and a `completion_epoch` on top of Pi's native session persistence
 
-What is still missing is the reusable worker loop beyond the gate preflight: a real Pi-dispatched ensign session for same-session follow-up, routed follow-up on that same Pi session, and explicit shutdown proof for a reused worker. For now, reopened-session reuse is the intended proving path; SDK-managed keep-alive sessions are the preferred follow-up optimization once behavior is proven.
+This slice now proves the intended reopened-session path for Pi reuse: the same Pi session can be reopened by stable handle, answer a follow-up using prior-turn context, and continue appending to the same session file. That is enough to support Spacedock's first-slice same-worker semantics.
+
+Remaining gap: explicit shutdown is still only a Spacedock metadata concern for Pi. We can mark a worker unroutable in `PiSessionRegistry`, but we do not yet prove a Pi-native close/kill primitive for a reused worker session. Optimization gap: the current proof uses reopened non-interactive sessions; SDK-managed in-memory keep-alive reuse is still the follow-up path if we later want lower-latency worker continuation.
+
+Changed files in this slice:
+
+- `scripts/test_lib.py`
+- `tests/test_pi_runtime_harness.py`
+- `tests/test_pi_reopened_session_reuse.py`

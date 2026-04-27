@@ -947,6 +947,66 @@ def run_first_officer_streaming(
             raise
 
 
+def run_pi_prompt(
+    runner: TestRunner,
+    prompt: str,
+    *,
+    session_dir: Path | str,
+    session: Path | str | None = None,
+    extra_args: list[str] | None = None,
+    log_name: str = "pi-log.jsonl",
+    timeout_s: int = 120,
+    cwd: Path | str | None = None,
+    skill_paths: list[Path | str] | None = None,
+    no_context_files: bool = False,
+) -> int:
+    """Run a non-interactive Pi prompt and capture the JSON event stream."""
+    log_path = runner.log_dir / log_name
+    session_dir = Path(session_dir)
+    session_dir.mkdir(parents=True, exist_ok=True)
+
+    cmd = [
+        "pi",
+        "--mode",
+        "json",
+        "--print",
+        "--session-dir",
+        str(session_dir),
+    ]
+    if session is not None:
+        cmd.extend(["--session", str(session)])
+    if skill_paths:
+        for skill_path in skill_paths:
+            cmd.extend(["--skill", str(skill_path)])
+    cmd.extend(["--no-extensions", "--no-prompt-templates"])
+    if no_context_files:
+        cmd.append("--no-context-files")
+    if extra_args:
+        cmd[4:4] = list(extra_args)
+    cmd.append(prompt)
+
+    with open(log_path, "w") as log_file:
+        try:
+            result = subprocess.run(
+                cmd,
+                stdout=log_file,
+                stderr=subprocess.STDOUT,
+                cwd=cwd or runner.test_project_dir,
+                timeout=timeout_s,
+                text=True,
+            )
+        except subprocess.TimeoutExpired:
+            print(f"\n  TIMEOUT: pi prompt exceeded {timeout_s}s limit")
+            return 124
+
+    print()
+    if result.returncode != 0:
+        print(f"WARNING: pi prompt exited with code {result.returncode}")
+
+    return result.returncode
+
+
+
 def run_pi_first_officer(
     runner: TestRunner,
     workflow_dir: str,
@@ -962,7 +1022,6 @@ def run_pi_first_officer(
     stream so the harness can evolve toward session-backed worker reuse without
     inventing a separate Pi-only workflow contract.
     """
-    log_path = runner.log_dir / log_name
     workflow_path = (runner.test_project_dir / workflow_dir).resolve()
     local_skill_path = runner.repo_root / "skills" / "first-officer"
     prompt = build_pi_first_officer_invocation_prompt(
@@ -973,44 +1032,15 @@ def run_pi_first_officer(
     )
     (runner.log_dir / "pi-fo-invocation.txt").write_text(prompt + "\n")
 
-    session_dir = runner.test_dir / "pi-sessions"
-    session_dir.mkdir(parents=True, exist_ok=True)
-
-    cmd = [
-        "pi",
-        "--mode",
-        "json",
-        "--print",
-        "--session-dir",
-        str(session_dir),
-        "--skill",
-        str(local_skill_path),
-        "--no-extensions",
-        "--no-prompt-templates",
+    return run_pi_prompt(
+        runner,
         prompt,
-    ]
-    if extra_args:
-        cmd[4:4] = list(extra_args)
-
-    with open(log_path, "w") as log_file:
-        try:
-            result = subprocess.run(
-                cmd,
-                stdout=log_file,
-                stderr=subprocess.STDOUT,
-                cwd=runner.test_project_dir,
-                timeout=timeout_s,
-                text=True,
-            )
-        except subprocess.TimeoutExpired:
-            print(f"\n  TIMEOUT: pi first officer exceeded {timeout_s}s limit")
-            return 124
-
-    print()
-    if result.returncode != 0:
-        print(f"WARNING: pi first officer exited with code {result.returncode}")
-
-    return result.returncode
+        session_dir=runner.test_dir / "pi-sessions",
+        skill_paths=[local_skill_path],
+        extra_args=extra_args,
+        log_name=log_name,
+        timeout_s=timeout_s,
+    )
 
 
 
@@ -1877,6 +1907,30 @@ class PiLogParser:
         self.log_path = Path(log_path)
         self._raw_lines: list[str] | None = None
         self._json_entries: list[dict] | None = None
+
+    def session_id(self) -> str | None:
+        for entry in self.json_entries:
+            if entry.get("type") == "session" and entry.get("id"):
+                return str(entry["id"])
+        return None
+
+    def session_file(self, session_dir: Path | str) -> Path | None:
+        session_id = self.session_id()
+        if not session_id:
+            return None
+        matches = sorted(Path(session_dir).glob(f"*_{session_id}.jsonl"))
+        return matches[0] if matches else None
+
+    def last_assistant_usage(self) -> dict[str, object]:
+        for entry in reversed(self.json_entries):
+            if entry.get("type") != "message_end":
+                continue
+            message = entry.get("message", {})
+            if not isinstance(message, dict) or message.get("role") != "assistant":
+                continue
+            usage = message.get("usage", {})
+            return usage if isinstance(usage, dict) else {}
+        return {}
 
     @property
     def raw_lines(self) -> list[str]:
