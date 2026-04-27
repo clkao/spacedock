@@ -283,3 +283,38 @@ The approval amendment changes the dynamic generated-ID design from `MIN_PREFIX:
 ### Summary
 
 Implemented the status strategy layer for `sequential`, `slug`, and `generated`, including generated ID allocation, validation, shortest unique display prefixes, and deterministic reference resolution. Updated commission, refit, and first-officer docs so task creation and migration guidance are strategy-aware while preserving sequential workflow compatibility.
+
+## Stage Report: validation
+
+- FAILED: Validate AC-1 through AC-11 against the actual implementation, including the captain amendment `MIN_PREFIX: 2` and no fixed 12-character displayed-ID behavior.
+  Evidence: AC-1 and AC-3 through AC-11 have targeted test evidence, but AC-2 fails because the existing sequential self-workflow cannot produce normal status output with historic archived duplicate IDs.
+- DONE: Run targeted status/docs tests plus the stable offline suite as appropriate, and explicitly assess the observed self-workflow duplicate-archive failure against backward compatibility.
+  Evidence: `uv run pytest tests/test_status_script.py -q` = 172 passed/15 subtests; `uv run pytest tests/test_agent_content.py tests/test_commission_template.py -q` = 55 passed; `make test-static` = 532 passed/26 deselected/15 subtests; duplicate-archive failure is a compatibility regression.
+- DONE: Append a validation report with concrete evidence, test results, and a clear `PASSED` or `REJECTED` recommendation.
+  Evidence: This validation report records a `REJECTED` recommendation; commit follows on the validation branch.
+- DONE: AC-1 - Workflows have a documented `id-style` strategy contract covering `sequential`, `slug`, and `generated`.
+  Evidence: Static docs tests passed; `tests/test_agent_content.py` and `tests/test_commission_template.py` assert all three styles, required/optional `id`, `--next-id`, and no generic "next sequential ID" wording.
+- FAILED: AC-2 - Existing sequential workflows keep their current behavior.
+  Evidence: Current `skills/commission/bin/status --workflow-dir docs/plans --where id=217`, `--boot`, `--next`, `--next-id`, and `--resolve 217` exit 1 on archived duplicate IDs `131` and `033`; the pre-implementation script printed the `217` row and `NEXT_ID: 220`.
+- DONE: AC-3 - `id-style: slug` treats the slug as the effective ID and makes `status --next-id` non-applicable.
+  Evidence: `TestIdStyleStrategies.test_slug_style_uses_slug_as_effective_id_and_next_id_is_not_applicable` passed in `tests/test_status_script.py`.
+- DONE: AC-4 - `id-style: generated` stores full stable generated IDs and displays shortest unique address prefixes.
+  Evidence: Generated `--next-id`, retry exhaustion, and active/archive prefix-growth tests passed; they assert 24-character stored IDs and 2-character minimum display prefixes rather than fixed 12-character display IDs.
+- DONE: AC-5 - Invalid or duplicate effective IDs are caught before status output is trusted.
+  Evidence: Validation/fail-fast tests for generated duplicates, invalid/missing IDs, sequential duplicate/non-numeric IDs, and flat/folder conflicts passed; the self-workflow failure shows this strictness currently overbreaks AC-2.
+- DONE: AC-6 - `--boot` and first-officer task creation are strategy-aware.
+  Evidence: Boot tests assert `ID_STYLE`, strategy-specific `NEXT_ID`, and `MIN_PREFIX: 2`; first-officer static tests assert sequential/generated/slug creation behavior.
+- DONE: AC-7 - Entity reference resolution is deterministic through `status --resolve`.
+  Evidence: Resolver tests cover slug precedence, forced qualifiers, generated prefix minimum/ambiguity, archived disambiguation, and active-scope `--set`/`--archive` resolution.
+- DONE: AC-8 - Cross-workflow ambiguity is rejected rather than guessed.
+  Evidence: Root resolver tests cover duplicate slugs, duplicate generated prefixes/full IDs, basename qualifiers, and absolute path qualifiers.
+- DONE: AC-9 - Migration scope is documented and validation-backed without shipping a rewrite helper.
+  Evidence: Static refit/commission docs tests assert manual migration, validation before style changes, and deferred rewrite automation; validation fixtures report bad state without rewriting frontmatter.
+- DONE: AC-10 - Concurrent or offline task creation is safer under generated IDs than under sequential IDs.
+  Evidence: `TestGeneratedIdConcurrency.test_generated_style_allows_isolated_creators_and_grows_prefix_after_merge` passed, including distinct full IDs and prefix growth after merge.
+- DONE: AC-11 - Commission/refit documentation preserves concrete style-selection and generated-ID examples.
+  Evidence: Static template tests assert the three style labels, 24-character Crockford examples for 10s/100s/1000s, `MIN_PREFIX: 2`, prefix lengthening, and stable stored IDs.
+
+### Summary
+
+Recommendation: `REJECTED`. The generated, slug, resolver, docs, and offline test coverage are strong, and the captain amendment is implemented as full stored 24-character generated IDs with shortest unique prefixes and `MIN_PREFIX: 2`. The blocking defect is backward compatibility: the existing `id-style: sequential` Spacedock workflow now fails normal status, boot, next-id, and resolution paths because archived historical duplicates are treated as fatal before output.
