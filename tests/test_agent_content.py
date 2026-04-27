@@ -108,6 +108,44 @@ def test_first_officer_shared_core_documents_worktree_ownership_rule():
     assert "Ordinary active-state writes like `implementation -> validation` do not land on `main`" in text
 
 
+def test_first_officer_docs_are_id_style_aware_for_task_creation():
+    shared = read_text("skills/first-officer/references/first-officer-shared-core.md")
+    codex = read_text("skills/first-officer/references/codex-first-officer-runtime.md")
+    claude = read_text("skills/first-officer/references/claude-first-officer-runtime.md")
+    combined = "\n".join([shared, codex, claude])
+
+    assert "ID_STYLE" in shared
+    assert "MIN_PREFIX: 2" in shared
+    assert "status --validate" in shared
+    assert "status --resolve" in shared
+    assert "sequential stores the returned numeric ID" in shared
+    assert "generated stores the returned 24-character full ID" in shared
+    assert "slug derives identity from the entity slug" in shared
+    assert "shortest unique prefix" in shared
+    assert "next sequential ID" not in shared
+
+    for runtime_doc in (codex, claude):
+        assert "strategy-dependent ID candidate" in runtime_doc
+        assert "not a reservation" in runtime_doc
+        assert "next sequential ID" not in runtime_doc
+
+    assert "duplicate full generated ID" in combined
+    assert "prefix collisions lengthen display IDs" in combined
+
+
+def test_refit_docs_preserve_id_style_and_defer_migration_rewrites():
+    text = read_text("skills/refit/SKILL.md")
+
+    assert "id-style" in text
+    assert "do not silently change" in text
+    assert "status --validate" in text
+    assert "manual migration" in text
+    assert "rewrite automation" in text
+    assert "generated" in text
+    assert "sequential" in text
+    assert "slug" in text
+
+
 def test_ensign_shared_core_keeps_stage_report_protocol():
     text = read_text("skills/ensign/references/ensign-shared-core.md")
     assert "## Stage Report: {stage_name}" in text

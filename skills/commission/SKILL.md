@@ -122,6 +122,14 @@ After collecting answers, derive all remaining values from the mission context:
 - `{rejection_flow}` — for each approval gate, determine which earlier stage gets bounced back to on rejection (default: the stage immediately before the gated stage).
 - `{dir}` — `docs/{mission-slug}/` where `{mission-slug}` is the mission condensed to a short lowercase hyphenated directory name.
 - `{captain}` — "Captain".
+- `{id_style}` — choose explicitly with {captain}. Offer:
+  - `generated` (recommended for collaborative workflows): use when multiple people or agents may create entities across branches, worktrees, offline edits, or long-running projects.
+  - `sequential` (compatibility/default): use when the workflow is single-writer, small, or needs continuity with existing numeric IDs. This is the non-interactive default when no collaboration signal is present and no `--id-style` was provided.
+  - `slug` (canonical filename): use when the slug is already the durable identity, such as named projects, semantically numbered episodes, or workflows with single-digit or low double-digit entity counts.
+
+Recommend `generated` when the workflow has worktree stages, PR/merge mods, team-mode agents, or {captain} mentions collaboration, concurrency, branches, worktrees, offline editing, or multiple creators. Generated IDs are 24-character lowercase Crockford Base32 values stored in entity frontmatter; the status viewer displays and accepts the shortest unique prefix with `MIN_PREFIX: 2`.
+
+Use these exact prompt labels: generated (recommended for collaborative workflows), sequential (compatibility/default), and slug (canonical filename).
 
 Present the full summary with all derived values. Use plain language for stage behavior — do not expose implementation vocabulary like `worktree`, `gate`, `fresh`, or `feedback-to`:
 
@@ -138,6 +146,8 @@ Present the full summary with all derived values. Use plain language for stage b
 >
 > Our pilot run will be with:
 > {for each seed: "- {title}"}
+>
+> Entity identity will use `{id_style}`.
 >
 > All files will be created in `{dir}` for you to review.
 >
@@ -204,7 +214,7 @@ commissioned-by: spacedock@{spacedock_version}
 entity-type: {entity_type}
 entity-label: {entity_label}
 entity-label-plural: {entity_label_plural}
-id-style: sequential
+id-style: {id_style}
 stages:
   defaults:
     worktree: false
@@ -261,6 +271,40 @@ Every {entity_label} file has YAML frontmatter. Fields are documented below; see
 | `worktree` | string | Worktree path while a dispatched agent is active, empty otherwise |
 | `issue` | string | GitHub issue reference (e.g., `#42` or `owner/repo#42`). Optional cross-reference, set manually. |
 | `pr` | string | GitHub PR reference (e.g., `#57` or `owner/repo#57`). Set when a PR is created for this entity's worktree branch. |
+
+### ID Style
+
+The `id-style` frontmatter setting controls the operator-facing ID strategy:
+
+- `sequential`: `id` is required and stores the next zero-padded numeric value from `status --next-id`, counting active and archived entities.
+- `generated`: `id` is required and stores the full stable 24-character lowercase Crockford Base32 value from `status --next-id`. Status tables show shorter display/address prefixes computed from active plus archived entities. `status --boot` reports `ID_STYLE: generated`, `NEXT_ID: {candidate}`, and `MIN_PREFIX: 2`.
+- `slug`: `id` is optional; the effective ID is the entity slug. `status --next-id is not applicable for id-style: slug` because the slug comes from the title.
+
+Generated display/address prefixes can lengthen after another branch adds a colliding prefix, while stored IDs remain stable. Use `status --validate` before trusting workflow state and `status --resolve <ref>` to resolve slugs, stored IDs, or generated prefixes.
+
+Copyable README frontmatter examples:
+
+```yaml
+id-style: sequential
+```
+
+```yaml
+id-style: generated
+```
+
+```yaml
+id-style: slug
+```
+
+Generated examples:
+
+| Workflow size | Stored `id` examples | Display/address examples |
+| --- | --- | --- |
+| 10s of entities | `4k9q2m7x8c3v9r5t6w2p0n1h`, `8t5n0p2w6j9r4c8x1m7q3v5k` | `4k`, `8t` |
+| 100s of entities | `9m2c7v4xq8j3h6t0p5w1r8n2`, `9m2cq8j3h6t0p5w1r8v7x4kn` | `9m2c7`, `9m2cq` |
+| 1000s of entities | `v7k3q9x2m5c8h6t0p1w4r8n2`, `v7k3qrv5t9p3j6n2w8c4x1mk` | `v7k3q9`, `v7k3qr` |
+
+Generated IDs make concurrent and offline creation safer because creators do not share a central counter. Migration from existing sequential workflows is manual migration in this release: validate the target style, update README/entity frontmatter deliberately, and defer rewrite automation to a separate tracked task.
 
 ## Stages
 
@@ -348,11 +392,15 @@ For each seed entity, create `{dir}/{slug}.md` where `{slug}` is the title conve
 
 The `title` field is the human-readable name (e.g., "Full Cycle Test"). The filename `{slug}.md` is derived from it (lowercase, hyphens).
 
-Each entity file gets a sequential ID, starting at `001`:
+Set the `id` field according to `{id_style}`:
+
+- `sequential`: assign IDs starting at `001`, zero-padded to 3 digits.
+- `generated`: call the plugin status viewer with `--next-id` immediately before writing each entity and store the returned 24-character full ID. This value is not a reservation; call again for the next entity.
+- `slug`: omit `id` or leave it blank; the slug is the effective ID.
 
 ```markdown
 ---
-id: {next sequential id, zero-padded to 3 digits}
+id: {strategy-dependent id value, or blank for id-style: slug}
 title: {entity title — human-readable, not the slug}
 status: {first_stage}
 source: {source if provided, otherwise "commission seed"}

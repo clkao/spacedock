@@ -79,3 +79,26 @@ def test_entity_label_template_has_acceptance_criteria_block():
     assert "Verified by:" in body, (
         "## {Entity_label} Template must include a 'Verified by:' exemplar line"
     )
+
+
+def test_commission_template_documents_all_id_styles_and_generated_examples():
+    text = read_skill()
+
+    for style in ("generated", "sequential", "slug"):
+        assert f"id-style: {style}" in text
+
+    assert "generated (recommended for collaborative workflows)" in text
+    assert "sequential (compatibility/default)" in text
+    assert "slug (canonical filename)" in text
+    assert "status --next-id is not applicable for id-style: slug" in text
+    assert "24-character lowercase Crockford Base32" in text
+    assert "MIN_PREFIX: 2" in text
+
+    for label in ("10s of entities", "100s of entities", "1000s of entities"):
+        assert label in text
+
+    assert "display/address prefixes can lengthen" in text
+    assert "stored IDs remain stable" in text
+    assert "concurrent and offline creation" in text
+    assert "manual migration" in text
+    assert "rewrite automation" in text

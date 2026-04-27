@@ -270,3 +270,16 @@ The recommended generated design now stores durable full random IDs and exposes 
 ### Summary
 
 The approval amendment changes the dynamic generated-ID design from `MIN_PREFIX: 4` to `MIN_PREFIX: 2` while preserving full stored IDs and shortest-unique display/address prefixes. No frontmatter or unrelated files were edited.
+
+## Stage Report: implementation
+
+- DONE: Pluggable `id-style` strategy implements and documents sequential, slug, and generated behavior with generated full stored IDs plus `MIN_PREFIX: 2` shortest-unique display/address prefixes.
+  Evidence: `skills/commission/bin/status` now parses `id-style`, preserves sequential defaults, uses slug effective IDs, stores/validates 24-character generated IDs, and displays generated shortest unique prefixes with `MIN_PREFIX: 2`.
+- DONE: Status CLI behavior covers `--next-id`, `--boot`/`ID_STYLE`/`MIN_PREFIX`, `--validate`, `--resolve`, active/archive flat/folder uniqueness, and ambiguity behavior.
+  Evidence: `tests/test_status_script.py` covers strategy-specific `--next-id`, boot output, validation fail-fast, generated prefix growth, root/workflow resolution, active/archive ambiguity, and flat/folder validation conflicts; `uv run pytest tests/test_status_script.py -q` passed with 172 tests and 15 subtests.
+- DONE: Tests/docs preserve commission/refit style selection, examples, migration scope, concurrent/offline creation safety, and backward compatibility for sequential workflows.
+  Evidence: `skills/commission/SKILL.md`, `skills/refit/SKILL.md`, and first-officer runtime docs now document style selection, generated examples, migration boundaries, and task creation behavior; `make test-static` passed with 532 tests, 26 deselected, and 15 subtests.
+
+### Summary
+
+Implemented the status strategy layer for `sequential`, `slug`, and `generated`, including generated ID allocation, validation, shortest unique display prefixes, and deterministic reference resolution. Updated commission, refit, and first-officer docs so task creation and migration guidance are strategy-aware while preserving sequential workflow compatibility.

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # commissioned-by: spacedock@{spacedock_version}
 # ABOUTME: Workflow status viewer — shows entity overview from YAML frontmatter.
-# ABOUTME: Supports default table, --archived, --next, --next-id, --boot, and --discover.
+# ABOUTME: Supports default table, --archived, --next, --next-id, --boot, --validate, --resolve, and --discover.
 #
 # goal: Show one-line-per-{entity_label} workflow overview from YAML frontmatter.
 #
@@ -11,14 +11,21 @@
 #   Sorted by stage order ascending, then score descending.
 #   Default: scan entities at $DIR. With --archived, also scan $DIR/_archive/.
 #   With --next, read stage metadata from README frontmatter and output dispatchable entities.
-#   With --next-id, print only the next sequential ID across active and archived entities.
+#   With --next-id, print only the next strategy-dependent ID candidate.
+#   README frontmatter `id-style` controls identity:
+#     sequential: required numeric id, allocated across active + archived entities.
+#     generated: required full 24-char lowercase Crockford Base32 id; display/address
+#       IDs are shortest unique prefixes across active + archived, MIN_PREFIX: 2.
+#     slug: id is optional; the slug is the effective ID and --next-id is not applicable.
+#   --validate scans active + archived entities and prints VALID or one error per problem.
+#   --resolve REF prints workflow=, scope=, slug=, id=, path= for an unambiguous ref.
 #
 # Entity discovery: An entity is either a flat `{slug}.md` file OR a folder
 #   `{slug}/` containing an `index.md` file (folder-per-entity). Reserved
 #   subdirectories `_archive` and `_mods` are never treated as entity folders.
-#   When both `{slug}.md` and `{slug}/index.md` exist, the folder form wins
-#   and a warning is emitted on stderr. `--set` and `--archive` operate on
-#   whichever form holds the slug (folder form preferred when both present).
+#   When both `{slug}.md` and `{slug}/index.md` exist, validation fails before
+#   normal status output is trusted. `--set` and `--archive` operate on whichever
+#   form holds the slug (folder form preferred when both present).
 #
 # --where filters: Supply one or more --where clauses to filter the output.
 #   Accepted forms (operators `=` and `!=` only, with or without spaces around the operator):
@@ -75,6 +82,8 @@
 
 import glob
 import os
+import re
+import secrets
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -342,6 +351,11 @@ def parse_stages_with_defaults(filepath):
 # Subdirectories that are never treated as entity folders. Keep in sync with
 # the rest of the status script and commission scaffolding.
 RESERVED_SUBDIRS = frozenset({'_archive', '_mods'})
+ID_STYLES = frozenset({'sequential', 'slug', 'generated'})
+GENERATED_ID_ALPHABET = '0123456789abcdefghjkmnpqrstvwxyz'
+GENERATED_ID_LENGTH = 24
+GENERATED_MIN_PREFIX = 2
+GENERATED_ID_RE = re.compile(r'^[%s]{%d}$' % (GENERATED_ID_ALPHABET, GENERATED_ID_LENGTH))
 
 
 def discover_entity_files(directory):
@@ -446,6 +460,9 @@ def scan_entities(directory):
         entity['slug'] = slug
         for key in ('id', 'status', 'title', 'score', 'source', 'worktree'):
             entity.setdefault(key, '')
+        entity['_stored_id'] = entity.get('id', '')
+        entity['_path'] = filepath
+        entity['_scope'] = 'active'
         entities.append(entity)
     return entities
 
@@ -518,8 +535,187 @@ def scan_entities_active(directory, git_root):
         entity['slug'] = slug
         for key in ('id', 'status', 'title', 'score', 'source', 'worktree'):
             entity.setdefault(key, '')
+        entity['_stored_id'] = entity.get('id', '')
+        entity['_path'] = filepath
+        entity['_scope'] = 'active'
         entities.append(entity)
     return entities
+
+
+def workflow_id_style(workflow_dir):
+    """Read README frontmatter and return the configured id-style."""
+    readme_path = os.path.join(workflow_dir, 'README.md')
+    if not os.path.exists(readme_path):
+        return 'sequential'
+    fields = parse_frontmatter(readme_path)
+    style = fields.get('id-style', 'sequential').strip() or 'sequential'
+    if style not in ID_STYLES:
+        raise ValueError(f"unsupported id-style: {style}")
+    return style
+
+
+def archive_entities(workflow_dir):
+    archive_dir = os.path.join(workflow_dir, '_archive')
+    if not os.path.isdir(archive_dir):
+        return []
+    entities = scan_entities(archive_dir)
+    for entity in entities:
+        entity['_scope'] = 'archived'
+    return entities
+
+
+def active_and_archived_entities(workflow_dir, git_root):
+    active = scan_entities_active(workflow_dir, git_root)
+    archived = archive_entities(workflow_dir)
+    return active + archived
+
+
+def entity_evidence(entity, workflow_dir, problem, display_id=''):
+    stored_id = entity.get('_stored_id', entity.get('id', ''))
+    path = entity.get('_path', '')
+    scope = entity.get('_scope', 'active')
+    display = display_id or entity.get('_display_id', '')
+    parts = [
+        f"Error: {problem}:",
+        f"workflow={workflow_dir}",
+        f"scope={scope}",
+        f"slug={entity.get('slug', '')}",
+        f"id={stored_id}",
+    ]
+    if display:
+        parts.append(f"display={display}")
+    parts.append(f"path={path}")
+    return ' '.join(parts)
+
+
+def find_entity_form_conflicts(directory, scope):
+    """Return validation errors for slugs present as both flat and folder entities."""
+    if not os.path.isdir(directory):
+        return []
+    try:
+        entries = os.listdir(directory)
+    except OSError:
+        return []
+    slugs = set()
+    flat = set()
+    folder = set()
+    for name in entries:
+        full = os.path.join(directory, name)
+        if os.path.isfile(full) and name.endswith('.md') and name != 'README.md' and not name.startswith('.'):
+            flat.add(name[:-3])
+            slugs.add(name[:-3])
+        elif os.path.isdir(full) and name not in RESERVED_SUBDIRS and not name.startswith('.'):
+            if os.path.isfile(os.path.join(full, 'index.md')):
+                folder.add(name)
+                slugs.add(name)
+
+    errors = []
+    for slug in sorted(flat & folder):
+        folder_path = os.path.join(directory, slug, 'index.md')
+        flat_path = os.path.join(directory, slug + '.md')
+        errors.append(
+            f"Error: flat/folder conflict: workflow={os.path.dirname(directory) if scope == 'archived' else directory} "
+            f"scope={scope} slug={slug} flat_path={flat_path} folder_path={folder_path}"
+        )
+    return errors
+
+
+def is_valid_generated_id(value):
+    return bool(GENERATED_ID_RE.match(value or ''))
+
+
+def compute_generated_display_ids(entities):
+    """Return {stored_id: shortest unique display prefix} for valid generated IDs."""
+    ids = [e.get('_stored_id', e.get('id', '')) for e in entities]
+    valid_ids = [value for value in ids if is_valid_generated_id(value)]
+    display = {}
+    for value in valid_ids:
+        length = GENERATED_MIN_PREFIX
+        while length < len(value):
+            prefix = value[:length]
+            if sum(1 for other in valid_ids if other.startswith(prefix)) == 1:
+                break
+            length += 1
+        display[value] = value[:length]
+    return display
+
+
+def apply_effective_ids(entities, id_style, all_entities=None):
+    """Mutate display-facing `id` fields while preserving `_stored_id`."""
+    all_entities = all_entities if all_entities is not None else entities
+    generated_display = compute_generated_display_ids(all_entities) if id_style == 'generated' else {}
+    for entity in entities:
+        stored_id = entity.get('_stored_id', entity.get('id', ''))
+        if id_style == 'slug':
+            display_id = entity.get('slug', '')
+        elif id_style == 'generated':
+            display_id = generated_display.get(stored_id, stored_id)
+        else:
+            display_id = stored_id
+        entity['_display_id'] = display_id
+        entity['id'] = display_id
+    return entities
+
+
+def validate_workflow(workflow_dir, git_root, id_style):
+    """Return a list of validation error lines for active + archived entities."""
+    errors = []
+    errors.extend(find_entity_form_conflicts(workflow_dir, 'active'))
+    errors.extend(find_entity_form_conflicts(os.path.join(workflow_dir, '_archive'), 'archived'))
+
+    entities = active_and_archived_entities(workflow_dir, git_root)
+    generated_display = compute_generated_display_ids(entities) if id_style == 'generated' else {}
+
+    if id_style == 'sequential':
+        seen = {}
+        for entity in entities:
+            stored_id = entity.get('_stored_id', entity.get('id', ''))
+            if not stored_id:
+                errors.append(entity_evidence(entity, workflow_dir, 'missing required id'))
+                continue
+            if not stored_id.isdigit():
+                errors.append(entity_evidence(entity, workflow_dir, 'non-numeric sequential id'))
+                continue
+            if stored_id in seen:
+                errors.append(entity_evidence(seen[stored_id], workflow_dir, 'duplicate id'))
+                errors.append(entity_evidence(entity, workflow_dir, 'duplicate id'))
+            else:
+                seen[stored_id] = entity
+    elif id_style == 'slug':
+        seen = {}
+        for entity in entities:
+            effective = entity.get('slug', '')
+            entity['_display_id'] = effective
+            if effective in seen:
+                errors.append(entity_evidence(seen[effective], workflow_dir, 'duplicate effective id', effective))
+                errors.append(entity_evidence(entity, workflow_dir, 'duplicate effective id', effective))
+            else:
+                seen[effective] = entity
+    elif id_style == 'generated':
+        seen = {}
+        for entity in entities:
+            stored_id = entity.get('_stored_id', entity.get('id', ''))
+            display = generated_display.get(stored_id, '')
+            if not stored_id:
+                errors.append(entity_evidence(entity, workflow_dir, 'missing required id', display))
+                continue
+            if not is_valid_generated_id(stored_id):
+                errors.append(entity_evidence(entity, workflow_dir, 'invalid generated id', display))
+                continue
+            if stored_id in seen:
+                errors.append(entity_evidence(seen[stored_id], workflow_dir, 'duplicate generated id', display))
+                errors.append(entity_evidence(entity, workflow_dir, 'duplicate generated id', display))
+            else:
+                seen[stored_id] = entity
+    return errors
+
+
+def fail_on_validation_errors(workflow_dir, git_root, id_style):
+    errors = validate_workflow(workflow_dir, git_root, id_style)
+    if errors:
+        for error in errors:
+            print(error, file=sys.stderr)
+        sys.exit(1)
 
 
 def stage_order(status, stages):
@@ -671,7 +867,7 @@ def scan_mods(workflow_dir):
     return hooks
 
 
-def compute_next_id(active_entities, archive_dir):
+def compute_next_sequential_id(active_entities, archive_dir):
     """Find the highest numeric ID across active + archived entities, return next ID string."""
     max_id = 0
     all_entities = list(active_entities)
@@ -689,10 +885,55 @@ def compute_next_id(active_entities, archive_dir):
     return '%03d' % (max_id + 1)
 
 
-def print_next_id(entities, workflow_dir):
-    """Print only the next sequential ID."""
+def generated_id_candidates():
+    """Yield generated IDs from a deterministic test hook or the CSPRNG."""
+    hook = os.environ.get('SPACEDOCK_TEST_GENERATED_IDS', '').strip()
+    if hook:
+        for raw in hook.replace('\n', ',').split(','):
+            value = raw.strip()
+            if value:
+                yield value
+        return
+    while True:
+        yield ''.join(secrets.choice(GENERATED_ID_ALPHABET) for _ in range(GENERATED_ID_LENGTH))
+
+
+def compute_next_generated_id(workflow_dir, git_root):
+    existing = {
+        e.get('_stored_id', e.get('id', ''))
+        for e in active_and_archived_entities(workflow_dir, git_root)
+        if e.get('_stored_id', e.get('id', ''))
+    }
+    hook = os.environ.get('SPACEDOCK_TEST_GENERATED_IDS', '').strip()
+    attempts = 0
+    for candidate in generated_id_candidates():
+        attempts += 1
+        if not is_valid_generated_id(candidate):
+            print(f'Error: generated id candidate is invalid: {candidate}', file=sys.stderr)
+            sys.exit(1)
+        if candidate not in existing:
+            return candidate
+        if not hook and attempts >= 1024:
+            break
+    print('Error: generated id collision retry exhausted', file=sys.stderr)
+    sys.exit(1)
+
+
+def compute_next_id(entities, workflow_dir, git_root, id_style):
     archive_dir = os.path.join(workflow_dir, '_archive')
-    print(compute_next_id(entities, archive_dir))
+    if id_style == 'sequential':
+        return compute_next_sequential_id(entities, archive_dir)
+    if id_style == 'slug':
+        print('Error: status --next-id is not applicable for id-style: slug', file=sys.stderr)
+        sys.exit(1)
+    if id_style == 'generated':
+        return compute_next_generated_id(workflow_dir, git_root)
+    raise ValueError(f"unsupported id-style: {id_style}")
+
+
+def print_next_id(entities, workflow_dir, git_root, id_style):
+    """Print only the next strategy-dependent ID."""
+    print(compute_next_id(entities, workflow_dir, git_root, id_style))
 
 
 def scan_orphans(entities, git_root):
@@ -819,8 +1060,8 @@ def probe_team_state():
     return False, ''
 
 
-def print_boot(entities, stages, workflow_dir, git_root):
-    """Print all boot sections: MODS, NEXT_ID, ORPHANS, PR_STATE, DISPATCHABLE, TEAM_STATE."""
+def print_boot(entities, stages, workflow_dir, git_root, id_style):
+    """Print all boot sections: MODS, ID_STYLE/NEXT_ID, ORPHANS, PR_STATE, DISPATCHABLE, TEAM_STATE."""
     # MODS
     hooks = scan_mods(workflow_dir)
     if not hooks:
@@ -831,10 +1072,15 @@ def print_boot(entities, stages, workflow_dir, git_root):
             mods = ', '.join(sorted(hooks[point]))
             print('%s: %s' % (point, mods))
 
-    # NEXT_ID
-    archive_dir = os.path.join(workflow_dir, '_archive')
-    next_id = compute_next_id(entities, archive_dir)
+    # ID_STYLE / NEXT_ID
+    print('ID_STYLE: %s' % id_style)
+    if id_style == 'slug':
+        next_id = 'n/a (id-style: slug)'
+    else:
+        next_id = compute_next_id(entities, workflow_dir, git_root, id_style)
     print('NEXT_ID: %s' % next_id)
+    if id_style == 'generated':
+        print('MIN_PREFIX: %d' % GENERATED_MIN_PREFIX)
 
     # ORPHANS
     orphans = scan_orphans(entities, git_root)
@@ -1003,6 +1249,33 @@ def parse_archive_arg(args):
     return None
 
 
+def parse_resolve_arg(args):
+    """Parse --resolve <ref> from argv. Returns ref or None."""
+    i = 0
+    while i < len(args):
+        if args[i] == '--resolve':
+            if i + 1 >= len(args):
+                raise ValueError('--resolve requires a reference argument')
+            ref = args[i + 1]
+            if not ref or ref.startswith('--'):
+                raise ValueError('--resolve requires a reference argument')
+            return ref
+        i += 1
+    return None
+
+
+def parse_root_arg(args):
+    """Parse --root <path> from argv. Returns root or None."""
+    i = 0
+    while i < len(args):
+        if args[i] == '--root':
+            if i + 1 >= len(args):
+                raise ValueError('--root requires an argument')
+            return args[i + 1]
+        i += 1
+    return None
+
+
 DEFAULT_STATUS_FIELDS = ('id', 'slug', 'status', 'title', 'score', 'source')
 DEFAULT_NEXT_FIELDS = ('id', 'slug', 'status')
 
@@ -1021,6 +1294,8 @@ def resolve_extra_fields(entities, explicit_fields, all_fields_flag, default_fie
         seen = set()
         for e in entities:
             for key, val in e.items():
+                if key.startswith('_'):
+                    continue
                 if key in defaults:
                     continue
                 if val == '' or val is None:
@@ -1173,6 +1448,231 @@ def apply_filters(entities, filters):
         if match:
             filtered.append(e)
     return filtered
+
+
+def parse_reference(ref):
+    """Return (scope_filter, mode, value) for a resolver reference."""
+    scope_filter = None
+    value = ref
+    if ref.startswith('active:'):
+        scope_filter = 'active'
+        value = ref[len('active:'):]
+    elif ref.startswith('archive:'):
+        scope_filter = 'archived'
+        value = ref[len('archive:'):]
+
+    mode = 'bare'
+    if value.startswith('id:'):
+        mode = 'id'
+        value = value[len('id:'):]
+    elif value.startswith('slug:'):
+        mode = 'slug'
+        value = value[len('slug:'):]
+    elif value.startswith('prefix:'):
+        mode = 'prefix'
+        value = value[len('prefix:'):]
+    return scope_filter, mode, value
+
+
+def format_resolve_line(workflow_dir, entity):
+    return (
+        f"workflow={os.path.realpath(workflow_dir)} "
+        f"scope={entity.get('_scope', 'active')} "
+        f"slug={entity.get('slug', '')} "
+        f"id={entity.get('_stored_id', entity.get('id', ''))} "
+        f"path={entity.get('_path', '')}"
+    )
+
+
+def candidate_line(entity):
+    return (
+        f"scope={entity.get('_scope', 'active')} "
+        f"slug={entity.get('slug', '')} "
+        f"id={entity.get('_stored_id', entity.get('id', ''))} "
+        f"display={entity.get('_display_id', entity.get('id', ''))} "
+        f"path={entity.get('_path', '')}"
+    )
+
+
+def resolve_reference_candidates(workflow_dir, ref, include_archived=False, id_style=None):
+    """Resolve a reference in one workflow.
+
+    Returns (status, matches, errors) where status is one of:
+    ok, unknown, ambiguous, too_short.
+    """
+    git_root = find_git_root(workflow_dir)
+    if id_style is None:
+        id_style = workflow_id_style(workflow_dir)
+    all_entities = active_and_archived_entities(workflow_dir, git_root)
+    apply_effective_ids(all_entities, id_style, all_entities)
+
+    scope_filter, mode, value = parse_reference(ref)
+    allowed_scopes = {'active'}
+    if include_archived:
+        allowed_scopes.add('archived')
+    if scope_filter is not None:
+        allowed_scopes = {scope_filter}
+
+    entities = [e for e in all_entities if e.get('_scope') in allowed_scopes]
+
+    def in_scope_matches(predicate):
+        return [e for e in entities if predicate(e)]
+
+    matches = []
+    if mode == 'slug':
+        matches = in_scope_matches(lambda e: e.get('slug') == value)
+    elif mode == 'id':
+        matches = in_scope_matches(lambda e: e.get('_stored_id', e.get('id', '')) == value)
+    elif mode == 'prefix':
+        if id_style != 'generated':
+            return 'unknown', [], [f"Error: prefix resolution is only available for id-style: generated"]
+        if len(value) < GENERATED_MIN_PREFIX:
+            return 'too_short', [], [f"Error: generated prefix '{value}' is too short; minimum prefix length is {GENERATED_MIN_PREFIX}"]
+        matches = in_scope_matches(lambda e: e.get('_stored_id', '').startswith(value))
+    else:
+        slug_matches = in_scope_matches(lambda e: e.get('slug') == value)
+        id_matches = in_scope_matches(lambda e: e.get('_stored_id', e.get('id', '')) == value)
+        prefix_matches = []
+        prefix_too_short = False
+        if id_style == 'generated' and all(ch in GENERATED_ID_ALPHABET for ch in value):
+            if len(value) < GENERATED_MIN_PREFIX:
+                prefix_too_short = True
+            else:
+                prefix_matches = in_scope_matches(lambda e: e.get('_stored_id', '').startswith(value))
+
+        combined = []
+        seen_paths = set()
+        for entity in slug_matches + id_matches + prefix_matches:
+            key = (entity.get('_scope'), entity.get('slug'), entity.get('_path'))
+            if key in seen_paths:
+                continue
+            seen_paths.add(key)
+            combined.append(entity)
+        scopes = {e.get('_scope') for e in combined}
+        if include_archived and scope_filter is None and len(scopes) > 1:
+            errors = ['Error: ambiguous reference across active and archived entities']
+            errors.extend(candidate_line(e) for e in combined)
+            return 'ambiguous', combined, errors
+
+        if slug_matches:
+            return ('ok', slug_matches, []) if len(slug_matches) == 1 else (
+                'ambiguous', slug_matches, ['Error: ambiguous slug reference'] + [candidate_line(e) for e in slug_matches]
+            )
+        if id_matches:
+            matches = id_matches
+        elif prefix_matches:
+            matches = prefix_matches
+        elif prefix_too_short:
+            return 'too_short', [], [f"Error: generated prefix '{value}' is too short; minimum prefix length is {GENERATED_MIN_PREFIX}"]
+
+    if not matches:
+        return 'unknown', [], [f"Error: unknown reference: {ref}"]
+    if len(matches) > 1:
+        errors = [f"Error: ambiguous reference: {ref}"]
+        errors.extend(candidate_line(e) for e in matches)
+        return 'ambiguous', matches, errors
+    return 'ok', matches, []
+
+
+def resolve_reference_or_exit(workflow_dir, ref, include_archived=False):
+    id_style = workflow_id_style(workflow_dir)
+    fail_on_validation_errors(workflow_dir, find_git_root(workflow_dir), id_style)
+    status, matches, errors = resolve_reference_candidates(
+        workflow_dir, ref, include_archived=include_archived, id_style=id_style
+    )
+    if status != 'ok':
+        for error in errors:
+            print(error, file=sys.stderr)
+        sys.exit(1)
+    print(format_resolve_line(workflow_dir, matches[0]))
+
+
+def resolve_mutation_entity(workflow_dir, ref):
+    """Resolve a mutation target in active scope, with archived read-only diagnostics."""
+    id_style = workflow_id_style(workflow_dir)
+    status, matches, errors = resolve_reference_candidates(
+        workflow_dir, ref, include_archived=False, id_style=id_style
+    )
+    if status == 'ok':
+        return matches[0]
+
+    archived_status, archived_matches, _ = resolve_reference_candidates(
+        workflow_dir, ref, include_archived=True, id_style=id_style
+    )
+    archived_only = [
+        e for e in archived_matches
+        if e.get('_scope') == 'archived'
+    ]
+    if archived_only and not matches:
+        print(f"Error: archived entity is read-only: {ref}", file=sys.stderr)
+        for entity in archived_only:
+            print(candidate_line(entity), file=sys.stderr)
+        sys.exit(1)
+
+    if status == 'unknown':
+        print(f'Error: entity not found: {ref}', file=sys.stderr)
+        sys.exit(1)
+
+    for error in errors:
+        print(error, file=sys.stderr)
+    sys.exit(1)
+
+
+def resolve_from_root_or_exit(root_path, ref, include_archived=False):
+    if not os.path.isdir(root_path):
+        print('Error: --root path does not exist: %s' % root_path, file=sys.stderr)
+        sys.exit(1)
+
+    workflow_ref = None
+    inner_ref = ref
+    if '::' in ref:
+        workflow_ref, inner_ref = ref.split('::', 1)
+
+    workflows = discover_workflows(root_path)
+    if workflow_ref is not None:
+        if os.path.isabs(workflow_ref):
+            candidates = [os.path.realpath(workflow_ref)] if os.path.isdir(workflow_ref) else []
+        else:
+            candidates = [wf for wf in workflows if os.path.basename(wf) == workflow_ref]
+        if len(candidates) != 1:
+            print(f"Error: workflow qualifier is ambiguous or unknown: {workflow_ref}", file=sys.stderr)
+            for wf in candidates:
+                print(wf, file=sys.stderr)
+            sys.exit(1)
+        resolve_reference_or_exit(candidates[0], inner_ref, include_archived=include_archived)
+        return
+
+    matches = []
+    hard_errors = []
+    for workflow in workflows:
+        try:
+            id_style = workflow_id_style(workflow)
+        except ValueError as e:
+            hard_errors.append(f"Error: {workflow}: {e}")
+            continue
+        status, workflow_matches, errors = resolve_reference_candidates(
+            workflow, ref, include_archived=include_archived, id_style=id_style
+        )
+        if status == 'ok':
+            matches.append((workflow, workflow_matches[0]))
+        elif status not in ('unknown',):
+            hard_errors.extend(f"{workflow}: {error}" for error in errors)
+
+    if len(matches) == 1 and not hard_errors:
+        workflow, entity = matches[0]
+        print(format_resolve_line(workflow, entity))
+        return
+    if len(matches) > 1:
+        print(f"Error: multiple workflows match reference: {ref}", file=sys.stderr)
+        for workflow, entity in matches:
+            print(f"{workflow} {candidate_line(entity)}", file=sys.stderr)
+        sys.exit(1)
+    if hard_errors:
+        for error in hard_errors:
+            print(error, file=sys.stderr)
+        sys.exit(1)
+    print(f"Error: unknown reference: {ref}", file=sys.stderr)
+    sys.exit(1)
 
 
 def run_archive(pipeline_dir, slug, force=False):
@@ -1345,6 +1845,7 @@ def main():
             f for f in args if f in (
                 '--boot', '--next', '--next-id', '--archived', '--where',
                 '--set', '--archive', '--fields', '--all-fields', '--workflow-dir',
+                '--validate', '--resolve',
             )
         ]
         if incompatible:
@@ -1392,6 +1893,12 @@ def main():
         print('Error: ' + str(e), file=sys.stderr)
         sys.exit(1)
 
+    try:
+        root_path = parse_root_arg(args)
+    except ValueError as e:
+        print('Error: ' + str(e), file=sys.stderr)
+        sys.exit(1)
+
     pipeline_dir = workflow_dir or os.environ.get('PIPELINE_DIR') or os.path.dirname(os.path.abspath(__file__))
 
     # Parse --set before other flags
@@ -1408,6 +1915,12 @@ def main():
         sys.exit(1)
 
     try:
+        resolve_ref = parse_resolve_arg(args)
+    except ValueError as e:
+        print('Error: ' + str(e), file=sys.stderr)
+        sys.exit(1)
+
+    try:
         explicit_fields, all_fields_flag = parse_fields_options(args)
     except ValueError as e:
         print('Error: ' + str(e), file=sys.stderr)
@@ -1417,6 +1930,7 @@ def main():
     show_next = '--next' in args
     show_next_id = '--next-id' in args
     show_boot = '--boot' in args
+    show_validate = '--validate' in args
     has_fields_flag = explicit_fields is not None or all_fields_flag
 
     # --boot is incompatible with --next, --next-id, --archived, --where, --fields, --all-fields
@@ -1460,14 +1974,57 @@ def main():
             incompatible.append('--archive')
         if set_result is not None:
             incompatible.append('--set')
+        if resolve_ref is not None:
+            incompatible.append('--resolve')
+        if show_validate:
+            incompatible.append('--validate')
         if incompatible:
             print(f'Error: --next-id cannot be combined with {", ".join(incompatible)}',
                   file=sys.stderr)
             sys.exit(1)
 
         entities = scan_entities(pipeline_dir)
-        print_next_id(entities, pipeline_dir)
+        git_root = find_git_root(pipeline_dir)
+        try:
+            id_style = workflow_id_style(pipeline_dir)
+        except ValueError as e:
+            print('Error: ' + str(e), file=sys.stderr)
+            sys.exit(1)
+        fail_on_validation_errors(pipeline_dir, git_root, id_style)
+        print_next_id(entities, pipeline_dir, git_root, id_style)
         sys.exit(0)
+
+    if resolve_ref is not None:
+        incompatible = []
+        if show_next:
+            incompatible.append('--next')
+        if show_boot:
+            incompatible.append('--boot')
+        if show_next_id:
+            incompatible.append('--next-id')
+        if where_filters:
+            incompatible.append('--where')
+        if has_fields_flag:
+            incompatible.append('--fields/--all-fields')
+        if archive_slug is not None:
+            incompatible.append('--archive')
+        if set_result is not None:
+            incompatible.append('--set')
+        if show_validate:
+            incompatible.append('--validate')
+        if incompatible:
+            print(f'Error: --resolve cannot be combined with {", ".join(incompatible)}',
+                  file=sys.stderr)
+            sys.exit(1)
+        if root_path:
+            resolve_from_root_or_exit(root_path, resolve_ref, include_archived=include_archive)
+        else:
+            resolve_reference_or_exit(pipeline_dir, resolve_ref, include_archived=include_archive)
+        sys.exit(0)
+
+    if root_path:
+        print('Error: --root is only supported with --discover or --resolve', file=sys.stderr)
+        sys.exit(1)
 
     if archive_slug is not None:
         incompatible = []
@@ -1485,12 +2042,15 @@ def main():
             incompatible.append('--fields/--all-fields')
         if set_result is not None:
             incompatible.append('--set')
+        if show_validate:
+            incompatible.append('--validate')
         if incompatible:
             print(f'Error: --archive cannot be combined with {", ".join(incompatible)}',
                   file=sys.stderr)
             sys.exit(1)
 
-        run_archive(pipeline_dir, archive_slug, force='--force' in args)
+        resolved_entity = resolve_mutation_entity(pipeline_dir, archive_slug)
+        run_archive(pipeline_dir, resolved_entity['slug'], force='--force' in args)
         sys.exit(0)
 
     if set_result is not None:
@@ -1508,6 +2068,8 @@ def main():
             incompatible.append('--where')
         if has_fields_flag:
             incompatible.append('--fields/--all-fields')
+        if show_validate:
+            incompatible.append('--validate')
         if incompatible:
             print(f'Error: --set cannot be combined with {", ".join(incompatible)}',
                   file=sys.stderr)
@@ -1515,6 +2077,8 @@ def main():
 
         slug, updates = set_result
         force = '--force' in args
+        resolved_entity = resolve_mutation_entity(pipeline_dir, slug)
+        slug = resolved_entity['slug']
         main_entity_path = resolve_entity_path(pipeline_dir, slug)
         if main_entity_path is None:
             print(f'Error: entity not found: {slug}', file=sys.stderr)
@@ -1640,16 +2204,55 @@ def main():
         sys.exit(1)
 
     git_root = find_git_root(pipeline_dir)
+    try:
+        id_style = workflow_id_style(pipeline_dir)
+    except ValueError as e:
+        print('Error: ' + str(e), file=sys.stderr)
+        sys.exit(1)
+
+    if show_validate:
+        incompatible = []
+        if show_next:
+            incompatible.append('--next')
+        if include_archive:
+            incompatible.append('--archived')
+        if show_boot:
+            incompatible.append('--boot')
+        if show_next_id:
+            incompatible.append('--next-id')
+        if where_filters:
+            incompatible.append('--where')
+        if has_fields_flag:
+            incompatible.append('--fields/--all-fields')
+        if archive_slug is not None:
+            incompatible.append('--archive')
+        if set_result is not None:
+            incompatible.append('--set')
+        if incompatible:
+            print(f'Error: --validate cannot be combined with {", ".join(incompatible)}',
+                  file=sys.stderr)
+            sys.exit(1)
+        errors = validate_workflow(pipeline_dir, git_root, id_style)
+        if errors:
+            for error in errors:
+                print(error, file=sys.stderr)
+            sys.exit(1)
+        print('VALID')
+        sys.exit(0)
+
+    fail_on_validation_errors(pipeline_dir, git_root, id_style)
+
+    all_entities = active_and_archived_entities(pipeline_dir, git_root)
     entities = scan_entities_active(pipeline_dir, git_root)
     if include_archive:
-        archive_dir = os.path.join(pipeline_dir, '_archive')
-        if os.path.isdir(archive_dir):
-            entities.extend(scan_entities(archive_dir))
+        entities.extend(archive_entities(pipeline_dir))
 
+    apply_effective_ids(all_entities, id_style, all_entities)
+    apply_effective_ids(entities, id_style, all_entities)
     entities = apply_filters(entities, where_filters)
 
     if show_boot:
-        print_boot(entities, stages, pipeline_dir, git_root)
+        print_boot(entities, stages, pipeline_dir, git_root, id_style)
     elif show_next:
         extras = resolve_extra_fields(entities, explicit_fields, all_fields_flag, DEFAULT_NEXT_FIELDS)
         print_next_table(entities, stages, extra_fields=extras)

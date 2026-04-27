@@ -25,7 +25,7 @@ At startup (after reading the README, before dispatch):
 
 In single-entity mode, skip team creation. Use bare-mode dispatch for all agent spawning — the Agent tool without `team_name` blocks until the subagent completes, which prevents premature session termination in `-p` mode.
 
-When filing a new task, use `status --next-id` to fetch only the next sequential ID. Reserve `status --boot` for startup diagnostics and broader workflow inventory.
+When filing a new task, read `ID_STYLE` from `status --boot`, then use `status --next-id` only when the style is `sequential` or `generated` to fetch the strategy-dependent ID candidate. Generated candidates are full stored IDs and not a reservation; call again immediately before writing the entity. For `slug`, derive the slug from the title and leave `id` blank.
 
 ### Standing teammate discovery pass
 
