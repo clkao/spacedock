@@ -1,9 +1,9 @@
 ---
 id: 216
 title: "Codex FO runtime: add preemptible wait mode for subagent completions"
-status: backlog
+status: ideation
 source: "GitHub issue #148, 2026-04-27 - local mitigation for openai/codex#15723 completion wakeup limitation"
-started:
+started: 2026-04-27T18:27:05Z
 completed:
 verdict:
 score: 0.72
