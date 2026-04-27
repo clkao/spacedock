@@ -1,7 +1,7 @@
 ---
 name: pr-merge
 description: Push branches and create/track GitHub PRs for workflow entities
-version: 0.10.1
+version: 0.10.2
 ---
 
 # PR Merge
