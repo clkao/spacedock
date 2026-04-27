@@ -41,6 +41,83 @@ Introduce an `id-style` strategy layer used by the status viewer, commission sca
 
 The recommended generated format is a 12-character Crockford Base32 string normalized to lowercase, using the ULID-style alphabet without visually confusing letters. That gives 60 bits of entropy. Birthday-bound collision probability remains negligible for Spacedock-scale workflows: about 4.3e-9 at 100,000 generated IDs and about 4.3e-7 at 1,000,000 generated IDs, before the local collision check and retry path. A deterministic test hook can force collisions so the implementation proves retry and failure behavior without relying on chance.
 
+At commission time, the captain should choose the style explicitly unless batch mode provides a strong default. The prompt should offer three choices:
+
+- `generated` (recommended for collaborative workflows): use when multiple people or agents may create entities across branches, worktrees, offline edits, or long-running projects. This should be the recommended choice when the workflow has worktree stages, PR/merge mods, team-mode agents, or the captain mentions collaboration/concurrency.
+- `sequential` (compatibility/default): use when the workflow is single-writer, small, or needs continuity with existing numeric IDs. This remains the backwards-compatible default when no collaboration signal is present or when the command runs in non-interactive batch mode without an explicit `--id-style`.
+- `slug` (canonical filename): use when the slug is already the durable identity, such as named projects, semantically numbered episodes, or workflows with single-digit or low double-digit entity counts. This covers GitHub issue #98.
+
+Refit should not silently change an existing workflow's style. It should report the current `id-style`, recommend `generated` only when collaboration pressure exists, and require explicit captain approval before changing README frontmatter. If entities already exist, refit should require `status --validate` to pass under the target style and should point to manual migration guidance; it should not rewrite entity IDs as part of this task.
+
+Generated README frontmatter examples should be concrete and copyable. Only the `id-style` line changes; the surrounding workflow metadata and stages remain the same shape:
+
+```yaml
+---
+commissioned-by: spacedock@0.11.0
+entity-type: entity
+entity-label: task
+entity-label-plural: tasks
+id-style: sequential
+stages:
+  defaults:
+    worktree: false
+    concurrency: 2
+  states:
+    - name: backlog
+      initial: true
+    - name: done
+      terminal: true
+---
+```
+
+```yaml
+---
+commissioned-by: spacedock@0.11.0
+entity-type: entity
+entity-label: task
+entity-label-plural: tasks
+id-style: slug
+stages:
+  defaults:
+    worktree: false
+    concurrency: 2
+  states:
+    - name: backlog
+      initial: true
+    - name: done
+      terminal: true
+---
+```
+
+```yaml
+---
+commissioned-by: spacedock@0.11.0
+entity-type: entity
+entity-label: task
+entity-label-plural: tasks
+id-style: generated
+stages:
+  defaults:
+    worktree: false
+    concurrency: 2
+  states:
+    - name: backlog
+      initial: true
+    - name: done
+      terminal: true
+---
+```
+
+With the recommended first implementation, generated IDs are fixed-length. Display length does not grow when a workflow moves from tens to hundreds to thousands of entities:
+
+| Workflow size | Example generated IDs | Display behavior |
+|---------------|-----------------------|------------------|
+| 10s of entities | `4k9q2m7x8c3v`, `8t5n0p2w6j9r`, `c3v7k1m9q2x8` | show all 12 characters |
+| 100s of entities | `9m2c7v4xq8j3`, `h6t3k9p2w5r8`, `x8q4m2v7c9n5` | show all 12 characters |
+| 1000s of entities | `v7k3q9x2m5c8`, `2w8r5t9p3j6n`, `n4c8x2q7m9v5` | show all 12 characters |
+
+A dynamic shortest-prefix display remains a future alternative, not the first generated style. In that variant, Spacedock would store a longer full ID and display only the shortest unique prefix, so a stored value like `4k9q2m7x8c3v9r5t6w2p` might display as `4k9q` in a small workflow, `4k9q2m` after more similar IDs appear, and `4k9q2m7x` if thousands of entities make shorter prefixes ambiguous. That dynamic display would be contextual and could lengthen after branch merges; the recommended fixed 12-character generated ID avoids that moving display target.
+
 ## Design comparison
 
 **Full stable ID plus shortest unique display prefix.** This is the Git-like design: store a full UUID/ULID/KSUID/NanoID value and display/accept the shortest unique prefix in the workflow. It minimizes real collision risk and lets the display length grow with the corpus. The downside is collaboration ergonomics: a prefix copied into chat, a PR body, or a stage report can become ambiguous after another branch adds an ID with the same prefix. ULID/KSUID/UUIDv7 also have timestamp-leading strings, so short prefixes are less compact for bursts. This is a good future display mode, but it is not the best first collaboration-friendly storage mode.
@@ -112,6 +189,9 @@ Verified by: static docs tests confirm this task documents manual migration guid
 **AC-10 - Concurrent or offline task creation is safer under generated IDs than under sequential IDs.**
 Verified by: a filesystem-level test simulates two isolated creators adding different entity files from the same starting workflow; generated style yields distinct IDs without a shared counter, while a forced generated-ID duplicate is detected by `status --validate` and by fail-fast default/`--next`/`--boot` validation before status output can silently present duplicate effective IDs.
 
+**AC-11 - Commission/refit documentation preserves concrete style-selection and generated-ID examples.**
+Verified by: static docs/template tests assert the commission flow offers `generated`, `sequential`, and `slug` with the documented recommendations; README frontmatter examples for all three styles include the exact `id-style:` values; generated-ID examples for 10s, 100s, and 1000s of entities are 12-character lowercase Crockford Base32 strings; and docs distinguish fixed generated display from the future dynamic-prefix alternative.
+
 ## Test plan
 
 Most proof should be offline unit and fixture tests because the behavior is local file parsing, ID generation, and deterministic reference resolution. Live E2E tests are not required unless implementation also changes first-officer runtime dialogue around filing new tasks.
@@ -121,6 +201,7 @@ Most proof should be offline unit and fixture tests because the behavior is loca
 - Add static content tests in `tests/test_agent_content.py` and commission-template tests so docs and runtime references no longer hard-code "sequential" where they mean strategy-dependent "new ID", and so FO creation behavior is documented for sequential, generated, and slug workflows. Estimated cost: low.
 - Add migration-scope tests as static docs checks plus status validation fixtures only. This task should not test README/entity rewrite automation because it does not ship an executable migration helper. Estimated cost: low.
 - Add one concurrency simulation using temporary directories or branches, not live agents. It should copy the same starting workflow into two isolated locations, create entities under generated style, merge/copy the files into one workflow, and run `status --validate`, default status, `--next`, and `--boot` checks. Estimated cost: medium.
+- Add static docs/template tests for the style-selection prompt, the three README frontmatter examples, the 10s/100s/1000s generated-ID examples, and the note that fixed generated IDs do not shorten or grow by workflow size. Estimated cost: low.
 - Run `uv run pytest tests/test_status_script.py -q` during implementation for the core behavior, then `make test-static` before validation. If first-officer live creation prompts change materially, add a small runtime fixture or transcript-level test before considering expensive live E2E.
 
 ## Stage Report: ideation
@@ -148,3 +229,16 @@ The ideation output recommends a strategy layer over the existing `id-style` fie
 ### Summary
 
 The repair makes the implementation surfaces concrete instead of relying on runtime prose: validation is `status --validate`, resolution is `status --resolve`, and boot output remains parseable through strategy-aware `NEXT_ID`. Migration scope is narrowed to documentation and validation support, leaving rewrite automation for a separate task.
+
+## Stage Report: ideation (repair 2)
+
+- DONE: README frontmatter selection and recommendation examples are concrete enough for a user and implementation worker to follow.
+  Evidence: Proposed approach now includes commission/refit selection rules plus copyable README frontmatter examples for `sequential`, `slug`, and `generated`.
+- DONE: Sample IDs for 10s, 100s, and 1000s of entities are shown and tied to the chosen fixed/generated or dynamic-prefix design.
+  Evidence: Proposed approach now shows fixed 12-character generated IDs for each workflow size and distinguishes dynamic shortest-prefix display as a future alternative.
+- DONE: Acceptance criteria or test plan are updated if needed so these examples are preserved by implementation/docs tests.
+  Evidence: Added AC-11 and a static docs/template test-plan bullet for style-selection guidance, frontmatter examples, generated-ID examples, and fixed-vs-dynamic display behavior.
+
+### Summary
+
+This repair adds concrete operator-facing examples for choosing `id-style` during commission/refit and for how generated IDs look at different workflow sizes. The chosen first design remains fixed 12-character generated IDs; dynamic prefix growth is documented only as a future display alternative.
