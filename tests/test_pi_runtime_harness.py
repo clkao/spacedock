@@ -13,7 +13,8 @@ import subprocess
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
-from test_lib import TestRunner, build_pi_first_officer_invocation_prompt, create_test_project, run_pi_first_officer  # noqa: E402
+import test_lib  # noqa: E402
+from test_lib import TestRunner, build_pi_first_officer_invocation_prompt, create_test_project  # noqa: E402
 
 
 def test_pi_harness_invokes_first_officer_via_explicit_skill_command():
@@ -50,7 +51,7 @@ def test_run_pi_first_officer_assembles_pi_json_command(monkeypatch, tmp_path):
 
     monkeypatch.setattr(subprocess, "run", fake_run)
 
-    exit_code = run_pi_first_officer(
+    exit_code = test_lib.run_pi_first_officer(
         runner,
         "docs/plans",
         run_goal="Process only task 218.",

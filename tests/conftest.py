@@ -35,7 +35,7 @@ def pytest_addoption(parser):
                           "('1' or 'true' → teams, else bare).")
 
 
-_LIVE_IMPORT_MARKERS = {"run_first_officer", "run_codex_first_officer"}
+_LIVE_IMPORT_MARKERS = {"run_first_officer", "run_codex_first_officer", "run_pi_first_officer"}
 
 
 def _resolve_team_mode(config) -> str:
@@ -52,8 +52,8 @@ def pytest_collection_modifyitems(config, items):
 
     - Items carrying BOTH teams_mode and bare_mode fail collection loudly.
     - Items whose team-mode marker disagrees with the resolved mode get a skip marker.
-    - Advisory: warn if a module imports run_first_officer / run_codex_first_officer
-      but none of its tests carry live_claude or live_codex markers.
+    - Advisory: warn if a module imports a live-runtime launcher
+      but none of its tests carry live_claude, live_codex, or live_pi markers.
     """
     resolved_mode = _resolve_team_mode(config)
 
@@ -86,13 +86,13 @@ def pytest_collection_modifyitems(config, items):
         if not imports_live:
             continue
         has_live_marker = any(
-            item.get_closest_marker("live_claude") or item.get_closest_marker("live_codex")
+            item.get_closest_marker("live_claude") or item.get_closest_marker("live_codex") or item.get_closest_marker("live_pi")
             for item in module_items
         )
         if not has_live_marker:
             warnings.warn(
-                f"{module_name}: imports run_first_officer / run_codex_first_officer "
-                f"but no test carries live_claude or live_codex markers",
+                f"{module_name}: imports a live runtime launcher "
+                f"but no test carries live_claude, live_codex, or live_pi markers",
                 stacklevel=1,
             )
 

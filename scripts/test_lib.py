@@ -1870,6 +1870,54 @@ class LogParser:
             f.write(self.agent_prompt())
 
 
+class PiLogParser:
+    """Parses Pi `--mode json` logs."""
+
+    def __init__(self, log_path: Path | str):
+        self.log_path = Path(log_path)
+        self._raw_lines: list[str] | None = None
+        self._json_entries: list[dict] | None = None
+
+    @property
+    def raw_lines(self) -> list[str]:
+        if self._raw_lines is None:
+            self._raw_lines = self.log_path.read_text().splitlines() if self.log_path.exists() else []
+        return self._raw_lines
+
+    @property
+    def json_entries(self) -> list[dict]:
+        if self._json_entries is None:
+            entries: list[dict] = []
+            for line in self.raw_lines:
+                try:
+                    entries.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+            self._json_entries = entries
+        return self._json_entries
+
+    def assistant_texts(self) -> list[str]:
+        texts: list[str] = []
+        for entry in self.json_entries:
+            if entry.get("type") == "message_end":
+                message = entry.get("message", {})
+                if not isinstance(message, dict) or message.get("role") != "assistant":
+                    continue
+                for part in message.get("content", []) or []:
+                    if isinstance(part, dict) and part.get("type") == "text":
+                        text = part.get("text")
+                        if text:
+                            texts.append(str(text))
+        return texts
+
+    def full_text(self) -> str:
+        return "\n".join(self.assistant_texts())
+
+    def write_text(self, output_path: Path | str):
+        with open(output_path, "w") as f:
+            f.write(self.full_text())
+
+
 class CodexLogParser:
     """Parses a mixed JSONL/plain-text log file from `codex exec --json`."""
 

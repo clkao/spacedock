@@ -179,10 +179,10 @@ This ideation pass reframes #147 as a minimum-runtime baseline problem rather th
   Evidence: `scripts/test_lib.py` now provides `build_pi_first_officer_invocation_prompt()` and `run_pi_first_officer()`, and `tests/test_pi_runtime_harness.py` verifies the assembled command shape uses `pi --mode json --print --session-dir ... --skill ...`.
 - DONE: Added a minimal session-backed worker mapping scaffold for Pi reuse/shutdown bookkeeping.
   Evidence: `scripts/pi_session_registry.py` defines `WorkerSessionRecord` and `PiSessionRegistry`, and `tests/test_pi_session_registry.py` verifies metadata round-trip, active-again epoch bumps, and shutdown/unroutable behavior without introducing a second session system.
-- FAILED: Live Pi workflow execution is not proven yet.
-  Evidence: `tests/test_gate_guardrail.py --runtime pi` is not wired yet, and the current harness has no Pi log parser or completion/gate assertions beyond command-shape tests.
+- DONE: Live Pi gate-preflight workflow execution is now proven.
+  Evidence: `tests/test_gate_guardrail.py --runtime pi -v` passes, `scripts/test_lib.py` now provides `PiLogParser`, and the gate test validates gate hold behavior plus explicit `gate review` / `waiting-for-approval` output from the Pi run.
 - SKIPPED: Same-worker live routed follow-up and explicit shutdown on a real Pi session.
-  Evidence: the registry scaffold exists, but no live Pi worker dispatch/reuse cycle exercises it yet.
+  Evidence: the thin label-to-session mapping exists, but no live Pi worker dispatch/reuse cycle exercises it yet.
 
 ### Implementation Summary
 
@@ -193,5 +193,4 @@ This pass established the initial Pi integration seam rather than full runtime b
 - per-run Pi session storage via `--session-dir {runner.test_dir}/pi-sessions`
 - a thin Spacedock-owned worker-label -> Pi-session mapping (`PiSessionRegistry`) that records workflow metadata and a `completion_epoch` on top of Pi's native session persistence
 
-What is still missing is the live worker loop: a real Pi-dispatched ensign session, waiting/parsing of completion events, routed follow-up on the same Pi session, and gate-preflight proof in `tests/test_gate_guardrail.py --runtime pi`.
-
+What is still missing is the reusable live worker loop beyond the gate preflight: a real Pi-dispatched ensign session for same-session follow-up, routed follow-up on that same Pi session, and explicit shutdown proof for a reused worker.
