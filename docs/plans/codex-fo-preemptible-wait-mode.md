@@ -186,6 +186,21 @@ Validation selected the static/parser commands called out by the entity and the 
 
 Recommendation: PASSED
 
+## Stage Report: implementation (cycle 4)
+
+- DONE: Change Codex first-officer behavior so after every fresh Codex dispatch/spawn it immediately enters a preemptible wait on the dispatched handle(s), and the operator-facing prompt/status explicitly says Esc/message interruption is safe and that wait will resume unless the captain says pause/stop.
+  Evidence: `skills/first-officer/references/codex-first-officer-runtime.md` now requires immediate post-`spawn_agent` preemptible `wait_agent` and explicit Esc/message-safe resume-unless-pause/stop status.
+- DONE: Create a failing live Codex test locally for this dispatch-immediate-wait policy before changing runtime docs.
+  Evidence: New `tests/test_codex_dispatch_immediate_wait.py` failed RED before runtime changes: 4 passed, 2 failed; failures were missing immediate wait on the returned handle and missing interruption-safe wait status.
+- DONE: Fix the `test_gate_guardrail` issue where Codex live output says `waiting for human approval` but the assertion only accepts `waiting for approval`.
+  Evidence: `tests/test_gate_guardrail.py` now accepts optional `human` between `for` and `approval`; `uv run pytest tests/test_gate_guardrail.py --runtime codex -v` passed.
+- DONE: Validate locally with focused tests, including the new live test and `tests/test_gate_guardrail.py --runtime codex`. Also run static/content tests you touch.
+  Evidence: `uv run pytest tests/test_codex_dispatch_immediate_wait.py --runtime codex -v` passed; `uv run pytest tests/test_gate_guardrail.py --runtime codex -v` passed; `uv run --with pytest python tests/test_agent_content.py -q` passed; `uv run --with pytest python -m pytest tests/test_codex_packaged_agent_ids.py tests/test_test_lib_helpers.py -q` passed; `git diff --check` passed.
+
+### Summary
+
+Updated the Codex FO runtime from background-after-fresh-dispatch to immediate preemptible waiting on returned worker handles. Added a non-xfail live Codex regression for that behavior, pinned the Codex live harness to the local worktree plugin/runtime so it tests branch changes, and widened the gate guardrail approval regex for `waiting for human approval`.
+
 ### Feedback Cycles
 
 - Cycle 1 (2026-04-27): Captain rejected the validation gate despite a PASSED recommendation. Required changes:

@@ -86,6 +86,8 @@ For each dispatch:
 5. In the worker prompt:
    - first instruct the worker to resolve its role definition from the logical id and read it before doing anything else
    - then pass the assignment fields
+6. Immediately after `spawn_agent` returns the dispatched handle or handles, emit an operator-facing wait status using the FO-owned worker label and handle(s).
+7. Immediately enter a preemptible `wait_agent` on those same dispatched handle(s) before running follow-up status checks, advancing any workflow state, dispatching more work, or sending a final response.
 
 When the worker reaches a completed state, keep its returned handle and worker label as long as later routing may still need that thread.
 
@@ -145,18 +147,20 @@ spawn_agent(
   fork_context=false,
   message="<fully self-contained worker assignment>"
 )
+<operator-facing status: Waiting on `{label}` (handle {handle}). Esc/message interruption is safe; if interrupted, handle the message and resume this same wait unless the captain says pause/stop.>
 wait_agent(...)
 ```
 
 Always preserve the logical packaged id in summaries and use only `worker_key` in branch/worktree/session names.
 When reusing a completed worker, the equivalent pattern is `send_input(<existing_handle>, message="<next assignment>")` followed by `wait_agent(...)` on that same handle when the reused result is part of that entity's current critical path, then explicit shutdown once the reused cycle is complete and the worker is no longer needed. This wait blocks advancement of that entity, not unrelated ready entities.
 
-In interactive sessions, do not foreground `wait_agent` immediately after `spawn_agent` just because a worker was dispatched. Keep the worker in the background and continue the turn unless the next orchestration step is blocked on that worker result or the captain explicitly asks to wait.
-For bounded single-entity runs, immediate waiting after dispatch remains appropriate when completion is the point of the turn.
+In Codex sessions, every fresh `spawn_agent` dispatch immediately becomes a preemptible wait on the returned handle(s). Do not leave a freshly dispatched worker running in the background as the next operator-visible result. The wait is preemptible: Esc or a captain message can interrupt it safely, and after handling that message you resume waiting on the same unresolved handle(s) unless the captain says pause or stop.
 
 ## Interrupted Waits
 
-When you are waiting for ensigns because the next first-officer step is blocked, and the captain sends a non-stopping message, handle that input and then resume `wait_agent` for the same unresolved ensigns unless the captain says to pause or stop. If the input creates a clarification blocker, ask for the clarification instead of continuing to wait. Completion notifications that appear during the interruption are useful context, but do not replace the resumed `wait_agent` collection on the same worker handles.
+When you are waiting for ensigns and the captain sends a non-stopping message, handle that input and then resume `wait_agent` for the same unresolved ensigns unless the captain says to pause or stop. If the input creates a clarification blocker, ask for the clarification instead of continuing to wait. Completion notifications that appear during the interruption are useful context, but do not replace the resumed `wait_agent` collection on the same worker handles.
+
+The wait status must make the interruption contract explicit for the operator. State that Esc or sending a message is safe, and that the wait will resume on the same unresolved worker handle(s) unless the captain says pause or stop.
 
 ## Codex Worker Assignment Fields
 
@@ -188,8 +192,7 @@ When you render the worker prompt, keep the checklist header plain and stable: u
 
 - Workers report completion by returning a concise final response.
 - The first officer treats the entity file and stage report as the source of truth.
-- In interactive sessions, the first officer keeps the worker in the background and continues the turn unless the next step is blocked on the worker result or the captain explicitly asks to wait.
-- In bounded single-entity runs, the first officer may wait immediately after dispatch because the run is scoped around that completion.
+- After every fresh Codex dispatch, the first officer waits immediately on the returned worker handle(s); this applies in normal interactive and bounded runs.
 - In interactive Codex mode, once a worker completes for a gated stage, the stage report and gate handling become the next required action before unrelated orchestration continues.
 - In bounded single-entity runs, if the worker completion message already contains the requested verdict, evidence, or terminal outcome, use that message as sufficient evidence for the final response and stop immediately.
 - Only reread the entity file or rerun `status` after `wait_agent(...)` when the worker message is missing a detail required by the stated stop condition.

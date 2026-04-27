@@ -183,9 +183,24 @@ def build_codex_first_officer_invocation_prompt(
     workflow_dir: str | Path,
     agent_id: str = "spacedock:first-officer",
     run_goal: str | None = None,
+    local_skill_path: str | Path | None = None,
+    local_plugin_root: str | Path | None = None,
 ) -> str:
     workflow_dir = Path(workflow_dir)
-    prompt = f"Use the `{agent_id}` skill to manage the Codex workflow at `{workflow_dir}`."
+    if local_skill_path is not None:
+        prompt = (
+            f"Use the local `{agent_id}` skill at `{Path(local_skill_path)}` "
+            f"to manage the Codex workflow at `{workflow_dir}`."
+        )
+    else:
+        prompt = f"Use the `{agent_id}` skill to manage the Codex workflow at `{workflow_dir}`."
+    if local_plugin_root is not None:
+        plugin_root = Path(local_plugin_root)
+        prompt = (
+            f"{prompt}\n\n"
+            f"The local Spacedock plugin directory is `{plugin_root}`; the status helper is "
+            f"`{plugin_root / 'skills' / 'commission' / 'bin' / 'status'}`."
+        )
     if run_goal:
         prompt = f"{prompt}\n\n{run_goal.strip()}"
     return prompt
@@ -919,10 +934,17 @@ def run_codex_first_officer(
     """Run the Codex first-officer skill via codex exec. Returns exit code."""
     log_path = runner.log_dir / log_name
     workflow_path = (runner.test_project_dir / workflow_dir).resolve()
-    prompt = build_codex_first_officer_invocation_prompt(workflow_path, agent_id=agent_id, run_goal=run_goal)
+    skill_home = prepare_codex_skill_home(runner.test_dir, runner.repo_root)
+    local_skill_path = runner.repo_root / "skills" / "first-officer" / "SKILL.md"
+    prompt = build_codex_first_officer_invocation_prompt(
+        workflow_path,
+        agent_id=agent_id,
+        run_goal=run_goal,
+        local_skill_path=local_skill_path,
+        local_plugin_root=runner.repo_root,
+    )
     (runner.log_dir / "codex-fo-invocation.txt").write_text(prompt + "\n")
 
-    skill_home = prepare_codex_skill_home(runner.test_dir, runner.repo_root)
     env = os.environ.copy()
     env["HOME"] = str(skill_home)
     env["CODEX_HOME"] = str(skill_home / ".codex")

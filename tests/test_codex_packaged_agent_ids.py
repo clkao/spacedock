@@ -62,6 +62,20 @@ def test_exec_harness_invokes_first_officer_skill_by_name_with_minimal_prompt():
     assert "send_input" not in prompt
 
 
+def test_exec_harness_can_pin_first_officer_to_local_skill_path():
+    prompt = build_codex_first_officer_invocation_prompt(
+        "/tmp/example-workflow",
+        local_skill_path="/tmp/spacedock/skills/first-officer/SKILL.md",
+        local_plugin_root="/tmp/spacedock",
+    )
+
+    assert "spacedock:first-officer" in prompt
+    assert "/tmp/spacedock/skills/first-officer/SKILL.md" in prompt
+    assert "/tmp/spacedock/skills/commission/bin/status" in prompt
+    assert "wait_agent" not in prompt
+    assert "send_input" not in prompt
+
+
 def test_exec_harness_can_target_a_custom_logical_agent_id():
     prompt = build_codex_first_officer_invocation_prompt(
         "/tmp/example-workflow",

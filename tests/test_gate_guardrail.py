@@ -145,7 +145,7 @@ def test_gate_guardrail(test_project, runtime, model, effort, request):
             "waiting-for-approval result is explicitly surfaced",
             bool(
                 re.search(
-                    r"waiting(?:[_\s-]+)for(?:[_\s-]+)approval",
+                    r"waiting(?:[_\s-]+)for(?:[_\s-]+)(?:human(?:[_\s-]+))?approval",
                     fo_text_output,
                     re.IGNORECASE,
                 )

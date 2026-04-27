@@ -174,25 +174,26 @@ def test_assembled_codex_skill_contract_uses_skill_relative_bootstrap_language()
     assert "bounded fallback" in text
 
 
-def test_codex_runtime_docs_keep_interactive_workers_background_by_default():
-    """Contract-level check: the runtime text describes the interactive wait policy."""
+def test_codex_runtime_docs_wait_immediately_after_fresh_dispatch():
+    """Contract-level check: fresh Codex dispatches enter preemptible wait mode."""
     t = TestRunner("agent content", keep_test_dir=False)
     text = assembled_agent_content(t, "first-officer", runtime="codex")
 
-    assert "interactive sessions" in text.lower()
-    assert "do not foreground `wait_agent` immediately after `spawn_agent`" in text
-    assert "explicitly asks to wait" in text
-    assert "bounded single-entity runs" in text
-    assert "wait immediately after dispatch" in text
+    assert "every fresh `spawn_agent` dispatch immediately becomes a preemptible wait" in text
+    assert "Esc/message interruption is safe" in text
+    assert "same unresolved handle" in text
+    assert "unless the captain says pause or stop" in text
+    assert "do not foreground `wait_agent` immediately after `spawn_agent`" not in text
+    assert "freshly dispatched worker running in the background" in text
 
 
 def test_codex_runtime_docs_state_coverage_limits_in_plain_language():
     """Contract-level check: the docs stay honest about what the harness can prove."""
     text = read_text("skills/first-officer/references/codex-first-officer-runtime.md")
 
-    assert "interactive sessions" in text.lower()
-    assert "background" in text.lower()
-    assert "bounded single-entity runs" in text.lower()
+    assert "fresh `spawn_agent` dispatch" in text
+    assert "preemptible wait" in text.lower()
+    assert "Esc or a captain message" in text
     assert "wait_agent" in text
 
 
