@@ -1837,8 +1837,8 @@ class CodexLogParser:
                     messages.append(str(state["message"]))
         return messages
 
-    def preemptible_wait_sequences(self) -> list[dict]:
-        """Return wait/preemption/resume sequences from Codex JSONL fixtures.
+    def interrupted_wait_sequences(self) -> list[dict]:
+        """Return wait/interruption/resume sequences from Codex JSONL fixtures.
 
         This helper intentionally models Codex completion notifications as
         side-channel evidence: a sequence is only considered collected when a
@@ -1860,14 +1860,14 @@ class CodexLogParser:
                 if pending and pending.get("preemption_outcome") == "preempted_by_user_input":
                     completed = self._completed_thread_ids(item, handles)
                     initial = pending["initial_receiver_thread_ids"]
-                    initial_uncollected = pending["initial_uncollected_thread_ids"]
+                    initial_unresolved = pending["initial_unresolved_thread_ids"]
                     pending["resumed_receiver_thread_ids"] = handles
                     pending["collected_completed_thread_ids"] = completed
-                    pending["fo_collected_thread_ids"] = [
-                        handle for handle in initial_uncollected if handle in completed
+                    pending["resolved_thread_ids"] = [
+                        handle for handle in initial_unresolved if handle in completed
                     ]
-                    pending["still_uncollected_thread_ids"] = [
-                        handle for handle in initial_uncollected if handle not in completed
+                    pending["still_unresolved_thread_ids"] = [
+                        handle for handle in initial_unresolved if handle not in completed
                     ]
                     pending["dropped_thread_ids"] = [
                         handle for handle in initial if handle not in handles
@@ -1881,18 +1881,14 @@ class CodexLogParser:
 
                 pending = {
                     "initial_receiver_thread_ids": handles,
-                    "initial_wait_intent_entries": self._wait_intent_entries(item),
-                    "initial_uncollected_thread_ids": self._uncollected_thread_ids_from_intent(
-                        item,
-                        handles,
-                    ),
+                    "initial_unresolved_thread_ids": list(handles),
                     "preemption_outcome": None,
                     "user_interruption_texts": [],
                     "completion_notifications_before_resume": [],
                     "resumed_receiver_thread_ids": [],
                     "collected_completed_thread_ids": [],
-                    "fo_collected_thread_ids": [],
-                    "still_uncollected_thread_ids": [],
+                    "resolved_thread_ids": [],
+                    "still_unresolved_thread_ids": [],
                     "dropped_thread_ids": [],
                     "replacement_thread_ids": [],
                 }
@@ -1942,37 +1938,6 @@ class CodexLogParser:
             if isinstance(state, dict) and state.get("status") == "completed":
                 completed.append(handle_text)
         return completed
-
-    @staticmethod
-    def _wait_intent_entries(item: dict) -> list[dict]:
-        wait_intent = item.get("wait_intent", {})
-        if not isinstance(wait_intent, dict):
-            return []
-        entries = wait_intent.get("entries", [])
-        if not isinstance(entries, list):
-            return []
-        return [entry for entry in entries if isinstance(entry, dict)]
-
-    @classmethod
-    def _uncollected_thread_ids_from_intent(cls, item: dict, handle_order: list[str]) -> list[str]:
-        entries = cls._wait_intent_entries(item)
-        if not entries:
-            return list(handle_order)
-
-        uncollected: list[str] = []
-        for entry in entries:
-            state = str(entry.get("collection_state", "")).lower()
-            if state not in {"fo-uncollected", "uncollected", "unresolved"}:
-                continue
-            handle = entry.get("runtime_handle")
-            if isinstance(handle, str) and handle not in uncollected:
-                uncollected.append(handle)
-
-        return [
-            handle for handle in handle_order if handle in uncollected
-        ] + [
-            handle for handle in uncollected if handle not in handle_order
-        ]
 
     @staticmethod
     def _thread_ids_from_text(text: str) -> list[str]:

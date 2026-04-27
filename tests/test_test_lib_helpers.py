@@ -302,32 +302,6 @@ def test_codex_log_parser_detects_preempted_multi_handle_wait_resume(tmp_path):
                 "type": "collab_tool_call",
                 "tool": "wait",
                 "receiver_thread_ids": ["item_23", "item_42"],
-                "wait_intent": {
-                    "entries": [
-                        {
-                            "worker_label": "048-implementation/Ensign feedback cycle 2",
-                            "dispatch_agent_id": "spacedock:ensign",
-                            "runtime_handle": "item_23",
-                            "entity_path": "docs/plans/task-048.md",
-                            "entity_id": "048",
-                            "stage_name": "implementation",
-                            "blocked_reason": "blocked workflow state",
-                            "collection_state": "FO-uncollected",
-                            "source": "same-handle reuse",
-                        },
-                        {
-                            "worker_label": "054-implementation/Ensign",
-                            "dispatch_agent_id": "spacedock:ensign",
-                            "runtime_handle": "item_42",
-                            "entity_path": "docs/plans/task-054.md",
-                            "entity_id": "054",
-                            "stage_name": "implementation",
-                            "blocked_reason": "blocked workflow state",
-                            "collection_state": "FO-uncollected",
-                            "source": "fresh dispatch",
-                        },
-                    ]
-                },
             },
         },
         {
@@ -351,7 +325,7 @@ def test_codex_log_parser_detects_preempted_multi_handle_wait_resume(tmp_path):
             "item": {
                 "id": "notification_1",
                 "type": "agent_message",
-                "text": "Completion notification observed for item_23; still FO-uncollected until resumed wait_agent collects it.",
+                "text": "Completion notification observed for item_23; still unresolved until resumed wait_agent collects it.",
             },
         },
         {
@@ -377,10 +351,10 @@ def test_codex_log_parser_detects_preempted_multi_handle_wait_resume(tmp_path):
     log_path.write_text("\n".join(json.dumps(entry) for entry in entries))
 
     parser = CodexLogParser(log_path)
-    sequence = parser.preemptible_wait_sequences()[0]
+    sequence = parser.interrupted_wait_sequences()[0]
 
     assert sequence["initial_receiver_thread_ids"] == ["item_23", "item_42"]
-    assert sequence["initial_uncollected_thread_ids"] == ["item_23", "item_42"]
+    assert sequence["initial_unresolved_thread_ids"] == ["item_23", "item_42"]
     assert sequence["resumed_receiver_thread_ids"] == ["item_23", "item_42"]
     assert sequence["preemption_outcome"] == "preempted_by_user_input"
     assert sequence["user_interruption_texts"] == [
@@ -388,8 +362,8 @@ def test_codex_log_parser_detects_preempted_multi_handle_wait_resume(tmp_path):
     ]
     assert sequence["completion_notifications_before_resume"] == ["item_23"]
     assert sequence["collected_completed_thread_ids"] == ["item_23", "item_42"]
-    assert sequence["fo_collected_thread_ids"] == ["item_23", "item_42"]
-    assert sequence["still_uncollected_thread_ids"] == []
+    assert sequence["resolved_thread_ids"] == ["item_23", "item_42"]
+    assert sequence["still_unresolved_thread_ids"] == []
     assert sequence["dropped_thread_ids"] == []
     assert sequence["replacement_thread_ids"] == []
 

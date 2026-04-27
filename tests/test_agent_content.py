@@ -186,57 +186,6 @@ def test_codex_runtime_docs_keep_interactive_workers_background_by_default():
     assert "wait immediately after dispatch" in text
 
 
-def test_codex_runtime_docs_define_preemptible_wait_mode_contract():
-    text = read_text("skills/first-officer/references/codex-first-officer-runtime.md")
-
-    assert "preemptible wait" in text.lower()
-    assert "background worker" in text.lower()
-    assert "post-wait completion handling" in text.lower()
-    assert re.search(
-        r"next orchestration step.*blocked|blocked.*next orchestration step",
-        text,
-        re.IGNORECASE | re.DOTALL,
-    )
-
-    for required in (
-        "worker label",
-        "dispatch_agent_id",
-        "runtime handle",
-        "entity path/id",
-        "stage name",
-        "blocked reason",
-        "FO-uncollected",
-        "fresh dispatch",
-        "same-handle reuse",
-    ):
-        assert required in text
-
-
-def test_codex_runtime_docs_define_preemptible_wait_continuity_and_outcomes():
-    text = read_text("skills/first-officer/references/codex-first-officer-runtime.md")
-    wait_section = section_text(text, "## Codex Preemptible Wait Mode", (r"^## ",))
-
-    assert re.search(r"unresolved.*FO-uncollected", wait_section, re.IGNORECASE | re.DOTALL)
-    assert re.search(r"opportunistic evidence only", wait_section, re.IGNORECASE)
-    assert re.search(r"autonomous first-officer turn", wait_section, re.IGNORECASE)
-    assert re.search(r"resum.*wait_agent.*same handle", wait_section, re.IGNORECASE | re.DOTALL)
-    assert re.search(
-        r"preempted_by_user_input.*resume `wait_agent`.*FO-uncollected",
-        wait_section,
-        re.IGNORECASE | re.DOTALL,
-    )
-
-    for outcome in (
-        "completed",
-        "timed_out",
-        "failed",
-        "preempted_by_user_input",
-        "paused_by_user",
-        "clarification_required",
-    ):
-        assert outcome in wait_section
-
-
 def test_codex_runtime_docs_state_coverage_limits_in_plain_language():
     """Contract-level check: the docs stay honest about what the harness can prove."""
     text = read_text("skills/first-officer/references/codex-first-officer-runtime.md")
