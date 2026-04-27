@@ -37,7 +37,7 @@ Introduce an `id-style` strategy layer used by the status viewer, commission sca
 
 - `sequential`: the current behavior. `id` is required, numeric-looking values continue to sort/display as today, and `status --next-id` returns the next zero-padded number across active plus archived entities.
 - `slug`: the issue #98 behavior. `id` is optional; the effective identity is the entity slug. Status output should keep the existing columns for compatibility and render the effective ID as the slug. `status --next-id` should fail with a clear "not applicable for id-style: slug" error because a future slug depends on the entity title, not a central counter.
-- `generated`: a new collaboration-friendly style. `id` is required and stores a short generated ID, not a dynamically shortened view of a longer hidden value. `status --next-id` returns a fresh candidate generated from a CSPRNG, checks it against active plus archived entities, and retries on known collisions.
+- `generated`: a new collaboration-friendly style. `id` is required and stores a short generated ID, not a dynamically shortened view of a longer hidden value. `status --next-id` returns a fresh candidate generated from a CSPRNG, checks it against active plus archived entities, and retries on known collisions. Validation is explicit through `status --validate` and fail-fast in status display paths, so duplicate generated IDs cannot be silently presented as valid workflow state.
 
 The recommended generated format is a 12-character Crockford Base32 string normalized to lowercase, using the ULID-style alphabet without visually confusing letters. That gives 60 bits of entropy. Birthday-bound collision probability remains negligible for Spacedock-scale workflows: about 4.3e-9 at 100,000 generated IDs and about 4.3e-7 at 1,000,000 generated IDs, before the local collision check and retry path. A deterministic test hook can force collisions so the implementation proves retry and failure behavior without relying on chance.
 
@@ -56,17 +56,27 @@ The strategy contract should answer these questions for a workflow:
 - whether `id` is required in entity frontmatter
 - how to compute the effective display ID for a scanned entity
 - how `status --next-id` behaves
+- how `status --boot` emits `NEXT_ID`
 - how references are resolved from exact IDs, ID prefixes, and slugs
 - whether active and archived entities participate in uniqueness checks
+- how `status --validate` checks duplicate or invalid effective IDs
 - what migration checks are required before changing styles
 
-Reference resolution should be explicit and testable. Within a workflow, exact slug always resolves to that slug's canonical entity file. Exact ID resolves to the entity with that effective ID. For `generated`, an ID prefix resolves only when it is unique across active plus archived entities; ambiguous prefixes fail with the matching IDs/slugs. Operational mutations such as `--set` should only mutate active entities, but they should still report when the only match is archived instead of silently ignoring it. Read-only resolution may include archived entities when requested.
+Collision and schema validation should have a named CLI surface. Add `status --validate`, scoped by `--workflow-dir`, which scans active entities plus `_archive/` using the same flat/folder discovery rules as display and mutation paths. It exits 0 and prints `VALID` when the workflow is internally consistent. It exits 1 and prints one stderr line per problem when it finds a duplicate effective ID, a missing required `id`, an invalid generated ID alphabet/length, a non-numeric sequential ID that would affect allocation, or any flat/folder conflict that changes the canonical entity path. Each error should name the workflow path, active or archived scope, slug, effective ID, and canonical file path. Default status output, `--archived`, `--next`, `--next-id`, and `--boot` should run the same validation before printing normal output; on validation failure they should exit 1 without printing a partial status table or boot payload. `--set` and `--archive` should continue to use active-only mutation resolution, but after a successful mutation they should leave any subsequent validation failure visible to the caller rather than masking it.
 
-Folder-form entities should use the existing discovery rule: `{slug}/index.md` is the canonical entity file, and folder form wins over a same-slug flat file with a warning. Archived folder entities live under `_archive/{slug}/index.md`. Every uniqueness check, `--next-id` check, status display, and resolver should use the same discovery path so flat, folder, active, and archived entities cannot disagree.
+`--boot` should keep the `NEXT_ID:` line for first-officer compatibility, but its meaning becomes strategy-dependent and should be accompanied by an `ID_STYLE: {style}` line. For `sequential`, `NEXT_ID: 005` keeps the current highest-active-or-archived-plus-one behavior. For `generated`, `NEXT_ID: {candidate}` emits the same kind of collision-checked generated candidate as `status --next-id`; it is informational and not a reservation, so the first officer must call `status --next-id` again immediately before creating a new entity. For `slug`, `--boot` succeeds and emits `NEXT_ID: n/a (id-style: slug)`, while direct `status --next-id` exits non-zero with the same not-applicable message because the eventual ID is the slug derived from the title.
 
-Cross-workflow references are scoped to a single `--workflow-dir` by default. A resolver operating above one workflow must require a workflow qualifier, an explicit workflow path, or an unambiguous discovered workflow. If two workflows contain the same slug, ID, or generated prefix, the unqualified reference should fail and list candidate workflow directories. This avoids treating generated IDs as globally meaningful when Spacedock's workflow directory is the real namespace.
+First-officer task creation should use the strategy explicitly. Under `sequential`, the FO calls `status --next-id` immediately before writing the entity and stores that value in `id`. Under `generated`, the FO also calls `status --next-id` immediately before writing the entity and stores that generated value in `id`; if `status --validate` or a subsequent display command reports a collision after a branch/worktree merge, the FO refreshes workflow state, calls `--next-id` again, and rewrites only the new unmerged entity before committing. Under `slug`, the FO derives the slug from the title, omits `id` or leaves it blank according to the workflow template, and never calls `--next-id` for creation.
 
-Migration should be explicit and non-destructive. Existing workflows with `id-style: sequential` require no data rewrite. New workflows may choose `slug` or `generated` at commission time. A migration helper or documented refit path should support a dry-run first, report duplicate effective IDs, include archived and folder-form entities, and only then rewrite README `id-style` plus entity frontmatter. Sequential-to-generated migration should preserve the old value in `legacy-id` so old numeric references remain searchable during transition. Slug migration should reject workflows whose slugs are not unique under the flat/folder discovery rules.
+Reference resolution should be implemented as a status CLI helper, not runtime-only prose. Add `status --resolve <ref>` as the canonical resolver used by FO logic and available to operators. With `--workflow-dir`, resolution is limited to one workflow. With `--root`, it discovers workflows and requires either an unambiguous match or a workflow qualifier of the form `{workflow-basename}::{ref}`; if two workflows share a basename, the qualifier must be an absolute workflow path followed by `::{ref}`. The resolver prints a single machine-readable line containing `workflow=`, `scope=active|archived`, `slug=`, `id=`, and `path=`, or exits 1 with all candidates listed on stderr.
+
+Within one workflow, resolver precedence should preserve current slug-based operations: exact active slug wins over ID/prefix matches unless the caller uses `id:{value}` or `slug:{value}`. Exact effective ID resolves next. For `generated`, `prefix:{value}` or a bare value of at least four generated-ID characters may resolve as a unique ID prefix; ambiguous prefixes fail and list all matching slugs/IDs. `--set` and `--archive` should route their entity argument through the same resolver in active-only scope, so they can accept slug, exact ID, or unique generated prefix, but they must refuse archived matches with an "archived entity is read-only" error. `status --resolve --archived <ref>` is read-only and includes archived entities; if the same reference matches both active and archived entities, it fails unless the caller qualifies with `active:{ref}` or `archive:{ref}`.
+
+Folder-form entities should use the existing discovery rule: `{slug}/index.md` is the canonical entity file, and folder form wins over a same-slug flat file with a warning. Archived folder entities live under `_archive/{slug}/index.md`. Every validation check, `--next-id` check, `--boot` candidate, status display, and resolver should use the same discovery path so flat, folder, active, and archived entities cannot disagree.
+
+Cross-workflow references are not globally unique. A resolver operating above one workflow must require `--workflow-dir`, an unambiguous discovered workflow, or the `{workflow}::{ref}` qualifier described above. If two workflows contain the same slug, exact ID, or generated prefix, the unqualified `--root ... --resolve <ref>` form must fail and list candidate workflow directories. This avoids treating generated IDs as globally meaningful when Spacedock's workflow directory is the real namespace.
+
+Migration is intentionally not an executable rewrite feature in this task. Existing workflows with `id-style: sequential` require no data rewrite. New workflows may choose `slug` or `generated` at commission time. The deliverable should document manual migration guidance and provide validation that makes manual migration safe: duplicate effective IDs, invalid generated IDs, missing required IDs, flat/folder conflicts, and active/archive conflicts are caught before normal status output. Sequential-to-generated rewrite automation, `legacy-id` population, and bulk README/entity frontmatter changes should be a separate tracked task or refit enhancement, not part of this implementation.
 
 Backward compatibility matters more than making the new abstraction elegant. Existing status output, `--next`, `--boot`, `--where`, `--set`, `--archive`, and first-officer task creation should continue to work for sequential workflows. The phrase "next ID" can remain the CLI name for compatibility, but the docs and runtime prompts should stop saying it is always sequential once strategies exist.
 
@@ -84,29 +94,33 @@ Verified by: status-script fixtures with omitted `id` fields show default and `-
 **AC-4 - `id-style: generated` stores stable short generated IDs and generates new candidates without central allocation.**
 Verified by: status-script tests run `status --next-id` under generated style with a deterministic RNG hook, assert the output matches the configured generated alphabet/length, assert active plus archived collisions are retried, and assert forced retry exhaustion fails loudly.
 
-**AC-5 - Entity reference resolution is deterministic for slugs, exact IDs, and generated ID prefixes.**
-Verified by: resolver tests cover exact slug, exact ID, unique generated prefix, ambiguous generated prefix, unknown reference, active-only mutation resolution, and read-only archived resolution, with assertions on the selected canonical path or error candidate list.
+**AC-5 - Invalid or duplicate effective IDs are caught before status output is trusted.**
+Verified by: `tests/test_status_script.py` fixtures for active flat files, active `{slug}/index.md`, archived `.md` files, and archived `{slug}/index.md` show `status --validate` exits 1 with slug/id/path evidence for duplicate generated IDs, invalid generated IDs, missing required IDs, and sequential allocation conflicts; default status output, `--archived`, `--next`, `--next-id`, and `--boot` fail before printing partial normal output on the same invalid fixtures.
 
-**AC-6 - Archived and folder-form entities participate in ID uniqueness and resolution consistently.**
-Verified by: fixtures containing active flat files, active `{slug}/index.md`, archived `.md` files, archived `{slug}/index.md`, and flat/folder same-slug conflicts show status display, `--next-id`, resolver behavior, and warnings all use the same folder-preferred discovery rule.
+**AC-6 - `--boot` and first-officer task creation are strategy-aware.**
+Verified by: boot tests show `ID_STYLE:` plus `NEXT_ID:` for sequential, generated, and slug workflows; generated boot output contains a valid generated candidate, slug boot output contains `NEXT_ID: n/a (id-style: slug)`, direct slug `--next-id` exits non-zero, and static first-officer reference tests show creation calls `--next-id` for sequential/generated but not for slug.
 
-**AC-7 - Cross-workflow ambiguity is rejected rather than guessed.**
-Verified by: temp-root fixtures with two discovered workflows containing the same slug, exact ID, or generated prefix show unqualified resolution fails with both workflow paths, while an explicit `--workflow-dir` or workflow qualifier resolves the intended entity.
+**AC-7 - Entity reference resolution is deterministic through `status --resolve`.**
+Verified by: resolver tests cover exact slug precedence over ID/prefix, `id:` and `slug:` forced qualifiers, exact ID, unique generated prefix, ambiguous generated prefix, unknown reference, active-only `--set`/`--archive` resolution, archived-only mutation refusal, read-only `--resolve --archived`, and `active:`/`archive:` disambiguation, with assertions on the printed path or candidate-list error.
 
-**AC-8 - Migration behavior is explicit, auditable, and backward compatible.**
-Verified by: migration/refit tests cover dry-run duplicate detection, sequential-to-generated mapping with `legacy-id`, slug migration rejection on discovery conflicts, archived/folder inclusion, and no-op behavior for existing sequential workflows.
+**AC-8 - Cross-workflow ambiguity is rejected rather than guessed.**
+Verified by: temp-root fixtures with two discovered workflows containing the same slug, exact ID, or generated prefix show `--root ... --resolve <ref>` fails with both workflow paths, while explicit `--workflow-dir`, `{workflow-basename}::{ref}`, or absolute-path workflow qualifiers resolve the intended entity.
 
-**AC-9 - Concurrent or offline task creation is safer under generated IDs than under sequential IDs.**
-Verified by: a filesystem-level test simulates two isolated creators adding different entity files from the same starting workflow; generated style yields distinct IDs without a shared counter, while a forced generated-ID duplicate is detected by the validation/check command before status output can silently present duplicate effective IDs.
+**AC-9 - Migration scope is documented and validation-backed without shipping a rewrite helper.**
+Verified by: static docs tests confirm this task documents manual migration guidance and explicitly defers rewrite automation; validation fixtures prove duplicate effective IDs, invalid generated IDs, missing IDs, archived/folder conflicts, and flat/folder conflicts are reported without modifying README or entity frontmatter.
+
+**AC-10 - Concurrent or offline task creation is safer under generated IDs than under sequential IDs.**
+Verified by: a filesystem-level test simulates two isolated creators adding different entity files from the same starting workflow; generated style yields distinct IDs without a shared counter, while a forced generated-ID duplicate is detected by `status --validate` and by fail-fast default/`--next`/`--boot` validation before status output can silently present duplicate effective IDs.
 
 ## Test plan
 
 Most proof should be offline unit and fixture tests because the behavior is local file parsing, ID generation, and deterministic reference resolution. Live E2E tests are not required unless implementation also changes first-officer runtime dialogue around filing new tasks.
 
-- Add focused status-script tests in `tests/test_status_script.py` for README `id-style` parsing, `--next-id` delegation, generated collision retry, slug-style non-applicability, resolver behavior, archived entities, and folder-form entities. Estimated cost: medium; the file already has helpers for active, archived, and folder-form workflows.
-- Add static content tests in `tests/test_agent_content.py` and commission-template tests so docs and runtime references no longer hard-code "sequential" where they mean strategy-dependent "new ID". Estimated cost: low.
-- Add migration/refit tests only if the implementation includes an executable migration helper. If migration is documented but not automated, the test should be a static contract test plus a status validation test that detects duplicate or invalid effective IDs before migration. Estimated cost: low to medium depending on scope.
-- Add one concurrency simulation using temporary directories or branches, not live agents. It should copy the same starting workflow into two isolated locations, create entities under generated style, merge/copy the files into one workflow, and run the status validation/resolver checks. Estimated cost: medium.
+- Add focused status-script tests in `tests/test_status_script.py` for README `id-style` parsing, `--next-id` delegation, generated collision retry, slug-style non-applicability, `--boot` `ID_STYLE`/`NEXT_ID` output, `--validate`, `--resolve`, archived entities, and folder-form entities. Estimated cost: medium to high; the file already has helpers for active, archived, boot, and folder-form workflows.
+- Add fail-fast validation tests proving default status output, `--archived`, `--next`, `--next-id`, and `--boot` refuse invalid generated/sequential/slug effective-ID state before printing normal output. Estimated cost: medium.
+- Add static content tests in `tests/test_agent_content.py` and commission-template tests so docs and runtime references no longer hard-code "sequential" where they mean strategy-dependent "new ID", and so FO creation behavior is documented for sequential, generated, and slug workflows. Estimated cost: low.
+- Add migration-scope tests as static docs checks plus status validation fixtures only. This task should not test README/entity rewrite automation because it does not ship an executable migration helper. Estimated cost: low.
+- Add one concurrency simulation using temporary directories or branches, not live agents. It should copy the same starting workflow into two isolated locations, create entities under generated style, merge/copy the files into one workflow, and run `status --validate`, default status, `--next`, and `--boot` checks. Estimated cost: medium.
 - Run `uv run pytest tests/test_status_script.py -q` during implementation for the core behavior, then `make test-static` before validation. If first-officer live creation prompts change materially, add a small runtime fixture or transcript-level test before considering expensive live E2E.
 
 ## Stage Report: ideation
@@ -121,3 +135,16 @@ Most proof should be offline unit and fixture tests because the behavior is loca
 ### Summary
 
 The ideation output recommends a strategy layer over the existing `id-style` field and a 12-character Crockford Base32 generated style for distributed task creation. It keeps sequential workflows compatible, models issue #98 as the `slug` strategy, and defines resolver, archive, folder-form, cross-workflow, and migration behavior at a testable level.
+
+## Stage Report: ideation (repair)
+
+- DONE: Collision validation surface and behavior are explicit and testable across active/archived flat/folder entities.
+  Evidence: Behavior details now define `status --validate`, fail-fast display paths, error evidence, and active/archived flat/folder coverage; AC-5 and AC-10 test it.
+- DONE: `--boot` / `NEXT_ID` and FO task creation behavior are defined for sequential, slug, and generated styles.
+  Evidence: Behavior details now define `ID_STYLE`, strategy-specific `NEXT_ID`, direct `--next-id`, and FO creation rules; AC-6 tests it.
+- DONE: Resolver and migration scopes are concrete, internally consistent, and reflected in acceptance criteria/tests.
+  Evidence: Behavior details now define `status --resolve`, qualifiers, precedence, scope, and migration as docs plus validation only; AC-7 through AC-9 test those scopes.
+
+### Summary
+
+The repair makes the implementation surfaces concrete instead of relying on runtime prose: validation is `status --validate`, resolution is `status --resolve`, and boot output remains parseable through strategy-aware `NEXT_ID`. Migration scope is narrowed to documentation and validation support, leaving rewrite automation for a separate task.
