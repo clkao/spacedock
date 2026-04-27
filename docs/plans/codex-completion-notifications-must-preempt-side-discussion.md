@@ -10,6 +10,8 @@ score: 0.69
 worktree: .worktrees/spacedock-ensign-codex-completion-notifications-must-preempt-side-discussion
 issue:
 pr:
+blocked-on: https://github.com/openai/codex/issues/15723
+blocked-reason: Upstream Codex does not wake the parent turn on subagent completion; task 216 landed the local preemptible-wait mitigation instead.
 ---
 
 Follow-up to task 140.
