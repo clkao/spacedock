@@ -4,7 +4,7 @@ This file defines how the shared first-officer core executes on Pi.
 
 ## Runtime Shape
 
-Pi is a first-class runtime target. For the first slice, treat Pi worker identity as a Spacedock-owned handle layered over Pi session identity rather than assuming Claude-style teams or Codex-style native collaborator handles.
+Pi is a first-class runtime target. For the first slice, treat Pi's built-in session identity as the canonical worker handle. Spacedock should layer only a thin worker-label -> Pi-session mapping on top, rather than assuming Claude-style teams or Codex-style native collaborator handles.
 
 The Pi path must support:
 - fresh worker dispatch
@@ -18,7 +18,7 @@ Standing teammates are out of scope for the first Pi slice.
 
 ## Worker Model
 
-Use one Pi session per worker assignment. Persist enough metadata to reopen the same worker for routed reuse:
+Use one Pi session per worker assignment. Pi session id or session path is the canonical worker handle. Persist only the minimum extra metadata needed to reopen the same worker for routed reuse:
 - FO-owned worker label
 - logical dispatch id
 - worker key
@@ -27,6 +27,8 @@ Use one Pi session per worker assignment. Persist enough metadata to reopen the 
 - entity slug and stage
 - active / completed / shutdown state
 - a completion epoch or equivalent marker so reused follow-up completions are distinguishable from stale prior completions
+
+Do not build a second session system on top of Pi. The sidecar exists only to answer workflow questions such as "which Pi session currently backs `218-implementation/Ensign`?".
 
 ## Dispatch Adapter
 

@@ -1,5 +1,14 @@
 from __future__ import annotations
 
+"""Thin Spacedock mapping over Pi's built-in session persistence.
+
+Pi session ids / session files are the canonical worker handle. This module does
+not try to replace Pi's own session system or emulate Claude-style team state.
+It only records the workflow-specific association between an FO-owned worker
+label and the Pi session that currently backs it, plus the minimum extra state
+Spacedock needs for reuse/shutdown bookkeeping.
+"""
+
 import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -20,6 +29,8 @@ class WorkerSessionRecord:
 
 
 class PiSessionRegistry:
+    """Persist a minimal worker-label -> Pi-session mapping for Spacedock."""
+
     def __init__(self, path: Path):
         self.path = Path(path)
 

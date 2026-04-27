@@ -64,19 +64,19 @@ The runtime should expose a Spacedock-owned worker-handle model even if Pi itsel
 
 5. **Session continuity**
    - Interactive and batch runs both preserve enough identity to reopen a worker handle for reuse.
-   - The runtime handle may be a Pi session id plus local metadata.
+   - The runtime handle should be the Pi session id or session file itself, with only thin workflow metadata layered on top.
 
 6. **Worktree isolation**
    - The FO remains anchored at repo root.
    - Worktree-backed worker stages run with the worktree as their cwd.
 
-The likely Pi mapping is one Pi session per worker. Fresh dispatch creates or opens a worker session and sends a fully self-contained assignment. Wait drives that session until idle/completion. Reuse reopens the same session and sends the follow-up assignment. Shutdown is recorded explicitly in Spacedock-owned metadata even if the underlying Pi session file still exists.
+The likely Pi mapping is one Pi session per worker. Fresh dispatch creates or opens a worker session and sends a fully self-contained assignment. Wait drives that session until idle/completion. Reuse reopens the same session and sends the follow-up assignment. Shutdown is recorded explicitly in thin Spacedock workflow metadata even if the underlying Pi session file still exists.
 
 Architecturally, this suggests:
 
 - add `skills/first-officer/references/pi-first-officer-runtime.md`
 - add the corresponding Pi runtime branch in ensign runtime selection
-- introduce a small Pi worker adapter/registry layer that stores worker label, session id, cwd/worktree path, entity/stage, and active/completed/shutdown state
+- introduce a small Pi worker adapter plus a thin worker-label -> session mapping that stores session id/path, cwd/worktree path, entity/stage, and active/completed/shutdown state
 - add a `--runtime pi` branch in the live harness so tests can launch Pi and parse Pi-specific evidence while preserving shared behavioral assertions
 
 The first live behavior target is the gate-preflight sequence:
@@ -137,7 +137,7 @@ The design should prefer a thin adapter over a broad runtime abstraction rewrite
 
 The riskiest technical edges are:
 
-- Pi is session-oriented, so Spacedock must supply its own worker registry/handle semantics.
+- Pi is session-oriented, so Spacedock should use Pi sessions as canonical worker handles and add only the thinnest workflow mapping needed for labels and lifecycle bookkeeping.
 - Reuse must track a new completion epoch/turn boundary so a reopened session does not accidentally reuse stale completion evidence.
 - Shutdown may need to be defined at the Spacedock metadata layer even if Pi does not expose a native per-worker kill primitive identical to other runtimes.
 - Interactive and batch invocation can use different transport surfaces, but they should share one runtime contract and one worker metadata model.
@@ -145,7 +145,7 @@ The riskiest technical edges are:
 A reasonable implementation order is:
 
 - add Pi runtime contract files and runtime selection
-- add the Pi worker/session registry
+- add the thin Pi worker/session mapping
 - implement dispatch/wait/reuse/shutdown semantics
 - wire worktree-aware prompt/context assembly
 - add `--runtime pi` harness support
@@ -157,7 +157,7 @@ A reasonable implementation order is:
 - DONE: The task now names a bounded first-slice goal for Pi support instead of asking for undefined full parity.
   Evidence: `## Scope Boundary` defines first-class Pi support, worktrees, dispatch/wait/reuse/shutdown, and `tests/test_gate_guardrail.py --runtime pi` as the first proving target.
 - DONE: The proposed approach selects a thin first-class Pi adapter over a larger runtime rewrite or a throwaway Pi-only mode.
-  Evidence: `## Proposed Approach` defines the worker-handle/session model, runtime files, registry layer, harness branch, and first live behavior target.
+  Evidence: `## Proposed Approach` defines Pi sessions as the canonical worker handle, plus a thin label-to-session mapping, runtime files, harness branch, and first live behavior target.
 - DONE: Acceptance criteria and test plan express end-state properties with reproducible checks.
   Evidence: `## Acceptance criteria` pairs each end-state property with concrete verification, and `## Test Plan` separates static, unit/integration, harness, and live gate-preflight coverage.
 
@@ -177,8 +177,8 @@ This ideation pass reframes #147 as a minimum-runtime baseline problem rather th
   Evidence: `skills/first-officer/SKILL.md`, `skills/ensign/SKILL.md`, `skills/first-officer/references/pi-first-officer-runtime.md`, `skills/ensign/references/pi-ensign-runtime.md`, and `tests/conftest.py` now advertise/accept Pi.
 - DONE: Added an initial Pi harness entry that uses Pi JSON mode, explicit skill loading, and per-run session storage.
   Evidence: `scripts/test_lib.py` now provides `build_pi_first_officer_invocation_prompt()` and `run_pi_first_officer()`, and `tests/test_pi_runtime_harness.py` verifies the assembled command shape uses `pi --mode json --print --session-dir ... --skill ...`.
-- DONE: Added a minimal session-backed worker registry scaffold for Pi reuse/shutdown bookkeeping.
-  Evidence: `scripts/pi_session_registry.py` defines `WorkerSessionRecord` and `PiSessionRegistry`, and `tests/test_pi_session_registry.py` verifies metadata round-trip, active-again epoch bumps, and shutdown/unroutable behavior.
+- DONE: Added a minimal session-backed worker mapping scaffold for Pi reuse/shutdown bookkeeping.
+  Evidence: `scripts/pi_session_registry.py` defines `WorkerSessionRecord` and `PiSessionRegistry`, and `tests/test_pi_session_registry.py` verifies metadata round-trip, active-again epoch bumps, and shutdown/unroutable behavior without introducing a second session system.
 - FAILED: Live Pi workflow execution is not proven yet.
   Evidence: `tests/test_gate_guardrail.py --runtime pi` is not wired yet, and the current harness has no Pi log parser or completion/gate assertions beyond command-shape tests.
 - SKIPPED: Same-worker live routed follow-up and explicit shutdown on a real Pi session.
@@ -191,7 +191,7 @@ This pass established the initial Pi integration seam rather than full runtime b
 - a Pi FO launcher based on `pi --mode json --print`
 - explicit skill loading via `--skill {repo}/skills/first-officer`
 - per-run Pi session storage via `--session-dir {runner.test_dir}/pi-sessions`
-- a Spacedock-owned session registry (`PiSessionRegistry`) that maps FO worker labels to Pi session metadata and a `completion_epoch`
+- a thin Spacedock-owned worker-label -> Pi-session mapping (`PiSessionRegistry`) that records workflow metadata and a `completion_epoch` on top of Pi's native session persistence
 
 What is still missing is the live worker loop: a real Pi-dispatched ensign session, waiting/parsing of completion events, routed follow-up on the same Pi session, and gate-preflight proof in `tests/test_gate_guardrail.py --runtime pi`.
 
