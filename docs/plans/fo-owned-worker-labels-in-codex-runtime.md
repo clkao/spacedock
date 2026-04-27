@@ -1,13 +1,13 @@
 ---
 id: 137
 title: FO-owned worker labels in Codex runtime
-status: ideation
+status: implementation
 source: FO observation during task 136 dispatch on 2026-04-12
 score: 0.58
 started: 2026-04-15T03:21:24Z
 completed:
 verdict:
-worktree:
+worktree: .worktrees/spacedock-ensign-fo-owned-worker-labels-in-codex-runtime
 issue:
 pr:
 ---
