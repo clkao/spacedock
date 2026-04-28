@@ -128,6 +128,24 @@ All verification commands run **locally** — captain has explicitly requested l
 
 **What ships from #200:** xfail classifier widening (commit a, AC-1) + extended-thinking scrub (commit b, AC-6). FO prose surgery is explicitly out of scope for this task.
 
+## AC-4 addendum: root cause was test-harness, not model capability
+
+Post-implementation reconnaissance (captain-requested in-scope after the implementation stage) overturned the rationale captured above for Pattern A.
+
+**Revised Pattern A root cause: plugin-path leakage in the test harness.** When the test launches the FO subprocess with `--plugin-dir <repo_root>`, every Read/Skill tool result the FO emits includes absolute paths under the spacedock checkout (e.g. `/Users/.../spacedock/.worktrees/.../skills/first-officer/...` or `/home/runner/work/spacedock/spacedock/skills/...`). Haiku-bare under `--effort low` then treats the most-frequent absolute path in its context as "the project," ignores the `git rev-parse --show-toplevel` result it just computed (which correctly returns the test_project_dir), and operates on the spacedock repo's real `docs/plans/` workflow.
+
+The `{PWD}` brace-bug is a separate, incidental shell-template-completion failure when haiku tries to write a defensive cd. Pattern A's wrong-discovery is upstream of that.
+
+**Fix shipped:** `_stage_plugin` in `scripts/test_lib.py` (commit 89f04009) copies the spacedock plugin into the per-test isolated `clean_home/spacedock-plugin/` and routes `--plugin-dir` to the staged path. The clean_home tmpdir is per-test-isolated and shares no path prefix with the spacedock checkout, so haiku no longer has a real-repo location to gravitate toward.
+
+**Local verification:** `pytest tests/test_gate_guardrail.py --runtime claude --model haiku --effort low --team-mode bare --runxfail` → `1 passed in 50.48s` with all 7 inner checks green. Previously this same invocation FAILED 1/7 (PR #132 CI run `24610475442`) and FAILED 2/7 (PR #159 CI run `25058370658`).
+
+**Consequence: removed the gate_guardrail xfail.** Commit 9768af2f drops the `pytest.xfail` block on test_gate_guardrail since the underlying failure is fixed. Test_feedback_keepalive xfail stays in place — its root cause is the keep-alive Bash-probe discipline (anthropics/claude-code#26426), unrelated to plugin-path leakage.
+
+**Original AC-4 "defer FO prose surgery" decision still stands**, but the rationale is now: "Pattern A's root cause is in the test harness; FO prose changes would not have addressed it. The harness fix lands instead." Pattern B (test_feedback_keepalive) rationale is unchanged — still a haiku tool-shape compression issue duplicating #160.
+
+**Stretch scope flag:** these three commits (staged-plugin, gate_guardrail xfail removal, this addendum) exceeded the implementation dispatch's literal scope ("test markers and AC-6 scrub, not FO surgery"). They were authorized in-conversation by the captain after the implementation stage report was filed. Splitting them into a follow-up PR is an option if scope-discipline matters for review.
+
 ## Stage Report: ideation
 
 - DONE: Test plan names a concrete LOCAL test command per AC (especially AC-1's grep and AC-5's `make test-static`) so an implementer can verify each acceptance criterion locally without round-tripping through CI.
@@ -166,3 +184,18 @@ Three commits, one concern each: (a) f13d2d4b widened xfail classifier on both t
 ### Summary
 
 PASSED. All six acceptance criteria reproduce cleanly in this worktree. Static suite green (513 passed independently), bare-haiku gate_guardrail XFAIL across all three model-name variants (`haiku`, `claude-haiku-4-5`, `claude-haiku-4-5-20251001`), teams-haiku keepalive XFAIL on both haiku variants, AC-6 `<thinking>` strip present at gate_guardrail.py:104 with AC-citing comment. AC-4 defer decision and AC-2/AC-3 root-cause documentation are intact in the entity body. One minor wording note flagged on the implementation report's keepalive citation (test is teams_mode-only) — does not affect AC satisfaction.
+
+## Stage Report: implementation (cycle 2 — captain-authorized scope expansion)
+
+- DONE: Investigate Pattern A root cause beyond "model capability gap" hypothesis (in-scope per captain after implementation stage signed off).
+  Read FO skill prose, reproduced `status --discover` behavior from various cwds, inspected the FO log of a one-off live haiku-bare run (with patched fixture as a probe). Found the actual trigger is plugin-path leakage via `--plugin-dir <repo_root>`: absolute spacedock-checkout paths in haiku's tool-result context outweigh the `git rev-parse` result for haiku-bare under low effort. Documented in the AC-4 addendum section above.
+- DONE: Implement and verify the test-harness fix.
+  Commit 89f04009 added `_stage_plugin` and `_plugin_dir_for` to `scripts/test_lib.py`; `_isolated_claude_env(repo_root)` now copies `.claude-plugin/`, `skills/`, `agents/`, `references/`, `mods/` into `clean_home/spacedock-plugin/` and writes the staged path into env. Two FO call sites use `_plugin_dir_for(env, runner.repo_root)` to compute `--plugin-dir`. Excluded `plugins/` from staging because `plugins/spacedock` is a self-symlink to `..` that caused `shutil.copytree` to recurse infinitely.
+- DONE: Live verify on the previously-failing case.
+  `unset CLAUDECODE && uv run pytest tests/test_gate_guardrail.py --runtime claude --model haiku --effort low --team-mode bare --runxfail -v` → `1 passed in 50.48s`, all 7 inner checks green. Compares to original Pattern A failures: PR #132 CI 1/7 checks, PR #159 CI 2/6 checks. Static suite re-run green: `513 passed in 24.20s`.
+- DONE: Remove the now-obsolete xfail.
+  Commit 9768af2f drops the `pytest.xfail` block on test_gate_guardrail (and the unused `request` fixture parameter). Test_feedback_keepalive xfail kept — different root cause (anthropics/claude-code#26426 keep-alive discipline), not addressed by plugin staging.
+
+### Summary
+
+Three additional commits beyond the original implementation scope, authorized in-conversation by the captain after the original stage report was filed: (89f04009) `_stage_plugin` test-harness fix that copies the plugin into per-test-isolated `clean_home/spacedock-plugin/` so absolute paths in haiku's tool-result context no longer leak the spacedock checkout location; (9768af2f) removed the test_gate_guardrail xfail since the underlying failure is fixed (haiku-bare now PASSES 7/7 in 50s); (this commit) entity body addendum documenting the revised Pattern A root cause and the changed AC-4 rationale (still "defer FO prose surgery" — but because the fix lives in the test harness, not because Pattern A was a model gap). Test_feedback_keepalive xfail remains because it tracks a separate, unrelated bug.
