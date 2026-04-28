@@ -49,17 +49,23 @@ That PR #159 failure also exposed a marker/harness gap: the known xfail was guar
 
 ## Acceptance criteria
 
-**AC-1 — Near-term xfail lands with #190 PR (#132).**
-The xfail guard in both tests uses a single classifier shape — `"haiku" in model.lower()` — so it classifies the pytest alias `haiku`, the canonical id `claude-haiku-4-5`, and concrete runtime variants like `claude-haiku-4-5-20251001` as the same xfail class. No alias-by-alias `or` chains, no separate guards per variant. The reason string cites this task (`#200`).
+**AC-1 — Haiku-bare end state on guardrail suite: gate_guardrail PASSES, feedback_keepalive XFAILS.**
+
+`test_gate_guardrail` PASSES on haiku-bare across all three model-name variants (`haiku`, `claude-haiku-4-5`, `claude-haiku-4-5-20251001`). No xfail guard remains on this test — the underlying Pattern A bootstrap failure is fixed at the test-harness layer by staging the spacedock plugin under each FO subprocess's isolated HOME (see AC-4 addendum for root cause; commit `89f04009`).
+
+`test_feedback_keepalive` continues to XFAIL on haiku across the same three model-name variants, guarded by a single classifier expression `"haiku" in model.lower()` (no alias-by-alias `or` chains, no separate guards per variant). Reason string cites this task (`#200`). The underlying root cause is the haiku-4-5 keep-alive Bash-probe-discipline drop at `system init` cycle boundaries (anthropics/claude-code#26426 class), unrelated to plugin-path leakage and not addressed by the harness fix.
 
 Verified by:
-- `grep -nE '"haiku" in model\.lower\(\)' tests/test_gate_guardrail.py tests/test_feedback_keepalive.py` returns at least one match per file.
-- `grep -nE '#200' tests/test_gate_guardrail.py tests/test_feedback_keepalive.py` returns at least one match per file (reason-string citation).
-- Local invocation classifies all three variants as XFAIL (not FAILED) on bare mode:
-  - `unset CLAUDECODE && uv run pytest tests/test_gate_guardrail.py --runtime claude --model haiku --effort low -v`
-  - `unset CLAUDECODE && uv run pytest tests/test_gate_guardrail.py --runtime claude --model claude-haiku-4-5 --effort low -v`
-  - `unset CLAUDECODE && uv run pytest tests/test_gate_guardrail.py --runtime claude --model claude-haiku-4-5-20251001 --effort low -v`
-  - Same three invocations against `tests/test_feedback_keepalive.py`.
+- `grep -nE '"haiku" in model\.lower\(\)' tests/test_gate_guardrail.py` returns no matches; the same grep on `tests/test_feedback_keepalive.py` returns at least one match.
+- `grep -nE '#200' tests/test_feedback_keepalive.py` returns at least one match (reason-string citation).
+- Local invocation reports `test_gate_guardrail` PASSES on haiku-bare across all three variants:
+  - `unset CLAUDECODE && uv run pytest tests/test_gate_guardrail.py --runtime claude --model haiku --effort low --team-mode bare -v`
+  - `unset CLAUDECODE && uv run pytest tests/test_gate_guardrail.py --runtime claude --model claude-haiku-4-5 --effort low --team-mode bare -v`
+  - `unset CLAUDECODE && uv run pytest tests/test_gate_guardrail.py --runtime claude --model claude-haiku-4-5-20251001 --effort low --team-mode bare -v`
+- Local invocation reports `test_feedback_keepalive` XFAIL (not FAILED) across the same three variants (test is `@pytest.mark.teams_mode`-only, so collection requires `--team-mode teams`):
+  - `unset CLAUDECODE && uv run pytest tests/test_feedback_keepalive.py --model haiku --effort low --team-mode teams -v`
+  - `unset CLAUDECODE && uv run pytest tests/test_feedback_keepalive.py --model claude-haiku-4-5 --effort low --team-mode teams -v`
+  - `unset CLAUDECODE && uv run pytest tests/test_feedback_keepalive.py --model claude-haiku-4-5-20251001 --effort low --team-mode teams -v`
 - PR #132 CI goes green on claude-live-bare.
 
 **AC-2 — Pattern A root cause documented with reproducible evidence.**
@@ -199,6 +205,8 @@ PASSED. All six acceptance criteria reproduce cleanly in this worktree. Static s
 ### Summary
 
 Three additional commits beyond the original implementation scope, authorized in-conversation by the captain after the original stage report was filed: (89f04009) `_stage_plugin` test-harness fix that copies the plugin into per-test-isolated `clean_home/spacedock-plugin/` so absolute paths in haiku's tool-result context no longer leak the spacedock checkout location; (9768af2f) removed the test_gate_guardrail xfail since the underlying failure is fixed (haiku-bare now PASSES 7/7 in 50s); (this commit) entity body addendum documenting the revised Pattern A root cause and the changed AC-4 rationale (still "defer FO prose surgery" — but because the fix lives in the test harness, not because Pattern A was a model gap). Test_feedback_keepalive xfail remains because it tracks a separate, unrelated bug.
+
+**Captain-directed AC-1 text fix (post-validation cycle 2):** AC-1's literal text was rewritten to match the cycle-2 end state — `test_gate_guardrail` PASSES on haiku-bare across all three model-name variants (no xfail), `test_feedback_keepalive` XFAILS on the same three variants pending #26426. `Verified by:` clauses updated accordingly. Validation cycle 2 had flagged a spirit-vs-text divergence on AC-1; this rewrite closes that gap. AC-2 through AC-6 untouched.
 
 ## Stage Report: validation (cycle 2 — re-verifying captain-authorized scope expansion)
 
