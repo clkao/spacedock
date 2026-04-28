@@ -335,3 +335,38 @@ Recommendation: `REJECTED`. The generated, slug, resolver, docs, and offline tes
 ### Summary
 
 The repair narrows sequential duplicate validation so archived-only historical duplicates do not invalidate existing workflows or block normal status operations. Generated ID validation remains strict for duplicate full stored IDs and invalid generated IDs, and generated display prefixes still use shortest unique prefixes with `MIN_PREFIX: 2`.
+
+## Stage Report: validation (recheck 1)
+
+- DONE: AC-2 repair is independently verified with command evidence against the self-workflow or equivalent fixture.
+  Evidence: Self-workflow `--where id=217`, `--boot`, `--next`, `--next-id`, `--resolve 217`, and `--validate` all exited 0 despite archived duplicate sequential IDs `033` and `131`; `--boot`/`--next-id` reported `220`.
+- DONE: Generated duplicate validation and `MIN_PREFIX: 2` dynamic prefix behavior remain independently verified.
+  Evidence: Focused generated tests for duplicate full IDs, fail-fast status paths, shortest active/archive prefixes, and boot `MIN_PREFIX: 2` passed: 4 tests plus 5 subtests.
+- DONE: Validation report gives concrete test results and a clear `PASSED` or `REJECTED` recommendation.
+  Evidence: This recheck report records a `PASSED` recommendation after focused checks and `make test-static`.
+- DONE: AC-1 - Workflows have a documented `id-style` strategy contract covering `sequential`, `slug`, and `generated`.
+  Evidence: `uv run pytest tests/test_agent_content.py tests/test_commission_template.py -q` passed 55 tests covering style docs, FO creation docs, and generated examples.
+- DONE: AC-2 - Existing sequential workflows keep their current behavior.
+  Evidence: Real `docs/plans` sequential workflow now permits normal status operations with historic archived duplicates; focused sequential fixture tests passed, including active duplicate rejection.
+- DONE: AC-3 - `id-style: slug` treats the slug as the effective ID and makes `status --next-id` non-applicable.
+  Evidence: `uv run pytest tests/test_status_script.py -q` passed 173 tests, including slug-style status, where-filter, boot, and direct `--next-id` assertions.
+- DONE: AC-4 - `id-style: generated` stores full stable generated IDs and displays shortest unique address prefixes.
+  Evidence: Generated tests assert 24-character stored IDs, collision retry/exhaustion, and shortest unique prefixes with minimum length 2.
+- DONE: AC-5 - Invalid or duplicate effective IDs are caught before status output is trusted.
+  Evidence: Generated duplicate full IDs still fail `--validate` and fail-fast output paths; sequential duplicate groups involving active entities and non-numeric IDs still fail validation.
+- DONE: AC-6 - `--boot` and first-officer task creation are strategy-aware.
+  Evidence: Boot/status tests plus static FO docs tests passed, including `ID_STYLE`, strategy-dependent `NEXT_ID`, and generated `MIN_PREFIX: 2`.
+- DONE: AC-7 - Entity reference resolution is deterministic through `status --resolve`.
+  Evidence: Resolver tests passed for slug precedence, forced qualifiers, generated prefix minimum/ambiguity, archived disambiguation, and mutation resolution.
+- DONE: AC-8 - Cross-workflow ambiguity is rejected rather than guessed.
+  Evidence: Root resolver tests passed for duplicate slugs, duplicate generated prefixes/full IDs, basename qualifiers, and absolute path qualifiers.
+- DONE: AC-9 - Migration scope is documented and validation-backed without shipping a rewrite helper.
+  Evidence: Static refit/commission docs tests passed for manual migration, validation-backed style changes, and deferred rewrite automation.
+- DONE: AC-10 - Concurrent or offline task creation is safer under generated IDs than under sequential IDs.
+  Evidence: Generated concurrency simulation remains covered in the full status-script suite and passed with prefix growth after merge.
+- DONE: AC-11 - Commission/refit documentation preserves concrete style-selection and generated-ID examples.
+  Evidence: Static template tests passed for all three style labels, 24-character Crockford examples, `MIN_PREFIX: 2`, prefix lengthening, and stable stored IDs; `rg` found no `fixed 12` or `12-character` wording in `skills/`, `tests/`, `references/`, or `docs/plans/README.md`.
+
+### Summary
+
+Recommendation: `PASSED`. Repair commit `815c0d1e` fixes the AC-2 regression by grandfathering archived-only sequential duplicate IDs while preserving active duplicate rejection and strict generated full-ID validation. Verification passed with `tests/test_status_script.py` = 173 passed/15 subtests, docs/template tests = 55 passed, and `make test-static` = 533 passed/26 deselected/15 subtests.
