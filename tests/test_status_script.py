@@ -640,6 +640,50 @@ class TestIdStyleStrategies(unittest.TestCase):
             self.assertIn('duplicate id', result.stderr)
             self.assertIn('non-numeric sequential id', result.stderr)
 
+    def test_sequential_archived_duplicate_ids_do_not_block_normal_operations(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            make_pipeline(
+                tmpdir,
+                readme_with_id_style('sequential'),
+                entities={
+                    'target.md': entity('217', 'Target', 'backlog', '0.50'),
+                    'highest.md': entity('219', 'Highest', 'done', '0.10'),
+                },
+                archived={
+                    'old-a.md': entity('033', 'Old A', 'done'),
+                    'old-b.md': entity('033', 'Old B', 'done'),
+                    'old-c.md': entity('131', 'Old C', 'done'),
+                    'old-d.md': entity('131', 'Old D', 'done'),
+                },
+            )
+
+            where = run_status(tmpdir, '--where', 'id=217', script_path=self.script_path)
+            self.assertEqual(where.returncode, 0, where.stderr)
+            self.assertIn('target', where.stdout)
+            self.assertNotIn('duplicate id', where.stderr)
+
+            boot = run_status(tmpdir, '--boot', script_path=self.script_path)
+            self.assertEqual(boot.returncode, 0, boot.stderr)
+            self.assertIn('ID_STYLE: sequential', boot.stdout)
+            self.assertIn('NEXT_ID: 220', boot.stdout)
+
+            next_result = run_status(tmpdir, '--next', script_path=self.script_path)
+            self.assertEqual(next_result.returncode, 0, next_result.stderr)
+            self.assertIn('target', next_result.stdout)
+
+            next_id = run_status(tmpdir, '--next-id', script_path=self.script_path)
+            self.assertEqual(next_id.returncode, 0, next_id.stderr)
+            self.assertEqual(next_id.stdout, '220\n')
+
+            resolved = run_status(tmpdir, '--resolve', '217', script_path=self.script_path)
+            self.assertEqual(resolved.returncode, 0, resolved.stderr)
+            self.assertIn('slug=target', resolved.stdout)
+            self.assertIn('id=217', resolved.stdout)
+
+            validation = run_status(tmpdir, '--validate', script_path=self.script_path)
+            self.assertEqual(validation.returncode, 0, validation.stderr)
+            self.assertEqual(validation.stdout, 'VALID\n')
+
 
 class TestResolveOption(unittest.TestCase):
     """Test status --resolve reference resolution."""

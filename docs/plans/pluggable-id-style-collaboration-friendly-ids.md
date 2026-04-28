@@ -322,3 +322,16 @@ Recommendation: `REJECTED`. The generated, slug, resolver, docs, and offline tes
 ### Feedback Cycles
 
 - Cycle 1 (2026-04-27T23:59:27Z): Validation rejected implementation for AC-2. Route back to implementation to preserve existing sequential self-workflow behavior despite historic archived duplicate IDs `131` and `033`, while keeping strict generated-ID duplicate validation and the approved `MIN_PREFIX: 2` generated display behavior.
+
+## Stage Report: implementation (repair 1)
+
+- DONE: AC-2 backward compatibility is repaired for existing sequential workflows with historic archived duplicate IDs, without weakening generated-ID strictness.
+  Evidence: Sequential validation now ignores archived-only duplicate numeric IDs but still rejects duplicate groups involving active sequential entities; exact self-workflow commands for `--where id=217`, `--boot`, `--next`, `--next-id`, and `--resolve 217` returned output.
+- DONE: Focused tests cover the repaired sequential duplicate-archive behavior and still cover generated duplicate validation plus `MIN_PREFIX: 2` prefix display behavior.
+  Evidence: `tests/test_status_script.py::TestIdStyleStrategies` adds archived-only sequential duplicate coverage for `--where`, `--boot`, `--next`, `--next-id`, `--resolve`, and `--validate`; focused generated duplicate and prefix tests passed.
+- DONE: Append a new `## Stage Report: implementation (repair 1)` section accounting for this checklist with DONE/SKIPPED/FAILED evidence, and commit all repair changes before reporting completion.
+  Evidence: This report was appended to the entity body; repair commit follows after `uv run pytest tests/test_status_script.py -q` and `make test-static`.
+
+### Summary
+
+The repair narrows sequential duplicate validation so archived-only historical duplicates do not invalidate existing workflows or block normal status operations. Generated ID validation remains strict for duplicate full stored IDs and invalid generated IDs, and generated display prefixes still use shortest unique prefixes with `MIN_PREFIX: 2`.

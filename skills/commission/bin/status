@@ -667,7 +667,7 @@ def validate_workflow(workflow_dir, git_root, id_style):
     generated_display = compute_generated_display_ids(entities) if id_style == 'generated' else {}
 
     if id_style == 'sequential':
-        seen = {}
+        by_id = {}
         for entity in entities:
             stored_id = entity.get('_stored_id', entity.get('id', ''))
             if not stored_id:
@@ -676,11 +676,14 @@ def validate_workflow(workflow_dir, git_root, id_style):
             if not stored_id.isdigit():
                 errors.append(entity_evidence(entity, workflow_dir, 'non-numeric sequential id'))
                 continue
-            if stored_id in seen:
-                errors.append(entity_evidence(seen[stored_id], workflow_dir, 'duplicate id'))
+            by_id.setdefault(stored_id, []).append(entity)
+        for group in by_id.values():
+            if len(group) < 2:
+                continue
+            if not any(entity.get('_scope') == 'active' for entity in group):
+                continue
+            for entity in group:
                 errors.append(entity_evidence(entity, workflow_dir, 'duplicate id'))
-            else:
-                seen[stored_id] = entity
     elif id_style == 'slug':
         seen = {}
         for entity in entities:
