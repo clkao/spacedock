@@ -322,6 +322,7 @@ Recommendation: `REJECTED`. The generated, slug, resolver, docs, and offline tes
 ### Feedback Cycles
 
 - Cycle 1 (2026-04-27T23:59:27Z): Validation rejected implementation for AC-2. Route back to implementation to preserve existing sequential self-workflow behavior despite historic archived duplicate IDs `131` and `033`, while keeping strict generated-ID duplicate validation and the approved `MIN_PREFIX: 2` generated display behavior.
+- Cycle 2 (2026-04-28T04:40:57Z): Captain rejected the public/API shape after validation passed. Route back to implementation to replace `id-style: generated` with `id-style: sd-b32` and change the stored-ID source from pure OS-random/CSPRNG tokens to a SHA-derived Spacedock Base32 scheme, while preserving shortest unique display/address prefixes with `MIN_PREFIX: 2`.
 
 ## Stage Report: implementation (repair 1)
 
