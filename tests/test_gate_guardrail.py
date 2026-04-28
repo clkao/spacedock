@@ -38,7 +38,7 @@ def test_gate_guardrail(test_project, runtime, model, effort, request):
         import os as _os
         _env = _os.environ.get("CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS", "").strip().lower()
         resolved_team_mode = "teams" if _env in ("1", "true") else "bare"
-    if runtime == "claude" and model == "claude-haiku-4-5" and resolved_team_mode in ("bare", "teams"):
+    if runtime == "claude" and "haiku" in model.lower() and resolved_team_mode in ("bare", "teams"):
         pytest.xfail(
             reason=(
                 "pending #200 — haiku FO bootstrap failure "
