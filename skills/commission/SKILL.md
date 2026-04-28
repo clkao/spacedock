@@ -123,13 +123,13 @@ After collecting answers, derive all remaining values from the mission context:
 - `{dir}` — `docs/{mission-slug}/` where `{mission-slug}` is the mission condensed to a short lowercase hyphenated directory name.
 - `{captain}` — "Captain".
 - `{id_style}` — choose explicitly with {captain}. Offer:
-  - `generated` (recommended for collaborative workflows): use when multiple people or agents may create entities across branches, worktrees, offline edits, or long-running projects.
+  - `sd-b32` (recommended for collaborative workflows): use when multiple people or agents may create entities across branches, worktrees, offline edits, or long-running projects.
   - `sequential` (compatibility/default): use when the workflow is single-writer, small, or needs continuity with existing numeric IDs. This is the non-interactive default when no collaboration signal is present and no `--id-style` was provided.
   - `slug` (canonical filename): use when the slug is already the durable identity, such as named projects, semantically numbered episodes, or workflows with single-digit or low double-digit entity counts.
 
-Recommend `generated` when the workflow has worktree stages, PR/merge mods, team-mode agents, or {captain} mentions collaboration, concurrency, branches, worktrees, offline editing, or multiple creators. Generated IDs are 24-character lowercase Crockford Base32 values stored in entity frontmatter; the status viewer displays and accepts the shortest unique prefix with `MIN_PREFIX: 2`.
+Recommend `sd-b32` when the workflow has worktree stages, PR/merge mods, team-mode agents, or {captain} mentions collaboration, concurrency, branches, worktrees, offline editing, or multiple creators. SD-B32 means Spacedock Base32: stored IDs are 24-character lowercase values derived from SHA-256 digest material and formatted with Spacedock's human-safe alphabet `0123456789abcdefghjkmnpqrstvwxyz`; the status viewer displays and accepts the shortest unique prefix with `MIN_PREFIX: 2`.
 
-Use these exact prompt labels: generated (recommended for collaborative workflows), sequential (compatibility/default), and slug (canonical filename).
+Use these exact prompt labels: sd-b32 (recommended for collaborative workflows), sequential (compatibility/default), and slug (canonical filename).
 
 Present the full summary with all derived values. Use plain language for stage behavior — do not expose implementation vocabulary like `worktree`, `gate`, `fresh`, or `feedback-to`:
 
@@ -277,10 +277,10 @@ Every {entity_label} file has YAML frontmatter. Fields are documented below; see
 The `id-style` frontmatter setting controls the operator-facing ID strategy:
 
 - `sequential`: `id` is required and stores the next zero-padded numeric value from `status --next-id`, counting active and archived entities.
-- `generated`: `id` is required and stores the full stable 24-character lowercase Crockford Base32 value from `status --next-id`. Status tables show shorter display/address prefixes computed from active plus archived entities. `status --boot` reports `ID_STYLE: generated`, `NEXT_ID: {candidate}`, and `MIN_PREFIX: 2`.
+- `sd-b32`: `id` is required and stores the full stable 24-character lowercase SD-B32 stored ID from `status --next-id --id-seed <slug-or-title>`. SD-B32 is Spacedock Base32: SHA-256 digest material formatted with Spacedock's human-safe alphabet `0123456789abcdefghjkmnpqrstvwxyz`. Status tables show shorter display/address prefixes computed from active plus archived entities. `status --boot` reports `ID_STYLE: sd-b32`, `NEXT_ID: {candidate}`, and `MIN_PREFIX: 2`.
 - `slug`: `id` is optional; the effective ID is the entity slug. `status --next-id is not applicable for id-style: slug` because the slug comes from the title.
 
-Generated display/address prefixes can lengthen after another branch adds a colliding prefix, while stored IDs remain stable. Use `status --validate` before trusting workflow state and `status --resolve <ref>` to resolve slugs, stored IDs, or generated prefixes.
+SD-B32 display/address prefixes can lengthen after another branch adds a colliding prefix, while stored IDs remain stable. Use `status --validate` before trusting workflow state and `status --resolve <ref>` to resolve slugs, stored IDs, or sd-b32 address prefixes.
 
 Copyable README frontmatter examples:
 
@@ -289,14 +289,14 @@ id-style: sequential
 ```
 
 ```yaml
-id-style: generated
+id-style: sd-b32
 ```
 
 ```yaml
 id-style: slug
 ```
 
-Generated examples:
+SD-B32 examples:
 
 | Workflow size | Stored `id` examples | Display/address examples |
 | --- | --- | --- |
@@ -395,7 +395,7 @@ The `title` field is the human-readable name (e.g., "Full Cycle Test"). The file
 Set the `id` field according to `{id_style}`:
 
 - `sequential`: assign IDs starting at `001`, zero-padded to 3 digits.
-- `generated`: call the plugin status viewer with `--next-id` immediately before writing each entity and store the returned 24-character full ID. This value is not a reservation; call again for the next entity.
+- `sd-b32`: call the plugin status viewer with `--next-id --id-seed "{slug-or-title}"` immediately before writing each entity and store the returned 24-character SD-B32 stored ID. This value is not a reservation; call again for the next entity.
 - `slug`: omit `id` or leave it blank; the slug is the effective ID.
 
 ```markdown

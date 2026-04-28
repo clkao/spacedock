@@ -371,3 +371,16 @@ The repair narrows sequential duplicate validation so archived-only historical d
 ### Summary
 
 Recommendation: `PASSED`. Repair commit `815c0d1e` fixes the AC-2 regression by grandfathering archived-only sequential duplicate IDs while preserving active duplicate rejection and strict generated full-ID validation. Verification passed with `tests/test_status_script.py` = 173 passed/15 subtests, docs/template tests = 55 passed, and `make test-static` = 533 passed/26 deselected/15 subtests.
+
+## Stage Report: implementation (repair 2)
+
+- DONE: Public `id-style` surface uses `sd-b32` instead of `generated`, and docs explain that SD-B32 is the formatter/alphabet plus SHA-derived stored IDs.
+  Evidence: `skills/commission/bin/status`, commission/refit skills, and first-officer runtime docs now expose `id-style: sd-b32`; docs state SD-B32 means Spacedock Base32, uses alphabet `0123456789abcdefghjkmnpqrstvwxyz`, and derives 24-character stored IDs from SHA-256 digest material. Targeted static docs tests passed, and `rg` found no public `id-style: generated`, Crockford, or generated-ID API terminology outside negative assertions/generic generated-file wording.
+- DONE: Status CLI creates/validates/resolves `sd-b32` IDs using SHA-derived 24-character stored IDs and `MIN_PREFIX: 2` shortest unique display/address prefixes, without using pure OS-random token generation.
+  Evidence: `status --next-id` now accepts `--id-seed` and `--id-actor`, hashes workflow path, optional context, seed, actor, high-precision UTC timestamp, and nonce with SHA-256, encodes through SD-B32, and retries nonce collisions against active plus archived full IDs. Static status tests assert `hashlib.sha256` is used and `secrets`/`SPACEDOCK_TEST_GENERATED_IDS` are absent; focused status tests passed for seed/fallback next-id, duplicate full stored ID validation, prefix ambiguity, and `MIN_PREFIX: 2`.
+- DONE: Focused tests and static docs/runtime tests cover `sd-b32`, seed/fallback `--next-id` behavior, duplicate full-ID validation, prefix growth, sequential backward compatibility, and removal of stale `generated` public terminology.
+  Evidence: `uv run pytest tests/test_status_script.py -q` passed 174 tests and 15 subtests; `uv run pytest tests/test_agent_content.py tests/test_commission_template.py -q` passed 55 tests; `make test-static` passed 534 tests, 26 deselected, and 15 subtests. Direct self-workflow regression commands `--where id=217`, `--boot`, `--next`, `--next-id`, and `--resolve 217` still exited 0 with `NEXT_ID: 220`; `status --validate` returned `VALID`.
+
+### Summary
+
+Repair 2 replaces the unshipped `generated` public API with canonical `sd-b32`, keeps the approved shortest-unique address prefixes with `MIN_PREFIX: 2`, and changes stored-ID creation from random token character selection to SHA-256 digest material formatted through Spacedock Base32. The repaired sequential archived-duplicate compatibility remains verified.

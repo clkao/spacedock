@@ -13,9 +13,9 @@ This file captures the shared first-officer semantics. Keep it aligned with `age
    - stage properties such as `initial`, `terminal`, `gate`, `worktree`, `concurrency`, `feedback-to`, `agent`
 4. Run `status --boot` for all startup information in one call. Parse the output sections:
    - **MODS** — registered mod hooks by lifecycle point (startup, idle, merge). Run startup hooks before normal dispatch.
-   - **ID_STYLE** — the workflow identity strategy: `sequential`, `generated`, or `slug`.
-   - **NEXT_ID** — strategy-dependent ID candidate. For `sequential`, this is the next numeric ID. For `generated`, this is a full 24-character generated ID candidate and is not a reservation. For `slug`, this is `n/a (id-style: slug)`.
-   - **MIN_PREFIX** — present for `generated`; currently `MIN_PREFIX: 2`, meaning status displays and resolves shortest unique prefixes of at least two characters.
+   - **ID_STYLE** — the workflow identity strategy: `sequential`, `sd-b32`, or `slug`.
+   - **NEXT_ID** — strategy-dependent ID candidate. For `sequential`, this is the next numeric ID. For `sd-b32`, this is a full 24-character SD-B32 stored ID candidate and is not a reservation. For `slug`, this is `n/a (id-style: slug)`.
+   - **MIN_PREFIX** — present for `sd-b32`; currently `MIN_PREFIX: 2`, meaning status displays and resolves shortest unique prefixes of at least two characters.
    - **ORPHANS** — entities with worktree fields, cross-referenced against filesystem and git state. Report anomalies; do not auto-redispatch.
    - **PR_STATE** — PR-pending entities with current merge state. Advance merged PRs.
    - **DISPATCHABLE** — entities ready for dispatch (same as `--next`).
@@ -29,7 +29,7 @@ Invoke it as:
 {spacedock_plugin_dir}/skills/commission/bin/status --workflow-dir {workflow_dir} [--next-id|--next|--archived|--where ...|--boot|--validate|--resolve REF]
 ```
 
-Use `--boot` at startup for mods, ID style, strategy-dependent next ID, orphans, PR state, and dispatchable entities in one call. Use `status --validate` before trusting manually edited workflow state. Use `status --resolve REF` for deterministic lookup by slug, exact stored ID, or generated prefix; with `--root`, unqualified cross-workflow ambiguity is rejected rather than guessed. Use `--next-id` immediately before filing a new task for `sequential` and `generated`; it is not applicable for `slug`. Use `--next`, `--where "pr !="`, and friends for targeted event-loop queries. `--boot` is incompatible with `--next`, `--next-id`, `--archived`, and `--where`.
+Use `--boot` at startup for mods, ID style, strategy-dependent next ID, orphans, PR state, and dispatchable entities in one call. Use `status --validate` before trusting manually edited workflow state. Use `status --resolve REF` for deterministic lookup by slug, exact stored ID, or sd-b32 address prefix; with `--root`, unqualified cross-workflow ambiguity is rejected rather than guessed. Use `--next-id` immediately before filing a new task for `sequential` and `sd-b32`; it is not applicable for `slug`. For `sd-b32`, include `--id-seed "{slug-or-title}"` and optionally `--id-actor "{actor-or-agent}"` so creation context enters the SHA-derived candidate. Use `--next`, `--where "pr !="`, and friends for targeted event-loop queries. `--boot` is incompatible with `--next`, `--next-id`, `--archived`, and `--where`.
 
 The `--set` flag updates entity frontmatter fields:
 - `--set {slug} field=value` sets a field
@@ -41,10 +41,10 @@ The `--set` flag updates entity frontmatter fields:
 README frontmatter `id-style` defines how new entities are addressed:
 
 - `sequential` stores the returned numeric ID from `status --next-id` in `id`. Existing sequential workflows remain backwards-compatible and count active plus archived entities.
-- `generated` stores the returned 24-character full ID from `status --next-id` in `id`. Status output computes a shortest unique prefix across active plus archived entities for the `ID` column; prefix collisions lengthen display IDs only for affected entities. A duplicate full generated ID value is a validation failure.
+- `sd-b32` stores the returned 24-character SD-B32 stored ID from `status --next-id --id-seed "{slug-or-title}"` in `id`. SD-B32 means Spacedock Base32; candidates are SHA-derived and formatted with Spacedock's alphabet `0123456789abcdefghjkmnpqrstvwxyz`. Status output computes a shortest unique prefix across active plus archived entities for the `ID` column; prefix collisions lengthen display IDs only for affected entities. A duplicate full sd-b32 stored ID value is a validation failure.
 - `slug` derives identity from the entity slug. Omit `id` or leave it blank when creating entities, and do not call `status --next-id` for creation.
 
-When filing a new task, branch by `ID_STYLE`: sequential stores the returned numeric ID, generated stores the returned 24-character full ID, and slug derives identity from the entity slug. Generated `NEXT_ID` values from `--boot` and `--next-id` are candidates, not a reservation; call `--next-id` immediately before writing the entity. Short generated references shown to operators are shortest unique prefix values with `MIN_PREFIX: 2`; use `status --resolve` before mutating if the reference came from a human or an older transcript.
+When filing a new task, branch by `ID_STYLE`: sequential stores the returned numeric ID, sd-b32 stores the returned 24-character SD-B32 stored ID, and slug derives identity from the entity slug. SD-B32 `NEXT_ID` values from `--boot` and `--next-id` are candidates, not a reservation; call `--next-id --id-seed "{slug-or-title}"` immediately before writing the entity. Short sd-b32 references shown to operators are shortest unique prefix values with `MIN_PREFIX: 2`; use `status --resolve` before mutating if the reference came from a human or an older transcript.
 
 ## Single-Entity Mode
 

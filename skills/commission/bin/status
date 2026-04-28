@@ -14,9 +14,13 @@
 #   With --next-id, print only the next strategy-dependent ID candidate.
 #   README frontmatter `id-style` controls identity:
 #     sequential: required numeric id, allocated across active + archived entities.
-#     generated: required full 24-char lowercase Crockford Base32 id; display/address
-#       IDs are shortest unique prefixes across active + archived, MIN_PREFIX: 2.
+#     sd-b32: required 24-char lowercase SD-B32 (Spacedock Base32) stored ID
+#       derived from SHA-256 digest material. Display/address IDs are shortest
+#       unique prefixes across active + archived, MIN_PREFIX: 2.
 #     slug: id is optional; the slug is the effective ID and --next-id is not applicable.
+#   For id-style: sd-b32, `status --next-id --id-seed <slug-or-title>` adds
+#   creator seed material. Direct `--next-id` falls back to SHA-based manual seed
+#   material; it never uses random token character selection.
 #   --validate scans active + archived entities and prints VALID or one error per problem.
 #   --resolve REF prints workflow=, scope=, slug=, id=, path= for an unambiguous ref.
 #
@@ -81,9 +85,9 @@
 # valid status values: {stage1}, {stage2}, ..., {last_stage}.
 
 import glob
+import hashlib
 import os
 import re
-import secrets
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -351,11 +355,11 @@ def parse_stages_with_defaults(filepath):
 # Subdirectories that are never treated as entity folders. Keep in sync with
 # the rest of the status script and commission scaffolding.
 RESERVED_SUBDIRS = frozenset({'_archive', '_mods'})
-ID_STYLES = frozenset({'sequential', 'slug', 'generated'})
-GENERATED_ID_ALPHABET = '0123456789abcdefghjkmnpqrstvwxyz'
-GENERATED_ID_LENGTH = 24
-GENERATED_MIN_PREFIX = 2
-GENERATED_ID_RE = re.compile(r'^[%s]{%d}$' % (GENERATED_ID_ALPHABET, GENERATED_ID_LENGTH))
+ID_STYLES = frozenset({'sequential', 'slug', 'sd-b32'})
+SD_B32_ALPHABET = '0123456789abcdefghjkmnpqrstvwxyz'
+SD_B32_ID_LENGTH = 24
+SD_B32_MIN_PREFIX = 2
+SD_B32_ID_RE = re.compile(r'^[%s]{%d}$' % (SD_B32_ALPHABET, SD_B32_ID_LENGTH))
 
 
 def discover_entity_files(directory):
@@ -620,17 +624,17 @@ def find_entity_form_conflicts(directory, scope):
     return errors
 
 
-def is_valid_generated_id(value):
-    return bool(GENERATED_ID_RE.match(value or ''))
+def is_valid_sd_b32_id(value):
+    return bool(SD_B32_ID_RE.match(value or ''))
 
 
-def compute_generated_display_ids(entities):
-    """Return {stored_id: shortest unique display prefix} for valid generated IDs."""
+def compute_sd_b32_display_ids(entities):
+    """Return {stored_id: shortest unique address prefix} for valid SD-B32 IDs."""
     ids = [e.get('_stored_id', e.get('id', '')) for e in entities]
-    valid_ids = [value for value in ids if is_valid_generated_id(value)]
+    valid_ids = [value for value in ids if is_valid_sd_b32_id(value)]
     display = {}
     for value in valid_ids:
-        length = GENERATED_MIN_PREFIX
+        length = SD_B32_MIN_PREFIX
         while length < len(value):
             prefix = value[:length]
             if sum(1 for other in valid_ids if other.startswith(prefix)) == 1:
@@ -643,13 +647,13 @@ def compute_generated_display_ids(entities):
 def apply_effective_ids(entities, id_style, all_entities=None):
     """Mutate display-facing `id` fields while preserving `_stored_id`."""
     all_entities = all_entities if all_entities is not None else entities
-    generated_display = compute_generated_display_ids(all_entities) if id_style == 'generated' else {}
+    sd_b32_display = compute_sd_b32_display_ids(all_entities) if id_style == 'sd-b32' else {}
     for entity in entities:
         stored_id = entity.get('_stored_id', entity.get('id', ''))
         if id_style == 'slug':
             display_id = entity.get('slug', '')
-        elif id_style == 'generated':
-            display_id = generated_display.get(stored_id, stored_id)
+        elif id_style == 'sd-b32':
+            display_id = sd_b32_display.get(stored_id, stored_id)
         else:
             display_id = stored_id
         entity['_display_id'] = display_id
@@ -664,7 +668,7 @@ def validate_workflow(workflow_dir, git_root, id_style):
     errors.extend(find_entity_form_conflicts(os.path.join(workflow_dir, '_archive'), 'archived'))
 
     entities = active_and_archived_entities(workflow_dir, git_root)
-    generated_display = compute_generated_display_ids(entities) if id_style == 'generated' else {}
+    sd_b32_display = compute_sd_b32_display_ids(entities) if id_style == 'sd-b32' else {}
 
     if id_style == 'sequential':
         by_id = {}
@@ -694,20 +698,20 @@ def validate_workflow(workflow_dir, git_root, id_style):
                 errors.append(entity_evidence(entity, workflow_dir, 'duplicate effective id', effective))
             else:
                 seen[effective] = entity
-    elif id_style == 'generated':
+    elif id_style == 'sd-b32':
         seen = {}
         for entity in entities:
             stored_id = entity.get('_stored_id', entity.get('id', ''))
-            display = generated_display.get(stored_id, '')
+            display = sd_b32_display.get(stored_id, '')
             if not stored_id:
                 errors.append(entity_evidence(entity, workflow_dir, 'missing required id', display))
                 continue
-            if not is_valid_generated_id(stored_id):
-                errors.append(entity_evidence(entity, workflow_dir, 'invalid generated id', display))
+            if not is_valid_sd_b32_id(stored_id):
+                errors.append(entity_evidence(entity, workflow_dir, 'invalid sd-b32 stored id', display))
                 continue
             if stored_id in seen:
-                errors.append(entity_evidence(seen[stored_id], workflow_dir, 'duplicate generated id', display))
-                errors.append(entity_evidence(entity, workflow_dir, 'duplicate generated id', display))
+                errors.append(entity_evidence(seen[stored_id], workflow_dir, 'duplicate sd-b32 stored id', display))
+                errors.append(entity_evidence(entity, workflow_dir, 'duplicate sd-b32 stored id', display))
             else:
                 seen[stored_id] = entity
     return errors
@@ -888,55 +892,87 @@ def compute_next_sequential_id(active_entities, archive_dir):
     return '%03d' % (max_id + 1)
 
 
-def generated_id_candidates():
-    """Yield generated IDs from a deterministic test hook or the CSPRNG."""
-    hook = os.environ.get('SPACEDOCK_TEST_GENERATED_IDS', '').strip()
-    if hook:
-        for raw in hook.replace('\n', ',').split(','):
-            value = raw.strip()
-            if value:
-                yield value
-        return
-    while True:
-        yield ''.join(secrets.choice(GENERATED_ID_ALPHABET) for _ in range(GENERATED_ID_LENGTH))
+def sd_b32_timestamp():
+    test_timestamp = os.environ.get('SPACEDOCK_TEST_SD_B32_TIMESTAMP', '').strip()
+    if test_timestamp:
+        return test_timestamp
+    return datetime.now(timezone.utc).isoformat(timespec='microseconds').replace('+00:00', 'Z')
 
 
-def compute_next_generated_id(workflow_dir, git_root):
+def encode_sd_b32_digest(digest, length=SD_B32_ID_LENGTH):
+    value = int.from_bytes(digest, 'big')
+    total_bits = len(digest) * 8
+    chars = []
+    for offset in range(total_bits - 5, -1, -5):
+        chars.append(SD_B32_ALPHABET[(value >> offset) & 31])
+        if len(chars) == length:
+            break
+    return ''.join(chars)
+
+
+def sd_b32_digest_material(workflow_dir, id_seed, id_actor, timestamp, nonce):
+    seed = (id_seed or '').strip() or 'manual'
+    actor = (
+        (id_actor or '').strip()
+        or os.environ.get('SPACEDOCK_ID_ACTOR', '').strip()
+        or os.environ.get('USER', '').strip()
+        or os.environ.get('USERNAME', '').strip()
+    )
+    context = os.environ.get('SPACEDOCK_ID_CONTEXT', '').strip()
+    return '\n'.join([
+        'spacedock-sd-b32-v1',
+        f'workflow={os.path.realpath(workflow_dir)}',
+        f'context={context}',
+        f'seed={seed}',
+        f'actor={actor}',
+        f'timestamp={timestamp}',
+        f'nonce={nonce}',
+    ]).encode('utf-8')
+
+
+def sd_b32_candidate(workflow_dir, id_seed, id_actor, timestamp, nonce):
+    digest = hashlib.sha256(
+        sd_b32_digest_material(workflow_dir, id_seed, id_actor, timestamp, nonce)
+    ).digest()
+    return encode_sd_b32_digest(digest)
+
+
+def compute_next_sd_b32_id(workflow_dir, git_root, id_seed='', id_actor=''):
     existing = {
         e.get('_stored_id', e.get('id', ''))
         for e in active_and_archived_entities(workflow_dir, git_root)
         if e.get('_stored_id', e.get('id', ''))
     }
-    hook = os.environ.get('SPACEDOCK_TEST_GENERATED_IDS', '').strip()
-    attempts = 0
-    for candidate in generated_id_candidates():
-        attempts += 1
-        if not is_valid_generated_id(candidate):
-            print(f'Error: generated id candidate is invalid: {candidate}', file=sys.stderr)
+    timestamp = sd_b32_timestamp()
+    for nonce in range(1024):
+        candidate = sd_b32_candidate(workflow_dir, id_seed, id_actor, timestamp, nonce)
+        if not is_valid_sd_b32_id(candidate):
+            print(f'Error: sd-b32 stored id candidate is invalid: {candidate}', file=sys.stderr)
             sys.exit(1)
         if candidate not in existing:
             return candidate
-        if not hook and attempts >= 1024:
-            break
-    print('Error: generated id collision retry exhausted', file=sys.stderr)
+    print('Error: sd-b32 stored id collision retry exhausted', file=sys.stderr)
     sys.exit(1)
 
 
-def compute_next_id(entities, workflow_dir, git_root, id_style):
+def compute_next_id(entities, workflow_dir, git_root, id_style, id_seed='', id_actor=''):
     archive_dir = os.path.join(workflow_dir, '_archive')
     if id_style == 'sequential':
+        if id_seed or id_actor:
+            print('Error: --id-seed and --id-actor are only applicable for id-style: sd-b32', file=sys.stderr)
+            sys.exit(1)
         return compute_next_sequential_id(entities, archive_dir)
     if id_style == 'slug':
         print('Error: status --next-id is not applicable for id-style: slug', file=sys.stderr)
         sys.exit(1)
-    if id_style == 'generated':
-        return compute_next_generated_id(workflow_dir, git_root)
+    if id_style == 'sd-b32':
+        return compute_next_sd_b32_id(workflow_dir, git_root, id_seed=id_seed, id_actor=id_actor)
     raise ValueError(f"unsupported id-style: {id_style}")
 
 
-def print_next_id(entities, workflow_dir, git_root, id_style):
+def print_next_id(entities, workflow_dir, git_root, id_style, id_seed='', id_actor=''):
     """Print only the next strategy-dependent ID."""
-    print(compute_next_id(entities, workflow_dir, git_root, id_style))
+    print(compute_next_id(entities, workflow_dir, git_root, id_style, id_seed=id_seed, id_actor=id_actor))
 
 
 def scan_orphans(entities, git_root):
@@ -1082,8 +1118,8 @@ def print_boot(entities, stages, workflow_dir, git_root, id_style):
     else:
         next_id = compute_next_id(entities, workflow_dir, git_root, id_style)
     print('NEXT_ID: %s' % next_id)
-    if id_style == 'generated':
-        print('MIN_PREFIX: %d' % GENERATED_MIN_PREFIX)
+    if id_style == 'sd-b32':
+        print('MIN_PREFIX: %d' % SD_B32_MIN_PREFIX)
 
     # ORPHANS
     orphans = scan_orphans(entities, git_root)
@@ -1277,6 +1313,29 @@ def parse_root_arg(args):
             return args[i + 1]
         i += 1
     return None
+
+
+def parse_id_material_options(args):
+    """Parse optional sd-b32 creator material for --next-id."""
+    values = {'--id-seed': '', '--id-actor': ''}
+    seen = set()
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg in values:
+            if arg in seen:
+                raise ValueError(f'{arg} may only be supplied once')
+            if i + 1 >= len(args):
+                raise ValueError(f'{arg} requires an argument')
+            value = args[i + 1]
+            if value.startswith('--'):
+                raise ValueError(f'{arg} requires an argument')
+            values[arg] = value
+            seen.add(arg)
+            i += 2
+            continue
+        i += 1
+    return values['--id-seed'], values['--id-actor'], seen
 
 
 DEFAULT_STATUS_FIELDS = ('id', 'slug', 'status', 'title', 'score', 'source')
@@ -1527,18 +1586,18 @@ def resolve_reference_candidates(workflow_dir, ref, include_archived=False, id_s
     elif mode == 'id':
         matches = in_scope_matches(lambda e: e.get('_stored_id', e.get('id', '')) == value)
     elif mode == 'prefix':
-        if id_style != 'generated':
-            return 'unknown', [], [f"Error: prefix resolution is only available for id-style: generated"]
-        if len(value) < GENERATED_MIN_PREFIX:
-            return 'too_short', [], [f"Error: generated prefix '{value}' is too short; minimum prefix length is {GENERATED_MIN_PREFIX}"]
+        if id_style != 'sd-b32':
+            return 'unknown', [], [f"Error: prefix resolution is only available for id-style: sd-b32"]
+        if len(value) < SD_B32_MIN_PREFIX:
+            return 'too_short', [], [f"Error: sd-b32 address prefix '{value}' is too short; minimum prefix length is {SD_B32_MIN_PREFIX}"]
         matches = in_scope_matches(lambda e: e.get('_stored_id', '').startswith(value))
     else:
         slug_matches = in_scope_matches(lambda e: e.get('slug') == value)
         id_matches = in_scope_matches(lambda e: e.get('_stored_id', e.get('id', '')) == value)
         prefix_matches = []
         prefix_too_short = False
-        if id_style == 'generated' and all(ch in GENERATED_ID_ALPHABET for ch in value):
-            if len(value) < GENERATED_MIN_PREFIX:
+        if id_style == 'sd-b32' and all(ch in SD_B32_ALPHABET for ch in value):
+            if len(value) < SD_B32_MIN_PREFIX:
                 prefix_too_short = True
             else:
                 prefix_matches = in_scope_matches(lambda e: e.get('_stored_id', '').startswith(value))
@@ -1566,7 +1625,7 @@ def resolve_reference_candidates(workflow_dir, ref, include_archived=False, id_s
         elif prefix_matches:
             matches = prefix_matches
         elif prefix_too_short:
-            return 'too_short', [], [f"Error: generated prefix '{value}' is too short; minimum prefix length is {GENERATED_MIN_PREFIX}"]
+            return 'too_short', [], [f"Error: sd-b32 address prefix '{value}' is too short; minimum prefix length is {SD_B32_MIN_PREFIX}"]
 
     if not matches:
         return 'unknown', [], [f"Error: unknown reference: {ref}"]
@@ -1848,7 +1907,7 @@ def main():
             f for f in args if f in (
                 '--boot', '--next', '--next-id', '--archived', '--where',
                 '--set', '--archive', '--fields', '--all-fields', '--workflow-dir',
-                '--validate', '--resolve',
+                '--validate', '--resolve', '--id-seed', '--id-actor',
             )
         ]
         if incompatible:
@@ -1929,12 +1988,22 @@ def main():
         print('Error: ' + str(e), file=sys.stderr)
         sys.exit(1)
 
+    try:
+        id_seed, id_actor, id_material_flags = parse_id_material_options(args)
+    except ValueError as e:
+        print('Error: ' + str(e), file=sys.stderr)
+        sys.exit(1)
+
     include_archive = '--archived' in args
     show_next = '--next' in args
     show_next_id = '--next-id' in args
     show_boot = '--boot' in args
     show_validate = '--validate' in args
     has_fields_flag = explicit_fields is not None or all_fields_flag
+
+    if id_material_flags and not show_next_id:
+        print('Error: --id-seed and --id-actor can only be used with --next-id', file=sys.stderr)
+        sys.exit(1)
 
     # --boot is incompatible with --next, --next-id, --archived, --where, --fields, --all-fields
     if show_boot:
@@ -1994,7 +2063,7 @@ def main():
             print('Error: ' + str(e), file=sys.stderr)
             sys.exit(1)
         fail_on_validation_errors(pipeline_dir, git_root, id_style)
-        print_next_id(entities, pipeline_dir, git_root, id_style)
+        print_next_id(entities, pipeline_dir, git_root, id_style, id_seed=id_seed, id_actor=id_actor)
         sys.exit(0)
 
     if resolve_ref is not None:

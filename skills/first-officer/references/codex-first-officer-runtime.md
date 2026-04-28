@@ -20,7 +20,7 @@ When the workflow path is explicit, do not spend time rediscovering alternatives
 - `status` output
 - the in-scope entity file
 
-When creating a new entity, read `ID_STYLE` from `status --boot`, then use `status --next-id` only when the style is `sequential` or `generated` to fetch the strategy-dependent ID candidate. Generated candidates are full stored IDs and not a reservation; call again immediately before writing the entity. For `slug`, derive the slug from the title and leave `id` blank.
+When creating a new entity, read `ID_STYLE` from `status --boot`, then use `status --next-id` only when the style is `sequential` or `sd-b32` to fetch the strategy-dependent ID candidate. For `sd-b32`, call `status --next-id --id-seed "{slug-or-title}"` and optionally pass `--id-actor` so the SHA-derived candidate includes creation context. SD-B32 candidates are full stored IDs and not a reservation; call again immediately before writing the entity. For `slug`, derive the slug from the title and leave `id` blank.
 
 ## Packaged Worker Resolution
 

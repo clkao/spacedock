@@ -119,18 +119,21 @@ def test_first_officer_docs_are_id_style_aware_for_task_creation():
     assert "status --validate" in shared
     assert "status --resolve" in shared
     assert "sequential stores the returned numeric ID" in shared
-    assert "generated stores the returned 24-character full ID" in shared
+    assert "sd-b32 stores the returned 24-character SD-B32 stored ID" in shared
     assert "slug derives identity from the entity slug" in shared
     assert "shortest unique prefix" in shared
     assert "next sequential ID" not in shared
 
     for runtime_doc in (codex, claude):
         assert "strategy-dependent ID candidate" in runtime_doc
+        assert "--id-seed" in runtime_doc
+        assert "sd-b32" in runtime_doc
         assert "not a reservation" in runtime_doc
         assert "next sequential ID" not in runtime_doc
 
-    assert "duplicate full generated ID" in combined
+    assert "duplicate full sd-b32 stored ID" in combined
     assert "prefix collisions lengthen display IDs" in combined
+    assert "generated stores" not in combined
 
 
 def test_refit_docs_preserve_id_style_and_defer_migration_rewrites():
@@ -141,7 +144,9 @@ def test_refit_docs_preserve_id_style_and_defer_migration_rewrites():
     assert "status --validate" in text
     assert "manual migration" in text
     assert "rewrite automation" in text
-    assert "generated" in text
+    assert "sd-b32" in text
+    assert "SHA-256" in text
+    assert "Crockford" not in text
     assert "sequential" in text
     assert "slug" in text
 

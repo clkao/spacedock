@@ -161,9 +161,9 @@ After upgrading scaffolding, check whether schema changes require migrating exis
 
 ### ID Style Preservation
 
-README frontmatter may contain `id-style: sequential`, `id-style: generated`, or `id-style: slug`. Refit must preserve the current `id-style`; do not silently change it. Report the current style in the refit summary, recommend `generated` only when collaboration pressure exists (worktree stages, PR/merge mods, multiple creators, branches, or offline work), and require explicit captain approval before changing README frontmatter.
+README frontmatter may contain `id-style: sequential`, `id-style: sd-b32`, or `id-style: slug`. Refit must preserve the current `id-style`; do not silently change it. Report the current style in the refit summary, recommend `sd-b32` only when collaboration pressure exists (worktree stages, PR/merge mods, multiple creators, branches, or offline work), and require explicit captain approval before changing README frontmatter.
 
-Before any approved style change, run `status --validate` against the workflow and report failures. Existing sequential workflows require no data rewrite. Generated style requires each entity to store a 24-character lowercase Crockford Base32 full ID while status displays shortest unique prefixes. Slug style derives identity from filenames and makes `status --next-id` non-applicable. Migration is manual migration in this release: use validation to make the change safe, and defer rewrite automation or bulk frontmatter rewriting to a separate tracked task.
+Before any approved style change, run `status --validate` against the workflow and report failures. Existing sequential workflows require no data rewrite. SD-B32 means Spacedock Base32: this style requires each entity to store a 24-character lowercase SD-B32 stored ID derived from SHA-256 digest material and formatted with Spacedock's alphabet `0123456789abcdefghjkmnpqrstvwxyz`, while status displays shortest unique prefixes. Slug style derives identity from filenames and makes `status --next-id` non-applicable. Migration is manual migration in this release: use validation to make the change safe, and defer rewrite automation or bulk frontmatter rewriting to a separate tracked task.
 
 ### Step 1 — Detect schema changes
 
