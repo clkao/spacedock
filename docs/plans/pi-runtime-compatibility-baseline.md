@@ -363,3 +363,16 @@ PY`
 
 - The live Pi FO proof still depends on long-running session behavior and can hit the existing 600s harness timeout before the final FO summary appears.
 - This slice intentionally does not change Pi runtime behavior, FO orchestration logic, or the bounded-proof workflow fixture.
+
+## Stage Report: validation
+
+- DONE: Run the focused validation needed for the new Pi FO reuse coverage slice using tests/README.md guidance, and report concrete pass/fail evidence for the relevant commands.
+  Evidence: per `tests/README.md` single-file runtime-specific guidance, `unset CLAUDECODE && uv run pytest tests/test_pi_runtime_harness.py -q` passed with `8 passed in 0.14s` as the cheap spot-check, then `unset CLAUDECODE && uv run pytest tests/test_pi_reuse_dispatch_live.py --runtime pi -v -s` passed with `1 passed in 359.41s`; the live test reported `19 passed, 0 failed` including same-session analysis→implementation reuse, fresh validation dispatch, shutdown recording, stage reports, and bounded follow-up git-history evidence.
+- DONE: Cross-check the latest implementation report and entity-level acceptance criteria against the current branch state, naming any missing or outdated evidence.
+  Evidence: the latest implementation report's timeout-only claim is now outdated and superseded by the passing live rerun above; current branch state matches AC-3/AC-5 for this slice via `tests/test_pi_reuse_dispatch_live.py`, while the earlier branch evidence for AC-1 (`tests/test_pi_runtime_contract.py` / Pi runtime docs), AC-2 (`tests/test_gate_guardrail.py --runtime pi`), and AC-4 (`tests/test_pi_ensign_skill_reuse_live.py`, `tests/test_pi_worker_runtime_live.py`) remains present in the entity and was not contradicted by the reviewed delta.
+- DONE: Append a validation stage report with a clear PASSED or REJECTED recommendation for this slice, commit any validation-file changes, and stop.
+  Evidence: this `## Stage Report: validation` section was appended to `docs/plans/pi-runtime-compatibility-baseline.md`; validation recommendation: PASSED for the Pi FO reuse coverage slice.
+
+### Summary
+
+I validated the new Pi FO reuse coverage slice with the repo's recommended single-file live entrypoint pattern after a cheap harness spot-check. The previously outdated implementation note about a 600s timeout no longer reflects the branch: the focused live Pi FO reuse test now completes and passes, and the current evidence supports a PASSED recommendation for this slice.
