@@ -1,6 +1,6 @@
 ---
 id: 217
-title: "Pluggable id-style with collaboration-friendly generated IDs"
+title: Pluggable id-style with collaboration-friendly SD-B32 IDs
 status: validation
 source: "GitHub issue #150 (filed by CL, 2026-04-27)"
 started: 2026-04-27T21:32:17Z
