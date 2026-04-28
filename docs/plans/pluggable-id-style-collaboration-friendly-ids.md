@@ -397,3 +397,38 @@ Repair 2 replaces the unshipped `generated` public API with canonical `sd-b32`, 
 ### Summary
 
 The active spec now matches repair 2 and the latest captain amendment: `sd-b32` is the public collaboration-friendly style, stored IDs are SHA-derived SD-B32 values, and display/address IDs remain shortest unique prefixes with `MIN_PREFIX: 2`. Historical reports remain unchanged for audit history.
+
+## Stage Report: validation (recheck 2)
+
+- DONE: Current AC-1 through AC-11 are independently verified against implementation, tests, and docs after the SD-B32 amendment.
+  Evidence: Verified against the active task body naming `sd-b32`; `uv run pytest tests/test_status_script.py -q` passed 174 tests/15 subtests, docs/template tests passed 55 tests, and `make test-static` passed 534 tests/26 deselected/15 subtests.
+- DONE: Targeted commands prove SHA-derived SD-B32 creation/validation/resolution behavior, `MIN_PREFIX: 2`, and sequential backward compatibility.
+  Evidence: Disposable `id-style: sd-b32` workflow proved deterministic `--next-id --id-seed/--id-actor`, SHA fallback without seed, nonce retry, `ab` prefix ambiguity with `ab0`/`ab1` display growth, `--resolve ab0`, and duplicate full-ID validation failure; real `docs/plans` sequential `--where id=217`, `--boot`, `--next`, `--next-id`, `--resolve 217`, and `--validate` all exited 0 with `NEXT_ID: 220`.
+- DONE: Validation report gives concrete test results and a clear `PASSED` or `REJECTED` recommendation.
+  Evidence: This report records `PASSED`; `git diff --check` passed for the report diff.
+- DONE: AC-1 - Workflows have a documented `id-style` strategy contract covering `sequential`, `slug`, and `sd-b32`.
+  Evidence: Commission/refit/FO docs and static tests expose `sd-b32`, `sequential`, and `slug`; exact stale public-style grep found `id-style: generated` only in negative assertions.
+- DONE: AC-2 - Existing sequential workflows keep their current behavior.
+  Evidence: Self-workflow commands succeeded despite archived-only duplicate sequential IDs `033`/`131`; status tests also cover archived-only compatibility and active duplicate rejection.
+- DONE: AC-3 - `id-style: slug` treats the slug as the effective ID and makes `status --next-id` non-applicable.
+  Evidence: Full status-script suite passed slug fixtures for default/`--next`, `--where`, `--boot`, and non-zero direct `--next-id`.
+- DONE: AC-4 - `id-style: sd-b32` stores full stable SHA-derived SD-B32 IDs and displays shortest unique address prefixes.
+  Evidence: Direct command output produced 24-character alphabet-valid IDs, deterministic repeat output for fixed seed/actor/timestamp, nonce retry after an existing full ID, and shortest unique displays `ab0`, `ab1`, and `cd`.
+- DONE: AC-5 - Invalid or duplicate effective IDs are caught before status output is trusted.
+  Evidence: Direct duplicate full SD-B32 fixture failed `--validate` with `duplicate sd-b32 stored id`; tests cover fail-fast default/`--archived`/`--next`/`--next-id`/`--boot` paths and invalid/missing IDs.
+- DONE: AC-6 - `--boot` and first-officer task creation are strategy-aware.
+  Evidence: Tests and FO docs cover `ID_STYLE`, strategy-dependent `NEXT_ID`, SD-B32 `MIN_PREFIX: 2`, and creation via `status --next-id --id-seed "{slug-or-title}"` with optional `--id-actor`.
+- DONE: AC-7 - Entity reference resolution is deterministic through `status --resolve`.
+  Evidence: Direct `--resolve ab` failed ambiguous with both candidates and displays, while `--resolve ab0` resolved one entity; resolver tests cover qualifiers, archived scope, too-short prefixes, and mutation resolution.
+- DONE: AC-8 - Cross-workflow ambiguity is rejected rather than guessed.
+  Evidence: Status-script root resolver fixtures passed for duplicate slugs, exact IDs, SD-B32 prefixes, basename qualifiers, and absolute workflow qualifiers.
+- DONE: AC-9 - Migration scope is documented and validation-backed without shipping a rewrite helper.
+  Evidence: Static docs tests passed for manual migration, validation-backed style changes, archived/folder conflict reporting, and deferred rewrite automation.
+- DONE: AC-10 - Concurrent or offline task creation is safer under `sd-b32` IDs than under sequential IDs.
+  Evidence: Status-script concurrency simulation passed using SD-B32 seed/actor/timestamp material, merge-time prefix growth, `--validate`, default status, `--next`, and `--boot`.
+- DONE: AC-11 - Commission/refit documentation preserves concrete style-selection and SD-B32 examples.
+  Evidence: Static template tests passed for `sd-b32 (recommended for collaborative workflows)`, `sequential`, `slug`, SHA-256, alphabet `0123456789abcdefghjkmnpqrstvwxyz`, `MIN_PREFIX: 2`, 10s/100s/1000s examples, and no public `id-style: generated`.
+
+### Summary
+
+Recommendation: `PASSED`. Repair 2 implements the captain amendment: the public collaboration-friendly style is `sd-b32`, stored IDs are SHA-256-derived 24-character Spacedock Base32 values using alphabet `0123456789abcdefghjkmnpqrstvwxyz`, `--next-id` supports seed/actor and SHA fallback behavior rather than random token selection, and display/address prefixes still use `MIN_PREFIX: 2`. Sequential archived-only duplicate compatibility remains intact, and duplicate full SD-B32 IDs still fail validation/status trust paths.
