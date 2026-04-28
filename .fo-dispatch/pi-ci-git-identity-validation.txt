@@ -1,0 +1,9 @@
+Validation of commit c499809a (test: bootstrap git identity for temp repos): PASSED
+
+Evidence:
+- Reviewed create_test_project(): it now sets repo-local git config user.name=Spacedock Test and user.email=spacedock-test@example.invalid before the initial empty commit.
+- Reviewed regression test: tests/test_test_lib_helpers.py::test_create_test_project_bootstraps_repo_local_git_identity isolates HOME and XDG_CONFIG_HOME, unsets GIT_AUTHOR_* and GIT_COMMITTER_* variables, calls create_test_project(), verifies local config, and verifies HEAD exists.
+- Focused validation passed: unset CLAUDECODE && uv run pytest tests/test_test_lib_helpers.py -k create_test_project_bootstraps_repo_local_git_identity -v -> 1 passed, 19 deselected.
+- Static validation passed: unset CLAUDECODE && uv run pytest tests/ --ignore=tests/fixtures -m "not live_claude and not live_codex and not live_pi" -q -> 541 passed, 31 deselected, 10 subtests passed.
+
+Recommendation: PASSED.

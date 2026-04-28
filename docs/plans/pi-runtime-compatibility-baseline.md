@@ -522,3 +522,25 @@ PASSED after the validation fix. The pyproject collection scope is appropriate f
 ### Summary
 
 The regression came from relying on ambient git identity during temp-repo bootstrap. The helper now sets deterministic repo-local identity before the first commit, and a focused regression test locks this behavior under isolated config environments.
+
+## Stage Report: validation
+
+- DONE: Reviewed CI git identity fix commit `c499809a`.
+  Evidence: `scripts/test_lib.py:create_test_project()` runs `git config user.name "Spacedock Test"` and `git config user.email "spacedock-test@example.invalid"` in the newly initialized temp repo before the initial empty commit, and the regression test isolates `HOME`/`XDG_CONFIG_HOME` while unsetting git author/committer env vars.
+- DONE: Verified the focused isolated-env regression with uv.
+  Evidence: `unset CLAUDECODE && uv run pytest tests/test_test_lib_helpers.py -k create_test_project_bootstraps_repo_local_git_identity -v` passed with `1 passed, 19 deselected`.
+- DONE: Verified the static suite remains green with uv-backed pytest.
+  Evidence: `unset CLAUDECODE && uv run pytest tests/ --ignore=tests/fixtures -m "not live_claude and not live_codex and not live_pi" -q` passed with `541 passed, 31 deselected, 10 subtests passed`.
+
+### Recommendation
+
+PASSED. The fix is minimal, repo-local, and covered under isolated git identity conditions; focused and static validation both pass.
+
+### Commands Run
+
+- `unset CLAUDECODE && uv run pytest tests/test_test_lib_helpers.py -k create_test_project_bootstraps_repo_local_git_identity -v`
+- `unset CLAUDECODE && uv run pytest tests/ --ignore=tests/fixtures -m "not live_claude and not live_codex and not live_pi" -q`
+
+### Changed Files
+
+- `docs/plans/pi-runtime-compatibility-baseline.md`
