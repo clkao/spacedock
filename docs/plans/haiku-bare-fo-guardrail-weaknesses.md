@@ -112,6 +112,22 @@ All verification commands run **locally** — captain has explicitly requested l
 - **#160** — haiku FO multi-stage dispatch compression. Related FO-tool-shape weakness on haiku; may share root cause with Pattern B.
 - Artifacts: CI run `24610475442`, job `71963876313` (claude-live-bare). Test dirs `spacedock-test-2izdmkjp` (gate_guardrail) + `spacedock-test-h42ehkks` (keepalive).
 
+## AC-4 decision: defer FO prose surgery
+
+**Decision: defer.** No FO prose changes ship from this task.
+
+**Rationale:**
+
+1. **Pattern A** (haiku FO bootstrap: `{PWD}` brace-bug, cd to repo root, `status --discover` finds wrong workflow) is a model-capability gap, not a prose gap. The current FO prose already specifies that workflow operations run in the test-project cwd; haiku-bare ignores that prose under `--effort low`. Adding more emphatic prose ("really, do not cd away") is speculative and likely regresses opus/haiku-teams (which already follow the rule). The cheapest test-suite signal — xfail markers landed in commit (a) — already silences the false negative without weakening assertions for stronger models.
+
+2. **Pattern B** (haiku FO tool-shape compression: `subagent_type=None` validation dispatch, `SendMessage` string nested inside `Agent` prompt, missing `### Feedback Cycles` header) is structurally identical to #160 ("haiku FO multi-stage dispatch compression"). #160 already owns the medium-term remediation. Duplicating that work here would fork investigation across two tasks.
+
+3. **Diff scope test:** any prose change targeting both Patterns would touch `skills/first-officer/SKILL.md` and `references/first-officer-shared-core.md` — both core-dispatch-contract files — and almost certainly exceed the dispatch instruction's 20-line / no-core-contract guardrail. The dispatch guidance explicitly preferred defer over speculative FO surgery in exactly this case.
+
+**Long-term path:** if the medium-term option fails (FO prose changes don't close the gap on either Pattern), the long-term option already documented above (retire bare-haiku coverage on these two tests; let bare-opus, teams-opus, and teams-haiku-in-scope-tests carry coverage) is the pragmatic answer. No new follow-up issue is filed because #160 already tracks the Pattern B class and the long-term retirement option is already documented in this entity body's "Proposed approach" → "Long-term" section.
+
+**What ships from #200:** xfail classifier widening (commit a, AC-1) + extended-thinking scrub (commit b, AC-6). FO prose surgery is explicitly out of scope for this task.
+
 ## Stage Report: ideation
 
 - DONE: Test plan names a concrete LOCAL test command per AC (especially AC-1's grep and AC-5's `make test-static`) so an implementer can verify each acceptance criterion locally without round-tripping through CI.
