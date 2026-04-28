@@ -95,6 +95,14 @@ def test_gate_guardrail(test_project, runtime, model, effort, request):
         log.write_text(t.log_dir / "codex-fo-text.txt")
         fo_text_output = log.full_text()
 
+    # #200 AC-6: opus extended-thinking content can leak literal `<thinking>...</thinking>`
+    # blocks into the FO's text output. Those blocks may contain the model's internal
+    # reasoning prose ("approved ... advancing") which would falsely trigger the
+    # self-approval scrub below. Strip them here (single chokepoint upstream of the
+    # gate-review and self-approval checks) so the assertions only see externalized FO
+    # output, not internal reasoning. Non-greedy + DOTALL so multi-line blocks match.
+    fo_text_output = re.sub(r"<thinking>.*?</thinking>", "", fo_text_output, flags=re.DOTALL)
+
     print()
     print("[Gate Hold Behavior]")
     check_gate_hold_behavior(t, "gated-pipeline", "gate-test-entity", fo_text_output)
