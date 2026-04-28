@@ -12,7 +12,7 @@ import sys
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
-from pi_session_registry import PiSessionRegistry  # noqa: E402
+from pi_session_registry import PiSessionRegistry, WorkerSessionRecord  # noqa: E402
 from pi_worker_runtime import PiWorkerRuntime  # noqa: E402
 from test_lib import PiBackgroundProcess, TestRunner, create_test_project  # noqa: E402
 
@@ -42,6 +42,7 @@ class _FakeBackgroundLauncher:
         class _Proc:
             def __init__(self):
                 self.returncode = 0
+                self.kill_called = False
 
             def poll(self):
                 return self.returncode
@@ -51,6 +52,10 @@ class _FakeBackgroundLauncher:
 
             def terminate(self):
                 self.returncode = -15
+
+            def kill(self):
+                self.kill_called = True
+                self.returncode = -9
 
         class _LogFile:
             closed = False
@@ -134,6 +139,109 @@ def test_pi_worker_runtime_background_launch_returns_handle_and_collects_complet
     )
     assert follow_up.final_text == "FOLLOWUP_OK"
     assert runtime.completion_is_current("218-implementation/Ensign", follow_up) is True
+
+
+
+def test_pi_worker_runtime_prevents_background_reuse_while_worker_is_still_active(tmp_path):
+    runner = TestRunner("pi worker runtime active reuse guard", keep_test_dir=False)
+    create_test_project(runner)
+
+    session_dir = tmp_path / "pi-sessions"
+    launcher = _FakeBackgroundLauncher(runner, session_dir)
+    runtime = PiWorkerRuntime(
+        PiSessionRegistry(tmp_path / "pi-workers.json"),
+        session_dir,
+        launch_pi=launcher,
+    )
+
+    runtime.dispatch_background(
+        runner,
+        worker_label="218-implementation/Ensign",
+        prompt="Do the first task.",
+        cwd=runner.test_project_dir,
+        entity_slug="pi-runtime-compatibility-baseline",
+        stage_name="implementation",
+        no_context_files=True,
+        log_name="dispatch-bg.jsonl",
+    )
+
+    with pytest.raises(RuntimeError, match="not routable"):
+        runtime.reuse_background(
+            runner,
+            worker_label="218-implementation/Ensign",
+            prompt="This must not overlap.",
+            log_name="reuse-bg.jsonl",
+            no_context_files=True,
+        )
+
+
+
+def test_pi_worker_runtime_reuse_falls_back_to_session_file_when_session_id_is_missing(tmp_path):
+    runner = TestRunner("pi worker runtime session file fallback", keep_test_dir=False)
+    create_test_project(runner)
+
+    session_dir = tmp_path / "pi-sessions"
+    invoker = _FakePiInvoker(runner, session_dir)
+    runtime = PiWorkerRuntime(
+        PiSessionRegistry(tmp_path / "pi-workers.json"),
+        session_dir,
+        invoke_pi=invoker,
+    )
+    runtime.registry.upsert(
+        WorkerSessionRecord(
+            worker_label="218-implementation/Ensign",
+            dispatch_agent_id="spacedock:ensign",
+            worker_key="spacedock-ensign",
+            session_id="",
+            session_file=str(invoker.session_file),
+            cwd=str(runner.test_project_dir),
+            entity_slug="pi-runtime-compatibility-baseline",
+            stage_name="implementation",
+            state="completed",
+            completion_epoch=0,
+        )
+    )
+
+    runtime.reuse(
+        runner,
+        worker_label="218-implementation/Ensign",
+        prompt="Do the second task.",
+        stage_name="validation",
+        no_context_files=True,
+        log_name="reuse.jsonl",
+    )
+    assert invoker.calls[-1].get("session") == str(invoker.session_file)
+
+
+
+def test_pi_worker_runtime_shutdown_terminates_tracked_background_process(tmp_path):
+    runner = TestRunner("pi worker runtime shutdown", keep_test_dir=False)
+    create_test_project(runner)
+
+    session_dir = tmp_path / "pi-sessions"
+    launcher = _FakeBackgroundLauncher(runner, session_dir)
+    runtime = PiWorkerRuntime(
+        PiSessionRegistry(tmp_path / "pi-workers.json"),
+        session_dir,
+        launch_pi=launcher,
+    )
+
+    record, process = runtime.dispatch_background(
+        runner,
+        worker_label="218-implementation/Ensign",
+        prompt="Do the first task.",
+        cwd=runner.test_project_dir,
+        entity_slug="pi-runtime-compatibility-baseline",
+        stage_name="implementation",
+        no_context_files=True,
+        log_name="dispatch-bg.jsonl",
+    )
+    process.proc.returncode = None
+
+    updated = runtime.shutdown(record.worker_label)
+    assert updated.state == "shutdown"
+    assert process.proc.returncode == -15
+    assert process.log_file.closed is True
 
 
 

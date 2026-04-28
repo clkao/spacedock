@@ -36,6 +36,8 @@ def test_pi_harness_can_pin_local_skill_and_plugin_root():
     assert "/skill:first-officer" in prompt
     assert "/tmp/spacedock/skills/first-officer" in prompt
     assert "/tmp/spacedock/skills/commission/bin/status" in prompt
+    assert "/tmp/spacedock/scripts/pi_worker_runtime.py" in prompt
+    assert "/tmp/spacedock/scripts/pi_session_registry.py" in prompt
 
 
 
@@ -104,6 +106,83 @@ def test_run_pi_prompt_can_target_a_specific_reopened_session(monkeypatch):
     assert "--no-context-files" in seen["cmd"]
     assert seen["kwargs"]["cwd"] == runner.test_project_dir
     assert seen["kwargs"]["text"] is True
+
+
+
+def test_pi_fo_stream_watcher_observes_labeled_stage_milestones(tmp_path):
+    log_path = tmp_path / "pi-fo-log.jsonl"
+    log_file = open(log_path, "w+")
+
+    class FakeProc:
+        returncode = None
+
+        def poll(self):
+            return self.returncode
+
+        def wait(self, timeout=None):
+            self.returncode = 0
+            return 0
+
+        def terminate(self):
+            self.returncode = -15
+
+        def kill(self):
+            self.returncode = -9
+
+    process = test_lib.PiBackgroundProcess(
+        proc=FakeProc(),
+        log_path=log_path,
+        session_dir=tmp_path / "sessions",
+        log_file=log_file,
+    )
+    watcher = test_lib.PiFOStreamWatcher(process)
+    try:
+        log_file.write(
+            '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"python3 scripts/pi_worker_runtime.py dispatch --stage-name analysis"}]}}\n'
+        )
+        log_file.flush()
+        watcher.expect_worker_runtime_stage("analysis", "dispatch", timeout_s=0.5, label="analysis dispatch")
+        assert watcher.expect_exit(timeout_s=0.5) == 0
+    finally:
+        watcher.close()
+        process.close()
+
+
+
+def test_pi_fo_stream_watcher_timeout_is_labeled(tmp_path):
+    log_path = tmp_path / "pi-fo-log.jsonl"
+    log_file = open(log_path, "w+")
+
+    class FakeProc:
+        returncode = None
+
+        def poll(self):
+            return self.returncode
+
+        def wait(self, timeout=None):
+            self.returncode = 0
+            return 0
+
+        def terminate(self):
+            self.returncode = -15
+
+        def kill(self):
+            self.returncode = -9
+
+    process = test_lib.PiBackgroundProcess(
+        proc=FakeProc(),
+        log_path=log_path,
+        session_dir=tmp_path / "sessions",
+        log_file=log_file,
+    )
+    watcher = test_lib.PiFOStreamWatcher(process)
+    try:
+        with pytest.raises(test_lib.StepTimeout) as excinfo:
+            watcher.expect_worker_runtime_stage("validation", "dispatch", timeout_s=0.1, label="validation dispatch")
+        assert excinfo.value.label == "validation dispatch"
+    finally:
+        watcher.close()
+        process.close()
 
 
 
@@ -191,6 +270,51 @@ def test_run_pi_ensign_assembles_pi_json_command(monkeypatch):
     assert str(runner.repo_root / "skills" / "ensign") in seen["cmd"]
     assert "--session" in seen["cmd"]
     assert "pi-session-123" in seen["cmd"]
+    assert seen["kwargs"]["cwd"] == runner.test_project_dir
+    assert seen["kwargs"]["text"] is True
+
+
+
+def test_run_pi_first_officer_streaming_assembles_pi_json_command(monkeypatch):
+    runner = TestRunner("pi streaming harness", keep_test_dir=False)
+    create_test_project(runner)
+
+    seen: dict[str, object] = {}
+
+    class FakeProc:
+        def __init__(self):
+            self.returncode = 0
+
+        def wait(self, timeout=None):
+            return 0
+
+        def terminate(self):
+            self.returncode = -15
+
+        def kill(self):
+            self.returncode = -9
+
+        def poll(self):
+            return self.returncode
+
+    def fake_popen(cmd, **kwargs):
+        seen["cmd"] = cmd
+        seen["kwargs"] = kwargs
+        return FakeProc()
+
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+
+    with test_lib.run_pi_first_officer_streaming(
+        runner,
+        "docs/plans",
+        run_goal="Process only task 218.",
+        hard_cap_s=1,
+    ) as watcher:
+        assert watcher.expect_exit(timeout_s=0.5) == 0
+
+    assert seen["cmd"][:4] == ["pi", "--mode", "json", "--print"]
+    assert "--skill" in seen["cmd"]
+    assert str(runner.repo_root / "skills" / "first-officer") in seen["cmd"]
     assert seen["kwargs"]["cwd"] == runner.test_project_dir
     assert seen["kwargs"]["text"] is True
 

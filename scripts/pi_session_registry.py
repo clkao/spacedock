@@ -10,6 +10,7 @@ Spacedock needs for reuse/shutdown bookkeeping.
 """
 
 import json
+import os
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -37,7 +38,10 @@ class PiSessionRegistry:
     def _load(self) -> dict[str, WorkerSessionRecord]:
         if not self.path.exists():
             return {}
-        data = json.loads(self.path.read_text())
+        try:
+            data = json.loads(self.path.read_text())
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(f"Pi session registry is corrupt: {self.path}") from exc
         return {
             worker_label: WorkerSessionRecord(**record)
             for worker_label, record in data.items()
@@ -49,7 +53,9 @@ class PiSessionRegistry:
             worker_label: asdict(record)
             for worker_label, record in records.items()
         }
-        self.path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+        tmp_path = self.path.with_name(f".{self.path.name}.tmp-{os.getpid()}")
+        tmp_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+        tmp_path.replace(self.path)
 
     def upsert(self, record: WorkerSessionRecord) -> WorkerSessionRecord:
         records = self._load()
@@ -63,6 +69,10 @@ class PiSessionRegistry:
     def mark_active_again(self, worker_label: str) -> WorkerSessionRecord:
         records = self._load()
         record = records[worker_label]
+        if record.state == "active":
+            raise RuntimeError(f"Pi worker {worker_label} is already active")
+        if record.state == "shutdown":
+            raise RuntimeError(f"Pi worker {worker_label} is shutdown")
         record.state = "active"
         record.completion_epoch += 1
         self._save(records)
@@ -77,4 +87,4 @@ class PiSessionRegistry:
 
     def routable(self, worker_label: str) -> bool:
         record = self.get(worker_label)
-        return bool(record is not None and record.state != "shutdown")
+        return bool(record is not None and record.state == "completed")

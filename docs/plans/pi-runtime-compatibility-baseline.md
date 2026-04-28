@@ -376,3 +376,35 @@ PY`
 ### Summary
 
 I validated the new Pi FO reuse coverage slice with the repo's recommended single-file live entrypoint pattern after a cheap harness spot-check. The previously outdated implementation note about a 600s timeout no longer reflects the branch: the focused live Pi FO reuse test now completes and passes, and the current evidence supports a PASSED recommendation for this slice.
+
+## Stage Report: implementation
+
+- DONE: Pi FO live reuse/dispatch test now uses progressive stage evidence instead of only a single fixed global timeout.
+  Evidence: `tests/test_pi_reuse_dispatch_live.py` now runs the FO through `run_pi_first_officer_streaming()` and waits for labeled milestones: analysis dispatch evidence, implementation reuse evidence, validation fresh-dispatch evidence, and the final reuse/fresh-dispatch summary before `expect_exit()`.
+- DONE: Added an evidence-driven Pi FO watcher with labeled timeout failures.
+  Evidence: `scripts/test_lib.py` adds `PiFOStreamWatcher` and `run_pi_first_officer_streaming()`. The watcher tails `pi-fo-log.jsonl`, accumulates parsed Pi JSON events, matches helper/stage evidence via `expect_worker_runtime_stage()`, supports assistant-text assertions, and raises `StepTimeout` / `StepFailure` with the caller-provided label and log tail.
+- DONE: Focused harness coverage was updated and run.
+  Evidence: `tests/test_pi_runtime_harness.py` adds watcher tests for stage-milestone matching, labeled timeout failure, and streaming FO command assembly. `unset CLAUDECODE && uv run pytest tests/test_pi_runtime_harness.py -q` passed with `11 passed in 0.41s`.
+- SKIPPED: Full live Pi reuse proof completion after the watcher change.
+  Evidence: `unset CLAUDECODE && uv run pytest tests/test_pi_reuse_dispatch_live.py --runtime pi -v -s` was started after the watcher change but was interrupted by the captain before completion (`Command aborted`). The previous attempt showed the new watcher failing fast with a labeled timeout during final-exit waiting rather than burning a single global timeout.
+
+### Summary
+
+This pass adds the Pi equivalent of the progressive live-test watcher discipline used by Claude/Codex. The Pi reuse-dispatch live test now advances through observed stage milestones instead of relying on a monolithic 600s process timeout. The watcher is intentionally narrow: it is a harness primitive for Pi FO JSON logs, not a new runtime abstraction.
+
+### Commands Run
+
+- `unset CLAUDECODE && uv run pytest tests/test_pi_runtime_harness.py -q` — passed, `11 passed in 0.41s`.
+- `unset CLAUDECODE && uv run pytest tests/test_pi_reuse_dispatch_live.py --runtime pi -v -s` — interrupted by captain before completion (`Command aborted`).
+
+### Changed Files
+
+- `scripts/test_lib.py`
+- `tests/test_pi_reuse_dispatch_live.py`
+- `tests/test_pi_runtime_harness.py`
+- `docs/plans/pi-runtime-compatibility-baseline.md`
+
+### Remaining Gaps
+
+- The focused Pi reuse live proof should be rerun to completion under the new watcher.
+- The same streaming watcher pattern can be applied to other Pi FO live tests such as the gate-focused path.

@@ -197,7 +197,9 @@ def build_pi_first_officer_invocation_prompt(
         prompt = (
             f"{prompt}\n\n"
             f"The local Spacedock plugin directory is `{plugin_root}`; the status helper is "
-            f"`{plugin_root / 'skills' / 'commission' / 'bin' / 'status'}`."
+            f"`{plugin_root / 'skills' / 'commission' / 'bin' / 'status'}`. "
+            f"Use the authoritative Pi worker runtime helper at `{plugin_root / 'scripts' / 'pi_worker_runtime.py'}` "
+            f"with the registry sidecar `{plugin_root / 'scripts' / 'pi_session_registry.py'}` instead of improvising Pi worker lifecycle behavior in-model."
         )
     if run_goal:
         prompt = f"{prompt}\n\n{run_goal.strip()}"
@@ -1113,6 +1115,228 @@ class PiLogWatcher:
             self.process.close()
 
 
+class PiFOStreamWatcher:
+    """Progressive watcher for non-interactive Pi first-officer JSON logs.
+
+    Unlike ``run_pi_first_officer()``, this watcher lets live tests advance on
+    observed stage evidence (helper dispatch/reuse commands or final FO text)
+    while timeouts remain labeled failure backstops.
+    """
+
+    POLL_INTERVAL_S = 0.2
+    _LOG_TAIL_LINES = 20
+
+    def __init__(self, process: PiBackgroundProcess):
+        self.process = process
+        self.log_path = process.log_path
+        self._fh = None
+        self._buffer = ""
+        self._log_text = ""
+        self._assistant_text = ""
+
+    def _ensure_handle(self) -> None:
+        if self._fh is None:
+            self._fh = open(self.log_path, "r")
+
+    @staticmethod
+    def _collect_content_text(content: object) -> str:
+        if isinstance(content, str):
+            return content
+        if not isinstance(content, list):
+            return ""
+        parts: list[str] = []
+        for block in content:
+            if not isinstance(block, dict):
+                continue
+            for key in ("text", "thinking"):
+                value = block.get(key)
+                if isinstance(value, str):
+                    parts.append(value)
+        return "\n".join(parts)
+
+    @classmethod
+    def _assistant_text_from_entry(cls, entry: dict) -> str:
+        messages: list[dict] = []
+        direct = entry.get("message")
+        if isinstance(direct, dict):
+            messages.append(direct)
+        event = entry.get("assistantMessageEvent")
+        if isinstance(event, dict):
+            for key in ("message", "partial"):
+                value = event.get(key)
+                if isinstance(value, dict):
+                    messages.append(value)
+        parts: list[str] = []
+        for message in messages:
+            if message.get("role") == "assistant":
+                text = cls._collect_content_text(message.get("content"))
+                if text:
+                    parts.append(text)
+        return "\n".join(parts)
+
+    def _drain_entries(self) -> list[dict]:
+        self._ensure_handle()
+        chunk = self._fh.read()
+        entries: list[dict] = []
+        if not chunk:
+            return entries
+        self._buffer += chunk
+        while True:
+            newline_idx = self._buffer.find("\n")
+            if newline_idx < 0:
+                break
+            line = self._buffer[:newline_idx]
+            self._buffer = self._buffer[newline_idx + 1:]
+            stripped = line.strip()
+            if not stripped:
+                continue
+            self._log_text += stripped + "\n"
+            try:
+                entry = json.loads(stripped)
+            except json.JSONDecodeError:
+                continue
+            entries.append(entry)
+            assistant_text = self._assistant_text_from_entry(entry)
+            if assistant_text:
+                self._assistant_text += assistant_text + "\n"
+        return entries
+
+    def _log_tail(self, max_lines: int = _LOG_TAIL_LINES) -> str:
+        if not self.log_path.is_file():
+            return ""
+        try:
+            return "\n".join(self.log_path.read_text().splitlines()[-max_lines:])
+        except OSError:
+            return ""
+
+    def expect(self, predicate: Callable[[dict], bool], timeout_s: float, label: str) -> dict:
+        deadline = time.monotonic() + timeout_s
+        while True:
+            for entry in self._drain_entries():
+                try:
+                    if predicate(entry):
+                        return entry
+                except Exception:
+                    continue
+            if self.process.poll() is not None:
+                for entry in self._drain_entries():
+                    try:
+                        if predicate(entry):
+                            return entry
+                    except Exception:
+                        continue
+                raise StepFailure(
+                    f"Pi FO subprocess exited (code={self.process.poll()}) before "
+                    f"step {label!r} matched.\nLog tail:\n{self._log_tail()}",
+                    label=label,
+                    exit_code=self.process.poll(),
+                )
+            if time.monotonic() >= deadline:
+                raise StepTimeout(
+                    f"Step {label!r} did not match within {timeout_s}s.\n"
+                    f"Log tail:\n{self._log_tail()}",
+                    label=label,
+                )
+            time.sleep(self.POLL_INTERVAL_S)
+
+    def expect_log_regex(self, pattern: str, timeout_s: float, label: str, flags: int = re.IGNORECASE | re.DOTALL) -> str:
+        deadline = time.monotonic() + timeout_s
+        compiled = re.compile(pattern, flags)
+        while True:
+            self._drain_entries()
+            match = compiled.search(self._log_text)
+            if match:
+                return match.group(0)
+            if self.process.poll() is not None:
+                self._drain_entries()
+                match = compiled.search(self._log_text)
+                if match:
+                    return match.group(0)
+                raise StepFailure(
+                    f"Pi FO subprocess exited (code={self.process.poll()}) before "
+                    f"step {label!r} matched.\nLog tail:\n{self._log_tail()}",
+                    label=label,
+                    exit_code=self.process.poll(),
+                )
+            if time.monotonic() >= deadline:
+                raise StepTimeout(
+                    f"Step {label!r} did not match within {timeout_s}s.\n"
+                    f"Log tail:\n{self._log_tail()}",
+                    label=label,
+                )
+            time.sleep(self.POLL_INTERVAL_S)
+
+    def expect_assistant_regex(self, pattern: str, timeout_s: float, label: str, flags: int = re.IGNORECASE | re.DOTALL) -> str:
+        deadline = time.monotonic() + timeout_s
+        compiled = re.compile(pattern, flags)
+        while True:
+            self._drain_entries()
+            match = compiled.search(self._assistant_text)
+            if match:
+                return match.group(0)
+            if self.process.poll() is not None:
+                self._drain_entries()
+                match = compiled.search(self._assistant_text)
+                if match:
+                    return match.group(0)
+                raise StepFailure(
+                    f"Pi FO subprocess exited (code={self.process.poll()}) before "
+                    f"step {label!r} matched.\nLog tail:\n{self._log_tail()}",
+                    label=label,
+                    exit_code=self.process.poll(),
+                )
+            if time.monotonic() >= deadline:
+                raise StepTimeout(
+                    f"Step {label!r} did not match within {timeout_s}s.\n"
+                    f"Log tail:\n{self._log_tail()}",
+                    label=label,
+                )
+            time.sleep(self.POLL_INTERVAL_S)
+
+    def expect_worker_runtime_stage(self, stage_name: str, mode: str, timeout_s: float, label: str | None = None) -> str:
+        stage = re.escape(stage_name)
+        mode_pat = re.escape(mode)
+        helper_call = rf"pi_worker_runtime\.py\s+{mode_pat}\b(?:(?!pi_worker_runtime\.py).)*--stage-name\s+{stage}\b"
+        json_stage = rf'"stage_name"\s*:\s*"{stage_name}"'
+        fallback = {
+            ("analysis", "dispatch"): r"`analysis` session\s*=|analysis stage report|Stage Report: analysis",
+            ("implementation", "reuse"): r"Implementation worker reused(?: for implementation)?:\s*yes|`implementation` session\s*=|Stage Report: implementation",
+            ("validation", "dispatch"): r"Validation dispatched fresh(?: for validation)?:\s*yes|`validation` session\s*=|Stage Report: validation",
+        }.get((stage_name, mode), r"$^")
+        return self.expect_log_regex(
+            rf"(?:{helper_call})|(?:{json_stage}.*?{re.escape(mode)})|(?:{fallback})",
+            timeout_s=timeout_s,
+            label=label or f"Pi {mode} {stage_name} milestone",
+        )
+
+    def expect_exit(self, timeout_s: float) -> int:
+        try:
+            return self.process.wait(timeout=timeout_s)
+        except subprocess.TimeoutExpired as exc:
+            self.process.terminate()
+            try:
+                self.process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self.process.proc.kill()
+                self.process.wait()
+            raise StepTimeout(
+                f"Pi FO subprocess did not exit within {timeout_s}s.\n"
+                f"Log tail:\n{self._log_tail()}",
+                label="pi_fo_expect_exit",
+            ) from exc
+        finally:
+            self._drain_entries()
+            self.close()
+            self.process.close()
+
+    def close(self) -> None:
+        if self._fh is not None:
+            try:
+                self._fh.close()
+            finally:
+                self._fh = None
+
+
 
 def _build_pi_command(
     prompt: str,
@@ -1320,6 +1544,75 @@ def run_pi_first_officer(
         log_name=log_name,
         timeout_s=timeout_s,
     )
+
+
+@contextlib.contextmanager
+def run_pi_first_officer_streaming(
+    runner: TestRunner,
+    workflow_dir: str,
+    agent_id: str = "spacedock:first-officer",
+    run_goal: str | None = None,
+    extra_args: list[str] | None = None,
+    log_name: str = "pi-fo-log.jsonl",
+    hard_cap_s: int = 900,
+) -> Iterator[PiFOStreamWatcher]:
+    """Launch the Pi first-officer and yield a progressive log watcher.
+
+    Use this for live tests that need stage-by-stage progress assertions. The
+    context manager only enforces a final hard cap at teardown; happy-path test
+    progression should use the watcher's labeled ``expect_*`` methods.
+    """
+    workflow_path = (runner.test_project_dir / workflow_dir).resolve()
+    local_skill_path = runner.repo_root / "skills" / "first-officer"
+    prompt = build_pi_first_officer_invocation_prompt(
+        workflow_path,
+        run_goal=run_goal,
+        local_skill_path=local_skill_path,
+        local_plugin_root=runner.repo_root,
+    )
+    (runner.log_dir / "pi-fo-invocation.txt").write_text(prompt + "\n")
+
+    start = time.monotonic()
+    bg = launch_pi_prompt_background(
+        runner,
+        prompt,
+        session_dir=runner.test_dir / "pi-sessions",
+        skill_paths=[local_skill_path],
+        extra_args=extra_args,
+        log_name=log_name,
+    )
+    watcher = PiFOStreamWatcher(bg)
+    exception_exit = False
+    try:
+        yield watcher
+    except BaseException:
+        exception_exit = True
+        raise
+    finally:
+        try:
+            if bg.poll() is None:
+                if exception_exit:
+                    grace_s = 5
+                else:
+                    elapsed = time.monotonic() - start
+                    grace_s = max(hard_cap_s - elapsed, 1)
+                try:
+                    bg.wait(timeout=grace_s)
+                except subprocess.TimeoutExpired:
+                    bg.terminate()
+                    try:
+                        bg.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        bg.proc.kill()
+                        bg.wait()
+            watcher.close()
+            bg.close()
+            if bg.poll() is not None and bg.poll() != 0:
+                print(f"WARNING: pi first officer exited with code {bg.poll()}")
+        except Exception:
+            watcher.close()
+            bg.close()
+            raise
 
 
 

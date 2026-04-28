@@ -22,4 +22,4 @@ Return a concise completion summary that names:
 - what passed
 - what still needs attention
 
-After sending that completion summary, stop and wait for either shutdown or an explicit routed follow-up assignment.
+After sending that completion summary, stop immediately. Pi same-worker follow-up is delivered by the first officer reopening this same session later with a fresh `pi --session ...` turn; do not stay alive waiting inside the current non-interactive invocation.

@@ -41,8 +41,12 @@ def test_assembled_agent_content_supports_pi_runtime_contracts():
 
     assert "# Pi First Officer Runtime" in fo_text
     assert "first-class runtime target" in fo_text
+    assert "scripts/pi_worker_runtime.py" in fo_text
+    assert "scripts/pi_session_registry.py" in fo_text
     assert "# Pi Ensign Runtime" in ensign_text
     assert "session-backed worker" in ensign_text
+    assert "stop immediately" in ensign_text
+    assert "reopening this same session later" in ensign_text
 
 
 def test_pytest_runtime_option_accepts_pi():
