@@ -11,6 +11,13 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
+testpaths = [
+    "tests",
+]
+norecursedirs = [
+    "tests/fixtures",
+    "plugins",
+]
 markers = [
     "live_claude: spawns a live Claude runtime (pipe or PTY)",
     "live_codex: spawns a live Codex runtime",

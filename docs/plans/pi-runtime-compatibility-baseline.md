@@ -439,3 +439,37 @@ The progressive Pi FO watcher implementation is coherent for this slice. It prov
 
 - No blocking defects were identified in the latest progressive-timeout implementation slice.
 - The prior implementation note that the live rerun was interrupted is superseded by the successful live validation above.
+
+## Stage Report: implementation
+
+- DONE: Reproduced and root-caused static collection failures from repo-root pytest invocation.
+  Evidence: `uv run pytest -m 'not live' -q` previously recursed through `plugins/spacedock -> ..` and repeatedly loaded `tests/conftest.py`, raising `ValueError: option names {'--runtime'} already added`, while also collecting duplicate-basename fixture payload tests under `tests/fixtures/`.
+- DONE: Fixed pytest collection scope at the config source (pyproject), not by deleting fixtures.
+  Evidence: `pyproject.toml` now sets `testpaths = ["tests"]` and `norecursedirs = ["tests/fixtures", "plugins"]`, preventing both fixture-payload collection and plugin symlink recursion when pytest is launched from repo root without an explicit test path.
+- DONE: Added a focused regression guard for pytest collection config.
+  Evidence: new `tests/test_pytest_collection_config.py` asserts `testpaths` is scoped to `tests` and that `norecursedirs` includes both `tests/fixtures` and `plugins`.
+- DONE: Updated test docs to match the new default-collection behavior.
+  Evidence: `tests/README.md` now documents that default pytest collection excludes `tests/fixtures/` and `plugins/` via pyproject config.
+- DONE: Validated the static entrypoint after the fix.
+  Evidence: `make test-static` passed with `544 passed, 26 deselected, 10 subtests passed`; `uv run pytest -m 'not live' --collect-only -q` completed cleanly with `570 tests collected` and no recursive `plugins/spacedock/...` errors.
+
+### Summary
+
+This fix addresses the static red root cause by constraining pytest's default discovery scope in `pyproject.toml`. Repo-root pytest no longer walks the self-referential `plugins/spacedock` symlink tree or fixture payload test files, and static CI entrypoint behavior remains green.
+
+### Commands Run
+
+- `uv run pytest -m 'not live' -q` (reproduced pre-fix failure)
+- `make test-static`
+- `uv run pytest -m 'not live' --collect-only -q`
+
+### Changed Files
+
+- `pyproject.toml`
+- `tests/test_pytest_collection_config.py`
+- `tests/README.md`
+- `docs/plans/pi-runtime-compatibility-baseline.md`
+
+### Remaining Gaps
+
+- `uv run pytest -m 'not live' -q` is not the documented static entrypoint and can still run long/hang if it selects live-marked tests unexpectedly; `make test-static` remains the canonical stable offline command.
