@@ -249,3 +249,40 @@ I tightened the live Pi proof by making the repo-local ensign skill run in a rea
 
 - Pi shutdown is still proven only at the Spacedock metadata/routability layer, not via a distinct Pi-native session close primitive.
 - The live worktree proof is focused on the ensign path; broader FO-driven worktree reuse coverage can still be expanded later if needed.
+
+## Stage Report: validation
+
+- DONE: Review the Pi-related changes on this branch since commit `fec3f5c0`
+  Evidence: reviewed `git log fec3f5c0..HEAD`, `git diff --stat fec3f5c0..HEAD -- skills scripts tests`, and the Pi runtime/harness/live-test changes in `scripts/pi_worker_runtime.py`, `scripts/test_lib.py`, `tests/test_pi_runtime_harness.py`, `tests/test_pi_reopened_session_reuse.py`, `tests/test_pi_worker_runtime.py`, `tests/test_pi_worker_runtime_live.py`, and `tests/test_pi_ensign_skill_reuse_live.py`.
+- DONE: Run the relevant Pi validation tests for the current slice
+  Evidence: `unset CLAUDECODE && uv run pytest tests/test_pi_runtime_harness.py tests/test_pi_reopened_session_reuse.py tests/test_pi_worker_runtime.py tests/test_pi_worker_runtime_live.py tests/test_pi_ensign_skill_reuse_live.py tests/test_gate_guardrail.py --runtime pi -v` passed with `12 passed`.
+- DONE: Append a new validation stage report with evidence, commands run, changed files, and findings
+  Evidence: this `## Stage Report: validation` section was appended to `docs/plans/pi-runtime-compatibility-baseline.md`.
+- DONE: Commit the validation work if you make any changes
+  Evidence: committed with message `docs: record pi validation results`.
+
+### Summary
+
+I performed a focused review of the Pi-specific branch delta since `fec3f5c0` and reran the Pi harness, reuse, worker-runtime, live ensign-worktree, and gate-guardrail coverage needed for this slice. I did not find a blocking regression in the reviewed code; the main remaining gaps are still the lack of a Pi-native shutdown primitive and the absence of broader FO-driven worktree-reuse coverage beyond the current focused live proof.
+
+### Commands Run
+
+- `git status --short`
+- `git log --oneline --decorate --graph fec3f5c0..HEAD`
+- `git diff --stat fec3f5c0..HEAD -- skills scripts tests`
+- `git diff --name-only fec3f5c0..HEAD -- skills scripts tests`
+- `unset CLAUDECODE && uv run pytest tests/test_pi_runtime_harness.py tests/test_pi_reopened_session_reuse.py tests/test_pi_worker_runtime.py tests/test_pi_worker_runtime_live.py tests/test_pi_ensign_skill_reuse_live.py tests/test_gate_guardrail.py --runtime pi -v`
+
+### Changed Files
+
+- `docs/plans/pi-runtime-compatibility-baseline.md`
+
+### Findings
+
+- No blocking defects were identified in the reviewed Pi runtime delta.
+- The current live validation covers session reopen-by-id, reopen-by-session-file, stale-completion rejection, worktree-local ensign execution, and gate hold behavior.
+
+### Remaining Gaps
+
+- Pi shutdown is still validated only through Spacedock-side routability metadata, not through a proven Pi-native close/kill primitive.
+- FO-driven worktree follow-up coverage is still narrower than the direct ensign worktree reuse proof added on this branch.
