@@ -9,7 +9,7 @@ verdict:
 score: 0.5
 worktree: .worktrees/spacedock-ensign-haiku-bare-fo-guardrail-weaknesses
 issue:
-pr:
+pr: #160
 mod-block: merge:pr-merge
 ---
 
