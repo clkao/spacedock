@@ -217,3 +217,35 @@ Changed files in this slice:
 - `tests/test_pi_worker_runtime.py`
 - `tests/test_pi_worker_runtime_live.py`
 - `tests/test_pi_ensign_skill_reuse_live.py`
+
+## Stage Report: implementation
+
+- DONE: Prove worktree-backed Pi ensign behavior via a focused live test that uses the repo-local Pi ensign skill
+  Evidence: `tests/test_pi_ensign_skill_reuse_live.py` now creates a real `git worktree`, runs the repo-local `skills/ensign` skill with `worktree_path` set, and asserts the worktree entity changes while the main checkout copy stays unchanged.
+- DONE: Keep helper/runtime changes minimal and aligned with Pi-native reopened sessions
+  Evidence: only `tests/test_pi_ensign_skill_reuse_live.py` changed; the proof still uses the existing `run_pi_ensign()`/`build_pi_ensign_invocation_prompt()` helpers and reopens the same Pi session id for follow-up.
+- DONE: Append a new implementation stage report section with evidence, commands run, changed files, and remaining gaps
+  Evidence: this section is appended at the end of `docs/plans/pi-runtime-compatibility-baseline.md` and includes commands, changed files, and remaining gaps below.
+- DONE: Run the focused relevant tests for your changes
+  Evidence: `unset CLAUDECODE && uv run pytest tests/test_pi_worker_runtime_live.py tests/test_pi_ensign_skill_reuse_live.py -v` passed with `2 passed`.
+- DONE: Commit the work
+  Evidence: committed as `test: cover pi ensign worktree reopen live path`.
+
+### Summary
+
+I tightened the live Pi proof by making the repo-local ensign skill run in a real git worktree and then reopening the same Pi session for a follow-up turn on that same worktree. The assertions now show both session reuse and worktree isolation without expanding the runtime surface or helper layer beyond the existing Pi-native session helpers.
+
+### Commands Run
+
+- `unset CLAUDECODE && uv run pytest tests/test_pi_ensign_skill_reuse_live.py -v`
+- `unset CLAUDECODE && uv run pytest tests/test_pi_worker_runtime_live.py tests/test_pi_ensign_skill_reuse_live.py -v`
+
+### Changed Files
+
+- `tests/test_pi_ensign_skill_reuse_live.py`
+- `docs/plans/pi-runtime-compatibility-baseline.md`
+
+### Remaining Gaps
+
+- Pi shutdown is still proven only at the Spacedock metadata/routability layer, not via a distinct Pi-native session close primitive.
+- The live worktree proof is focused on the ensign path; broader FO-driven worktree reuse coverage can still be expanded later if needed.
