@@ -1,7 +1,7 @@
 ---
 id: 218
 title: "Pi runtime compatibility baseline"
-status: implementation
+status: validation
 source: "github#147"
 started: 2026-04-27T22:48:56Z
 completed:
