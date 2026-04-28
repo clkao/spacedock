@@ -176,22 +176,24 @@ This ideation pass reframes #147 as a minimum-runtime baseline problem rather th
 
 - DONE: Added first-slice Pi runtime contract surfaces for the FO, ensign, and pytest runtime selection.
   Evidence: `skills/first-officer/SKILL.md`, `skills/ensign/SKILL.md`, `skills/first-officer/references/pi-first-officer-runtime.md`, `skills/ensign/references/pi-ensign-runtime.md`, and `tests/conftest.py` now advertise/accept Pi.
-- DONE: Added an initial Pi harness entry that uses Pi JSON mode, explicit skill loading, and per-run session storage.
-  Evidence: `scripts/test_lib.py` now provides `build_pi_first_officer_invocation_prompt()` and `run_pi_first_officer()`, and `tests/test_pi_runtime_harness.py` verifies the assembled command shape uses `pi --mode json --print --session-dir ... --skill ...`.
+- DONE: Added Pi harness helpers that use Pi JSON mode, explicit local skill loading, and per-run session storage for both the FO and manually constructed ensign dispatches.
+  Evidence: `scripts/test_lib.py` now provides `build_pi_first_officer_invocation_prompt()`, `build_pi_ensign_invocation_prompt()`, `run_pi_first_officer()`, and `run_pi_ensign()`, and `tests/test_pi_runtime_harness.py` verifies the assembled command shapes use `pi --mode json --print --session-dir ... --skill ...` against the repo-local skills.
 - DONE: Added a minimal session-backed worker mapping scaffold for Pi reuse/shutdown bookkeeping.
   Evidence: `scripts/pi_session_registry.py` defines `WorkerSessionRecord` and `PiSessionRegistry`, and `tests/test_pi_session_registry.py` verifies metadata round-trip, active-again epoch bumps, and shutdown/unroutable behavior without introducing a second session system.
 - DONE: Live Pi gate-preflight workflow execution is now proven.
   Evidence: `tests/test_gate_guardrail.py --runtime pi -v` passes, `scripts/test_lib.py` now provides `PiLogParser`, and the gate test validates gate hold behavior plus explicit `gate review` / `waiting-for-approval` output from the Pi run.
 - DONE: Reopened-session Pi reuse is now proven for the first-slice same-worker semantics without adding new session-registry machinery.
-  Evidence: `tests/test_pi_reopened_session_reuse.py` drives three real `pi --mode json --print` turns against the same Pi session, first by session id and then by session file path. The assertions prove stable session identity, successful previous-turn recall, positive `cacheRead` on reopened turns, and growth of the same on-disk session file across follow-up turns.
+  Evidence: `tests/test_pi_reopened_session_reuse.py` drives three real `pi --mode json --print` turns against the same Pi session, first by session id and then by session file path. The assertions prove stable session identity, successful previous-turn recall, and growth of the same on-disk session file across follow-up turns.
 - DONE: Added a thin Pi worker runtime that turns the registry-backed session handle into dispatch/reuse/shutdown behavior while staying Pi-session-native.
   Evidence: `scripts/pi_worker_runtime.py` introduces `PiWorkerRuntime` and `PiWorkerCompletion`. Dispatch creates the initial session-backed worker record, reuse reopens the same Pi session and bumps `completion_epoch`, `completion_is_current()` rejects stale pre-reuse completions, and shutdown marks the worker unroutable via the existing registry.
+- DONE: The repo-local Pi ensign skill is now usable for manual session-backed worker dispatch and reopened follow-up.
+  Evidence: `tests/test_pi_ensign_skill_reuse_live.py` drives the local `skills/ensign` skill through two real Pi turns on the same session. The first turn updates an entity file, appends `## Stage Report: implementation`, and commits; the reopened follow-up updates the same entity again, appends `## Stage Report: validation`, commits again, and stays on the same Pi session id.
 - DONE: Same-worker routed follow-up, stale-completion rejection, and post-shutdown reroute blocking are now validated.
   Evidence: `tests/test_pi_worker_runtime.py` unit-tests the runtime bookkeeping against a fake Pi invoker, and `tests/test_pi_worker_runtime_live.py` proves the real Pi path can dispatch, reopen the same worker session for follow-up, reject the old completion as stale after the epoch bump, and refuse reuse after shutdown.
 - SKIPPED: Explicit shutdown on a real reused Pi worker session still does not prove a native Pi close/kill primitive.
   Evidence: the slice now proves the workflow-visible shutdown semantics (`mark unroutable`, block reroute) but still relies on Pi's natural non-interactive process exit rather than a distinct Pi-native session termination API.
 - DONE: Validation commands were rerun after the runtime slice landed.
-  Evidence: `unset CLAUDECODE && uv run pytest tests/test_pi_runtime_contract.py tests/test_pi_session_registry.py tests/test_pi_runtime_harness.py tests/test_pi_reopened_session_reuse.py tests/test_pi_worker_runtime.py tests/test_pi_worker_runtime_live.py tests/test_gate_guardrail.py --runtime pi -v` passed with `15 passed` in the assigned worktree.
+  Evidence: `unset CLAUDECODE && uv run pytest tests/test_pi_runtime_contract.py tests/test_pi_session_registry.py tests/test_pi_runtime_harness.py tests/test_pi_reopened_session_reuse.py tests/test_pi_worker_runtime.py tests/test_pi_worker_runtime_live.py tests/test_pi_ensign_skill_reuse_live.py tests/test_gate_guardrail.py --runtime pi -v` passed with `18 passed` in the assigned worktree.
 
 ### Implementation Summary
 
@@ -214,3 +216,4 @@ Changed files in this slice:
 - `tests/test_pi_reopened_session_reuse.py`
 - `tests/test_pi_worker_runtime.py`
 - `tests/test_pi_worker_runtime_live.py`
+- `tests/test_pi_ensign_skill_reuse_live.py`

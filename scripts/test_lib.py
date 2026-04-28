@@ -232,6 +232,64 @@ def build_codex_first_officer_invocation_prompt(
     return prompt
 
 
+def build_pi_ensign_invocation_prompt(
+    workflow_dir: str | Path,
+    entity_path: str | Path,
+    stage_name: str,
+    stage_definition_text: str,
+    worktree_path: str | Path | None,
+    checklist: list[str],
+    local_skill_path: str | Path | None = None,
+    local_plugin_root: str | Path | None = None,
+    worker_label: str | None = None,
+) -> str:
+    workflow_dir = Path(workflow_dir)
+    entity_path = Path(entity_path)
+    prompt = "/skill:ensign"
+    if local_skill_path is not None:
+        prompt = (
+            f"{prompt}\n\n"
+            f"The local ensign skill directory is `{Path(local_skill_path)}`."
+        )
+    if local_plugin_root is not None:
+        plugin_root = Path(local_plugin_root)
+        prompt = (
+            f"{prompt}\n\n"
+            f"The local Spacedock plugin directory is `{plugin_root}`; the status helper is "
+            f"`{plugin_root / 'skills' / 'commission' / 'bin' / 'status'}`."
+        )
+
+    lines = [
+        prompt,
+        "",
+        "Assignment:",
+    ]
+    if worker_label:
+        lines.append(f"worker_label: {worker_label}")
+    lines.extend(
+        [
+            f"workflow_dir: {workflow_dir}",
+            f"entity_path: {entity_path}",
+            f"stage_name: {stage_name}",
+            "stage_definition_text:",
+            stage_definition_text,
+        ]
+    )
+    if worktree_path is not None:
+        lines.append(f"worktree_path: {Path(worktree_path)}")
+    if checklist:
+        lines.extend(["checklist:"] + [f"- {item}" for item in checklist])
+    lines.extend(
+        [
+            "",
+            "Completion rule:",
+            "After you finish the assignment, write the stage report, commit your work, return one concise completion summary, and stop immediately.",
+        ]
+    )
+    return "\n".join(lines)
+
+
+
 def build_codex_worker_bootstrap_prompt(
     resolved_worker: dict[str, object],
     workflow_dir: Path,
@@ -1004,6 +1062,36 @@ def run_pi_prompt(
         print(f"WARNING: pi prompt exited with code {result.returncode}")
 
     return result.returncode
+
+
+
+def run_pi_ensign(
+    runner: TestRunner,
+    prompt: str,
+    *,
+    session_dir: Path | str,
+    session: Path | str | None = None,
+    extra_args: list[str] | None = None,
+    log_name: str = "pi-ensign-log.jsonl",
+    timeout_s: int = 120,
+    cwd: Path | str | None = None,
+    skill_paths: list[Path | str] | None = None,
+    no_context_files: bool = False,
+) -> int:
+    """Run the Pi ensign skill via `pi --mode json` using the local repo skill."""
+    effective_skill_paths = list(skill_paths or [runner.repo_root / "skills" / "ensign"])
+    return run_pi_prompt(
+        runner,
+        prompt,
+        session_dir=session_dir,
+        session=session,
+        extra_args=extra_args,
+        log_name=log_name,
+        timeout_s=timeout_s,
+        cwd=cwd,
+        skill_paths=effective_skill_paths,
+        no_context_files=no_context_files,
+    )
 
 
 

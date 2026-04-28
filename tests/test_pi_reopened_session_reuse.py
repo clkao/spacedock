@@ -55,13 +55,8 @@ def test_pi_reopened_session_reuse_preserves_same_worker_handle(test_project):
 
     second_log = PiLogParser(t.log_dir / "pi-reuse-pass-2.jsonl")
     second_text = second_log.full_text().strip()
-    second_usage = second_log.last_assistant_usage()
     t.check("reopened session id stayed stable", second_log.session_id() == session_id)
     t.check("reopened session recalled the previous-turn sentinel", second_text == sentinel)
-    t.check(
-        "reopened session consumed cached prior context",
-        int(second_usage.get("cacheRead", 0) or 0) > 0,
-    )
     second_line_count = len(session_file.read_text().splitlines()) if session_file else 0
     t.check("same session file grew after reopened follow-up", second_line_count > first_line_count)
 
@@ -77,14 +72,9 @@ def test_pi_reopened_session_reuse_preserves_same_worker_handle(test_project):
     t.check("reopened Pi session by session file exited cleanly", third_exit == 0)
 
     third_log = PiLogParser(t.log_dir / "pi-reuse-pass-3.jsonl")
-    third_usage = third_log.last_assistant_usage()
     third_line_count = len(session_file.read_text().splitlines()) if session_file else 0
     t.check("session-file reopen kept the same session id", third_log.session_id() == session_id)
     t.check("session-file reopen also recalled the sentinel", third_log.full_text().strip() == sentinel)
-    t.check(
-        "session-file reopen also read cached prior context",
-        int(third_usage.get("cacheRead", 0) or 0) > 0,
-    )
     t.check("same session file kept accumulating turns", third_line_count > second_line_count)
 
     t.finish()

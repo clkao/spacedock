@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Callable
 
 from pi_session_registry import PiSessionRegistry, WorkerSessionRecord
-from test_lib import PiLogParser, run_pi_prompt
+from test_lib import PiLogParser, run_pi_ensign
 
 
 @dataclass
@@ -32,7 +32,7 @@ class PiWorkerRuntime:
         self,
         registry: PiSessionRegistry,
         session_dir: Path | str,
-        invoke_pi: Callable[..., int] = run_pi_prompt,
+        invoke_pi: Callable[..., int] = run_pi_ensign,
     ):
         self.registry = registry
         self.session_dir = Path(session_dir)
