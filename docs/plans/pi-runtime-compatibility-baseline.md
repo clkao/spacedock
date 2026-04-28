@@ -9,7 +9,7 @@ verdict:
 score:
 worktree: .worktrees/spacedock-ensign-pi-runtime-compatibility-baseline
 issue: "#147"
-pr:
+pr: #155
 mod-block: merge:pr-merge
 ---
 
