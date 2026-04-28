@@ -10,7 +10,7 @@ OPUS_MODEL ?= opus
 
 test-static:
 	unset CLAUDECODE && uv run pytest tests/ --ignore=tests/fixtures \
-	  -m "not live_claude and not live_codex" -q
+	  -m "not live_claude and not live_codex and not live_pi" -q
 
 # Single-file live override — pass TEST=tests/<file>.py RUNTIME=claude|codex.
 # Replaces the old test-e2e-commission target: `make test-e2e TEST=tests/test_commission.py`.

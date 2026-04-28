@@ -473,3 +473,37 @@ This fix addresses the static red root cause by constraining pytest's default di
 ### Remaining Gaps
 
 - `uv run pytest -m 'not live' -q` is not the documented static entrypoint and can still run long/hang if it selects live-marked tests unexpectedly; `make test-static` remains the canonical stable offline command.
+
+## Stage Report: validation
+
+- DONE: Reviewed commit `1b646380` static collection fix against the repo-root pytest failure mode.
+  Evidence: `pyproject.toml` sets `testpaths = ["tests"]`; `norecursedirs` includes `tests/fixtures` and `plugins`; `tests/test_pytest_collection_config.py` guards those settings; `tests/README.md` documents default collection excluding fixture payloads and the self-referential plugin symlink.
+- FIXED: The static Makefile marker expression still selected Pi live tests because it only excluded `live_claude` and `live_codex`.
+  Evidence: pre-fix `unset CLAUDECODE && make test-static` timed out after 300s, and collect-only for `-m "not live_claude and not live_codex"` selected Pi live tests such as `tests/test_pi_background_worker_launch_live.py`; `Makefile` and `tests/README.md` now use `-m "not live_claude and not live_codex and not live_pi"`, and `tests/test_pytest_collection_config.py` now guards that static target expression.
+- DONE: Verified the collection fix does not hide intended repo tests.
+  Evidence: `unset CLAUDECODE && uv run pytest --collect-only -q` collected `571 tests` with no `tests/fixtures` or `plugins/spacedock` nodeids; `unset CLAUDECODE && uv run pytest tests/ --ignore=tests/fixtures --collect-only -q` also collected `571 tests`, showing pyproject default collection matches the explicit repo test path.
+- DONE: Reran focused and static validation with uv-backed commands.
+  Evidence: `unset CLAUDECODE && uv run pytest tests/test_pytest_collection_config.py -q` passed with `3 passed`; `unset CLAUDECODE && make test-static` passed with `540 passed, 31 deselected, 10 subtests passed in 25.54s`.
+
+### Recommendation
+
+PASSED after the validation fix. The pyproject collection scope is appropriate for repo static CI, fixture payloads and the self-referential `plugins/spacedock` symlink are excluded from default discovery, and static CI now excludes all live runtime markers including Pi.
+
+### Commands Run
+
+- `unset CLAUDECODE && make test-static` — pre-fix timed out after 300s while the stale static marker expression selected Pi live tests.
+- `unset CLAUDECODE && uv run pytest tests/ --ignore=tests/fixtures -m "not live_claude and not live_codex" --collect-only -q`
+- `unset CLAUDECODE && uv run pytest tests/test_pytest_collection_config.py -q`
+- `unset CLAUDECODE && uv run pytest tests/ --ignore=tests/fixtures -m "not live_claude and not live_codex and not live_pi" --collect-only -q`
+- `unset CLAUDECODE && uv run pytest -m "not live_claude and not live_codex and not live_pi" --collect-only -q`
+- `unset CLAUDECODE && uv run pytest --collect-only -q`
+- `unset CLAUDECODE && uv run pytest --collect-only -q | grep -E 'tests/fixtures|plugins/spacedock' || true`
+- `unset CLAUDECODE && uv run pytest tests/ --ignore=tests/fixtures --collect-only -q`
+- `unset CLAUDECODE && make test-static`
+
+### Changed Files
+
+- `Makefile`
+- `tests/README.md`
+- `tests/test_pytest_collection_config.py`
+- `docs/plans/pi-runtime-compatibility-baseline.md`

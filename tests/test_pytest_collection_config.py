@@ -13,6 +13,7 @@ import tomllib
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 PYPROJECT_PATH = REPO_ROOT / "pyproject.toml"
+MAKEFILE_PATH = REPO_ROOT / "Makefile"
 
 
 def pytest_ini_options() -> dict:
@@ -30,3 +31,8 @@ def test_pytest_default_collection_excludes_fixture_and_plugin_recursion():
     norecursedirs = set(options.get("norecursedirs", []))
     assert "tests/fixtures" in norecursedirs
     assert "plugins" in norecursedirs
+
+
+def test_static_make_target_excludes_all_live_runtime_markers():
+    makefile = MAKEFILE_PATH.read_text()
+    assert '-m "not live_claude and not live_codex and not live_pi"' in makefile

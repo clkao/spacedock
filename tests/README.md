@@ -212,7 +212,7 @@ make test-live-codex                                  # all live_codex tests
 make test-e2e TEST=tests/test_gate_guardrail.py RUNTIME=codex   # single-file override
 ```
 
-- `make test-static` runs `pytest tests/ --ignore=tests/fixtures -m "not live_claude and not live_codex"`.
+- `make test-static` runs `pytest tests/ --ignore=tests/fixtures -m "not live_claude and not live_codex and not live_pi"`.
 - `make test-live-claude` runs the serial tier first (`-m "live_claude and serial" -x`), then the parallel tier (`-m "live_claude and not serial" -n $LIVE_CLAUDE_WORKERS`) regardless of the serial tier's outcome, and fails overall if either tier failed. `make test-live-codex` uses the same split with `LIVE_CODEX_WORKERS`; its cheap shared-runtime preflight is `test_gate_guardrail.py`, and the wrapper still tolerates any intentionally empty marker tier without masking real test failures.
 - `make test-live-claude-opus` is the same shape with `--model opus --effort low` overrides.
 - `make test-e2e` is the single-file override — pass `TEST=...` for the target file and `RUNTIME=claude|codex` for the runtime. This replaces the old `test-e2e-commission` target (use `TEST=tests/test_commission.py`).
