@@ -10,7 +10,7 @@ score: 0.66
 worktree: .worktrees/spacedock-ensign-pluggable-id-style-collaboration-friendly-ids
 issue: "#150"
 pr: #159
-mod-block: merge:pr-merge
+mod-block: 
 ---
 
 Spacedock should support pluggable `id-style` strategies and add an `sd-b32` ID style that is better for collaborative workflows than centrally allocated sequential numbers.
