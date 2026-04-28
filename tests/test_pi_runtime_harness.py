@@ -54,9 +54,11 @@ def test_pi_ensign_prompt_can_pin_local_skill_and_assignment_fields():
 
     assert "/skill:ensign" in prompt
     assert "/tmp/spacedock/skills/ensign" in prompt
-    assert "worker_label: 218-implementation/Ensign" in prompt
-    assert "entity_path: /tmp/workflow/task.md" in prompt
-    assert "stage_name: implementation" in prompt
+    assert "Worker label: 218-implementation/Ensign" in prompt
+    assert "Read the entity file at /tmp/workflow/task.md" in prompt
+    assert "Stage: implementation" in prompt
+    assert "### Completion checklist" in prompt
+    assert "### Stage report" in prompt
     assert "- Append a note" in prompt
 
 
@@ -66,12 +68,25 @@ def test_run_pi_prompt_can_target_a_specific_reopened_session(monkeypatch):
 
     seen: dict[str, object] = {}
 
-    def fake_run(cmd, **kwargs):
+    class FakeProc:
+        def __init__(self):
+            self.returncode = 0
+
+        def wait(self, timeout=None):
+            return 0
+
+        def terminate(self):
+            self.returncode = -15
+
+        def poll(self):
+            return self.returncode
+
+    def fake_popen(cmd, **kwargs):
         seen["cmd"] = cmd
         seen["kwargs"] = kwargs
-        return subprocess.CompletedProcess(cmd, 0)
+        return FakeProc()
 
-    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
 
     exit_code = test_lib.run_pi_prompt(
         runner,
@@ -92,18 +107,75 @@ def test_run_pi_prompt_can_target_a_specific_reopened_session(monkeypatch):
 
 
 
+def test_launch_pi_prompt_background_redirects_output_to_log_file(monkeypatch):
+    runner = TestRunner("pi background harness", keep_test_dir=False)
+    create_test_project(runner)
+
+    seen: dict[str, object] = {}
+
+    class FakeProc:
+        def __init__(self):
+            self.returncode = None
+
+        def poll(self):
+            return self.returncode
+
+        def wait(self, timeout=None):
+            self.returncode = 0
+            return 0
+
+        def terminate(self):
+            self.returncode = -15
+
+    def fake_popen(cmd, **kwargs):
+        seen["cmd"] = cmd
+        seen["kwargs"] = kwargs
+        return FakeProc()
+
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+
+    bg = test_lib.launch_pi_prompt_background(
+        runner,
+        "background prompt",
+        session_dir=runner.test_dir / "pi-sessions",
+        log_name="pi-background-log.jsonl",
+        no_context_files=True,
+    )
+
+    assert seen["cmd"][:4] == ["pi", "--mode", "json", "--print"]
+    assert seen["kwargs"]["stderr"] == subprocess.STDOUT
+    assert seen["kwargs"]["cwd"] == runner.test_project_dir
+    assert seen["kwargs"]["text"] is True
+    assert Path(seen["kwargs"]["stdout"].name) == runner.log_dir / "pi-background-log.jsonl"
+    bg.close()
+
+
+
 def test_run_pi_ensign_assembles_pi_json_command(monkeypatch):
     runner = TestRunner("pi ensign harness", keep_test_dir=False)
     create_test_project(runner)
 
     seen: dict[str, object] = {}
 
-    def fake_run(cmd, **kwargs):
+    class FakeProc:
+        def __init__(self):
+            self.returncode = 0
+
+        def wait(self, timeout=None):
+            return 0
+
+        def terminate(self):
+            self.returncode = -15
+
+        def poll(self):
+            return self.returncode
+
+    def fake_popen(cmd, **kwargs):
         seen["cmd"] = cmd
         seen["kwargs"] = kwargs
-        return subprocess.CompletedProcess(cmd, 0)
+        return FakeProc()
 
-    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
 
     exit_code = test_lib.run_pi_ensign(
         runner,
@@ -130,12 +202,25 @@ def test_run_pi_first_officer_assembles_pi_json_command(monkeypatch, tmp_path):
 
     seen: dict[str, object] = {}
 
-    def fake_run(cmd, **kwargs):
+    class FakeProc:
+        def __init__(self):
+            self.returncode = 0
+
+        def wait(self, timeout=None):
+            return 0
+
+        def terminate(self):
+            self.returncode = -15
+
+        def poll(self):
+            return self.returncode
+
+    def fake_popen(cmd, **kwargs):
         seen["cmd"] = cmd
         seen["kwargs"] = kwargs
-        return subprocess.CompletedProcess(cmd, 0)
+        return FakeProc()
 
-    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
 
     exit_code = test_lib.run_pi_first_officer(
         runner,

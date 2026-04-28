@@ -286,3 +286,40 @@ I performed a focused review of the Pi-specific branch delta since `fec3f5c0` an
 
 - Pi shutdown is still validated only through Spacedock-side routability metadata, not through a proven Pi-native close/kill primitive.
 - FO-driven worktree follow-up coverage is still narrower than the direct ensign worktree reuse proof added on this branch.
+
+## Stage Report: implementation
+
+- DONE: Build an FO-usable Pi worker launcher that keeps worker output in dedicated logs instead of the main operator surface
+  Evidence: `scripts/test_lib.py` now provides `launch_pi_prompt_background()`, `launch_pi_ensign_background()`, `PiBackgroundProcess`, and `PiLogWatcher`, all of which redirect Pi worker stdout/stderr to per-worker JSONL log files while preserving session-dir-based worker identity.
+- DONE: Keep Pi manual-dispatch prompt assembly aligned with the established helper shape
+  Evidence: `build_pi_ensign_invocation_prompt()` now mirrors the key `claude-team build` sections from `skills/commission/bin/claude-team` (`### Stage definition`, worktree instructions, entity-read instruction, `### Completion checklist`, and `### Stage report`) instead of using a one-off ad hoc prompt shape.
+- DONE: Prove the non-blocking background Pi worker path and registry-backed completion collection
+  Evidence: `tests/test_pi_worker_runtime.py` now covers `dispatch_background()`, `reuse_background()`, and `collect_background_completion()`, while `tests/test_pi_background_worker_launch_live.py` proves a live Pi worker can launch with a dedicated log sink, return a stable session handle immediately, and later complete successfully.
+- DONE: Run the expanded Pi validation suite including the new background-launch path
+  Evidence: `unset CLAUDECODE && uv run pytest tests/test_pi_runtime_contract.py tests/test_pi_session_registry.py tests/test_pi_runtime_harness.py tests/test_pi_reopened_session_reuse.py tests/test_pi_worker_runtime.py tests/test_pi_worker_runtime_live.py tests/test_pi_ensign_skill_reuse_live.py tests/test_pi_background_worker_launch_live.py tests/test_gate_guardrail.py --runtime pi -v` passed with `21 passed`.
+- SKIPPED: Pi HOME isolation / credential relocation
+  Evidence: this slice intentionally preserved ambient Pi login/config state and only isolates worker sessions via `--session-dir`; no `HOME` or `PI_CODING_AGENT_DIR` override was added yet.
+
+### Summary
+
+I added a Pi worker launcher shape that is closer to how the FO will actually need to dispatch subagents: background process, dedicated worker log, immediate handle return, and later completion collection via the session-backed registry. I also aligned Pi manual dispatch prompts with the established `claude-team build` structure so the Pi path reuses the same checklist and stage-report conventions instead of drifting into a Pi-only prompt contract.
+
+### Commands Run
+
+- `uv run pytest tests/test_pi_runtime_harness.py tests/test_pi_worker_runtime.py -q`
+- `uv run pytest tests/test_pi_background_worker_launch_live.py -q`
+- `unset CLAUDECODE && uv run pytest tests/test_pi_runtime_contract.py tests/test_pi_session_registry.py tests/test_pi_runtime_harness.py tests/test_pi_reopened_session_reuse.py tests/test_pi_worker_runtime.py tests/test_pi_worker_runtime_live.py tests/test_pi_ensign_skill_reuse_live.py tests/test_pi_background_worker_launch_live.py tests/test_gate_guardrail.py --runtime pi -v`
+
+### Changed Files
+
+- `scripts/test_lib.py`
+- `scripts/pi_worker_runtime.py`
+- `tests/test_pi_runtime_harness.py`
+- `tests/test_pi_worker_runtime.py`
+- `tests/test_pi_background_worker_launch_live.py`
+- `docs/plans/pi-runtime-compatibility-baseline.md`
+
+### Remaining Gaps
+
+- Pi shutdown is still only proven at the Spacedock routability/metadata layer rather than through a Pi-native session close primitive.
+- Pi login/config still comes from the ambient environment; only worker session storage is isolated today.

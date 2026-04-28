@@ -243,44 +243,70 @@ def build_pi_ensign_invocation_prompt(
     local_plugin_root: str | Path | None = None,
     worker_label: str | None = None,
 ) -> str:
+    """Assemble a Pi ensign prompt.
+
+    Shape this close to `skills/commission/bin/claude-team cmd_build` so the
+    Pi manual-dispatch path carries the same stage-definition, worktree, entity
+    read, completion checklist, and stage-report structure as the established
+    Claude helper path.
+    """
     workflow_dir = Path(workflow_dir)
     entity_path = Path(entity_path)
-    prompt = "/skill:ensign"
+    lines = ["/skill:ensign"]
     if local_skill_path is not None:
-        prompt = (
-            f"{prompt}\n\n"
-            f"The local ensign skill directory is `{Path(local_skill_path)}`."
-        )
+        lines.extend([
+            "",
+            f"The local ensign skill directory is `{Path(local_skill_path)}`.",
+        ])
     if local_plugin_root is not None:
         plugin_root = Path(local_plugin_root)
-        prompt = (
-            f"{prompt}\n\n"
-            f"The local Spacedock plugin directory is `{plugin_root}`; the status helper is "
-            f"`{plugin_root / 'skills' / 'commission' / 'bin' / 'status'}`."
+        lines.extend(
+            [
+                "",
+                f"The local Spacedock plugin directory is `{plugin_root}`; the status helper is "
+                f"`{plugin_root / 'skills' / 'commission' / 'bin' / 'status'}`.",
+            ]
         )
-
-    lines = [
-        prompt,
-        "",
-        "Assignment:",
-    ]
     if worker_label:
-        lines.append(f"worker_label: {worker_label}")
+        lines.extend(["", f"Worker label: {worker_label}"])
+
+    lines.extend([
+        "",
+        f"Stage: {stage_name}",
+        "",
+        "### Stage definition:",
+        "",
+        stage_definition_text,
+        "",
+    ])
+    if worktree_path is not None:
+        worktree_path = Path(worktree_path)
+        lines.extend(
+            [
+                f"Your working directory is {worktree_path}",
+                f"All file reads and writes MUST use paths under {worktree_path}.",
+                "",
+            ]
+        )
     lines.extend(
         [
-            f"workflow_dir: {workflow_dir}",
-            f"entity_path: {entity_path}",
-            f"stage_name: {stage_name}",
-            "stage_definition_text:",
-            stage_definition_text,
+            f"Read the entity file at {entity_path} for the full spec.",
+            f"Workflow directory: {workflow_dir}",
+            "",
+            "### Completion checklist",
+            "",
         ]
     )
-    if worktree_path is not None:
-        lines.append(f"worktree_path: {Path(worktree_path)}")
-    if checklist:
-        lines.extend(["checklist:"] + [f"- {item}" for item in checklist])
+    lines.extend(f"- {item}" for item in checklist)
     lines.extend(
         [
+            "",
+            "### Stage report",
+            "",
+            "Append a Stage Report section at the end of the entity file using the shared-core Stage Report Protocol.",
+            f"Use the title `Stage Report: {stage_name}`.",
+            "Account for every checklist item above with a `- DONE:` / `- SKIPPED:` / `- FAILED:` entry.",
+            "Use the checklist item text verbatim when possible.",
             "",
             "Completion rule:",
             "After you finish the assignment, write the stage report, commit your work, return one concise completion summary, and stop immediately.",
@@ -1005,24 +1031,100 @@ def run_first_officer_streaming(
             raise
 
 
-def run_pi_prompt(
-    runner: TestRunner,
+@dataclass
+class PiBackgroundProcess:
+    proc: subprocess.Popen
+    log_path: Path
+    session_dir: Path
+    log_file: object
+
+    def poll(self) -> int | None:
+        return self.proc.poll()
+
+    def wait(self, timeout: float | None = None) -> int:
+        return self.proc.wait(timeout=timeout)
+
+    def terminate(self) -> None:
+        self.proc.terminate()
+
+    def close(self) -> None:
+        if not self.log_file.closed:
+            self.log_file.close()
+
+
+class PiLogWatcher:
+    POLL_INTERVAL_S = 0.2
+
+    def __init__(self, process: PiBackgroundProcess):
+        self.process = process
+
+    def _wait_for_parser(self, timeout_s: float) -> PiLogParser:
+        deadline = time.monotonic() + timeout_s
+        while True:
+            parser = PiLogParser(self.process.log_path)
+            if parser.session_id():
+                return parser
+            if self.process.poll() is not None and time.monotonic() >= deadline:
+                raise StepFailure(
+                    f"Pi worker exited before session id appeared in {self.process.log_path}",
+                    label="pi_session_id",
+                    exit_code=self.process.poll(),
+                )
+            if time.monotonic() >= deadline:
+                raise StepTimeout(
+                    f"Pi worker session id did not appear within {timeout_s}s in {self.process.log_path}",
+                    label="pi_session_id",
+                )
+            time.sleep(self.POLL_INTERVAL_S)
+
+    def wait_for_session_id(self, timeout_s: float) -> str:
+        return self._wait_for_parser(timeout_s).session_id() or ""
+
+    def wait_for_session_file(self, timeout_s: float) -> Path:
+        deadline = time.monotonic() + timeout_s
+        while True:
+            parser = self._wait_for_parser(min(timeout_s, max(deadline - time.monotonic(), 0.1)))
+            session_file = parser.session_file(self.process.session_dir)
+            if session_file is not None:
+                return session_file
+            if self.process.poll() is not None and time.monotonic() >= deadline:
+                raise StepFailure(
+                    f"Pi worker exited before session file appeared in {self.process.log_path}",
+                    label="pi_session_file",
+                    exit_code=self.process.poll(),
+                )
+            if time.monotonic() >= deadline:
+                raise StepTimeout(
+                    f"Pi worker session file did not appear within {timeout_s}s in {self.process.log_path}",
+                    label="pi_session_file",
+                )
+            time.sleep(self.POLL_INTERVAL_S)
+
+    def wait_for_exit(self, timeout_s: float) -> int:
+        try:
+            return self.process.wait(timeout=timeout_s)
+        except subprocess.TimeoutExpired as exc:
+            self.process.terminate()
+            raise StepTimeout(
+                f"Pi worker did not exit within {timeout_s}s: {self.process.log_path}",
+                label="pi_expect_exit",
+            ) from exc
+        finally:
+            self.process.close()
+
+
+
+def _build_pi_command(
     prompt: str,
     *,
     session_dir: Path | str,
     session: Path | str | None = None,
     extra_args: list[str] | None = None,
-    log_name: str = "pi-log.jsonl",
-    timeout_s: int = 120,
-    cwd: Path | str | None = None,
     skill_paths: list[Path | str] | None = None,
     no_context_files: bool = False,
-) -> int:
-    """Run a non-interactive Pi prompt and capture the JSON event stream."""
-    log_path = runner.log_dir / log_name
+) -> tuple[list[str], Path]:
     session_dir = Path(session_dir)
     session_dir.mkdir(parents=True, exist_ok=True)
-
     cmd = [
         "pi",
         "--mode",
@@ -1042,26 +1144,115 @@ def run_pi_prompt(
     if extra_args:
         cmd[4:4] = list(extra_args)
     cmd.append(prompt)
+    return cmd, session_dir
 
-    with open(log_path, "w") as log_file:
-        try:
-            result = subprocess.run(
-                cmd,
-                stdout=log_file,
-                stderr=subprocess.STDOUT,
-                cwd=cwd or runner.test_project_dir,
-                timeout=timeout_s,
-                text=True,
-            )
-        except subprocess.TimeoutExpired:
-            print(f"\n  TIMEOUT: pi prompt exceeded {timeout_s}s limit")
-            return 124
+
+
+def launch_pi_prompt_background(
+    runner: TestRunner,
+    prompt: str,
+    *,
+    session_dir: Path | str,
+    session: Path | str | None = None,
+    extra_args: list[str] | None = None,
+    log_name: str = "pi-log.jsonl",
+    cwd: Path | str | None = None,
+    skill_paths: list[Path | str] | None = None,
+    no_context_files: bool = False,
+) -> PiBackgroundProcess:
+    """Launch Pi non-interactively with output redirected to a dedicated log file."""
+    log_path = runner.log_dir / log_name
+    cmd, resolved_session_dir = _build_pi_command(
+        prompt,
+        session_dir=session_dir,
+        session=session,
+        extra_args=extra_args,
+        skill_paths=skill_paths,
+        no_context_files=no_context_files,
+    )
+    log_file = open(log_path, "w")
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            stdout=log_file,
+            stderr=subprocess.STDOUT,
+            cwd=cwd or runner.test_project_dir,
+            text=True,
+        )
+    except Exception:
+        log_file.close()
+        raise
+    return PiBackgroundProcess(proc=proc, log_path=log_path, session_dir=resolved_session_dir, log_file=log_file)
+
+
+
+def run_pi_prompt(
+    runner: TestRunner,
+    prompt: str,
+    *,
+    session_dir: Path | str,
+    session: Path | str | None = None,
+    extra_args: list[str] | None = None,
+    log_name: str = "pi-log.jsonl",
+    timeout_s: int = 120,
+    cwd: Path | str | None = None,
+    skill_paths: list[Path | str] | None = None,
+    no_context_files: bool = False,
+) -> int:
+    """Run a non-interactive Pi prompt and capture the JSON event stream."""
+    bg = launch_pi_prompt_background(
+        runner,
+        prompt,
+        session_dir=session_dir,
+        session=session,
+        extra_args=extra_args,
+        log_name=log_name,
+        cwd=cwd,
+        skill_paths=skill_paths,
+        no_context_files=no_context_files,
+    )
+    try:
+        result = bg.wait(timeout=timeout_s)
+    except subprocess.TimeoutExpired:
+        bg.terminate()
+        bg.close()
+        print(f"\n  TIMEOUT: pi prompt exceeded {timeout_s}s limit")
+        return 124
+    finally:
+        bg.close()
 
     print()
-    if result.returncode != 0:
-        print(f"WARNING: pi prompt exited with code {result.returncode}")
+    if result != 0:
+        print(f"WARNING: pi prompt exited with code {result}")
 
-    return result.returncode
+    return result
+
+
+
+def launch_pi_ensign_background(
+    runner: TestRunner,
+    prompt: str,
+    *,
+    session_dir: Path | str,
+    session: Path | str | None = None,
+    extra_args: list[str] | None = None,
+    log_name: str = "pi-ensign-log.jsonl",
+    cwd: Path | str | None = None,
+    skill_paths: list[Path | str] | None = None,
+    no_context_files: bool = False,
+) -> PiBackgroundProcess:
+    effective_skill_paths = list(skill_paths or [runner.repo_root / "skills" / "ensign"])
+    return launch_pi_prompt_background(
+        runner,
+        prompt,
+        session_dir=session_dir,
+        session=session,
+        extra_args=extra_args,
+        log_name=log_name,
+        cwd=cwd,
+        skill_paths=effective_skill_paths,
+        no_context_files=no_context_files,
+    )
 
 
 

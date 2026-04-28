@@ -14,7 +14,50 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 from pi_session_registry import PiSessionRegistry  # noqa: E402
 from pi_worker_runtime import PiWorkerRuntime  # noqa: E402
-from test_lib import TestRunner, create_test_project  # noqa: E402
+from test_lib import PiBackgroundProcess, TestRunner, create_test_project  # noqa: E402
+
+
+class _FakeBackgroundLauncher:
+    def __init__(self, runner: TestRunner, session_dir: Path):
+        self.runner = runner
+        self.session_dir = Path(session_dir)
+        self.calls: list[dict] = []
+        self.turn = 0
+        self.session_id = "pi-session-123"
+        self.session_file = self.session_dir / f"2026-04-27T23-41-25-454Z_{self.session_id}.jsonl"
+
+    def __call__(self, runner: TestRunner, prompt: str, **kwargs):
+        assert runner is self.runner
+        self.turn += 1
+        self.calls.append({"prompt": prompt, **kwargs})
+        log_path = runner.log_dir / kwargs["log_name"]
+        self.session_dir.mkdir(parents=True, exist_ok=True)
+        self.session_file.write_text((self.session_file.read_text() if self.session_file.exists() else "") + f"turn {self.turn}\n")
+        reply = "INITIAL_OK" if self.turn == 1 else "FOLLOWUP_OK"
+        log_path.write_text(
+            f'{{"type":"session","id":"{self.session_id}"}}\n'
+            f'{{"type":"message_end","message":{{"role":"assistant","content":[{{"type":"text","text":"{reply}"}}]}}}}\n'
+        )
+
+        class _Proc:
+            def __init__(self):
+                self.returncode = 0
+
+            def poll(self):
+                return self.returncode
+
+            def wait(self, timeout=None):
+                return self.returncode
+
+            def terminate(self):
+                self.returncode = -15
+
+        class _LogFile:
+            closed = False
+            def close(self):
+                self.closed = True
+
+        return PiBackgroundProcess(proc=_Proc(), log_path=log_path, session_dir=self.session_dir, log_file=_LogFile())
 
 
 class _FakePiInvoker:
@@ -39,6 +82,59 @@ class _FakePiInvoker:
             f'{{"type":"message_end","message":{{"role":"assistant","content":[{{"type":"text","text":"{reply}"}}]}}}}\n'
         )
         return 0
+
+
+def test_pi_worker_runtime_background_launch_returns_handle_and_collects_completion(tmp_path):
+    runner = TestRunner("pi worker runtime background", keep_test_dir=False)
+    create_test_project(runner)
+
+    session_dir = tmp_path / "pi-sessions"
+    launcher = _FakeBackgroundLauncher(runner, session_dir)
+    runtime = PiWorkerRuntime(
+        PiSessionRegistry(tmp_path / "pi-workers.json"),
+        session_dir,
+        launch_pi=launcher,
+    )
+
+    record, process = runtime.dispatch_background(
+        runner,
+        worker_label="218-implementation/Ensign",
+        prompt="Do the first task.",
+        cwd=runner.test_project_dir,
+        entity_slug="pi-runtime-compatibility-baseline",
+        stage_name="implementation",
+        no_context_files=True,
+        log_name="dispatch-bg.jsonl",
+    )
+    assert record.state == "active"
+    assert record.session_id == "pi-session-123"
+    completion = runtime.collect_background_completion(
+        "218-implementation/Ensign",
+        process,
+        timeout_s=1,
+        completion_epoch=record.completion_epoch,
+    )
+    assert completion.final_text == "INITIAL_OK"
+    assert runtime.completion_is_current("218-implementation/Ensign", completion) is True
+
+    reuse_record, reuse_process = runtime.reuse_background(
+        runner,
+        worker_label="218-implementation/Ensign",
+        prompt="Do the second task.",
+        log_name="reuse-bg.jsonl",
+        no_context_files=True,
+    )
+    assert reuse_record.completion_epoch == 1
+    follow_up = runtime.collect_background_completion(
+        "218-implementation/Ensign",
+        reuse_process,
+        timeout_s=1,
+        completion_epoch=reuse_record.completion_epoch,
+        stage_name="validation",
+    )
+    assert follow_up.final_text == "FOLLOWUP_OK"
+    assert runtime.completion_is_current("218-implementation/Ensign", follow_up) is True
+
 
 
 def test_pi_worker_runtime_tracks_dispatch_reuse_and_shutdown(tmp_path):
