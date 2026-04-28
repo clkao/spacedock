@@ -408,3 +408,34 @@ This pass adds the Pi equivalent of the progressive live-test watcher discipline
 
 - The focused Pi reuse live proof should be rerun to completion under the new watcher.
 - The same streaming watcher pattern can be applied to other Pi FO live tests such as the gate-focused path.
+
+## Stage Report: validation
+
+- DONE: Reviewed the latest progressive-timeout Pi FO reuse slice against the current branch implementation.
+  Evidence: inspected `git log --oneline -n 12`, `git show --stat HEAD`, `scripts/test_lib.py` (`PiFOStreamWatcher` / `run_pi_first_officer_streaming()`), `tests/test_pi_runtime_harness.py`, and `tests/test_pi_reuse_dispatch_live.py`.
+- DONE: Ran the required focused Pi harness validation.
+  Evidence: `unset CLAUDECODE && uv run pytest tests/test_pi_runtime_harness.py -q` passed with `11 passed in 0.45s`.
+- DONE: Ran the focused live Pi FO reuse validation under the new progressive watcher.
+  Evidence: `unset CLAUDECODE && uv run pytest tests/test_pi_reuse_dispatch_live.py --runtime pi -v -s` passed with `1 passed in 300.12s`; the test observed analysis dispatch, implementation reuse, validation fresh-dispatch, and final reuse/fresh-dispatch summary milestones before clean FO exit, then reported `19 passed, 0 failed` checks.
+- DONE: Validation recommendation: PASSED for this latest progressive timeout per-stage slice.
+  Evidence: the live test now completes under the per-stage watcher rather than relying on a single monolithic harness timeout, and no blocking defects were found in the reviewed slice.
+
+### Summary
+
+The progressive Pi FO watcher implementation is coherent for this slice. It provides labeled per-stage milestone waits, preserves the required Pi JSON command shape, and the focused live reuse test completed successfully with evidence for same-session implementation reuse and fresh validation dispatch.
+
+### Commands Run
+
+- `git status --short && git log --oneline --decorate -n 12`
+- `git show --stat --oneline HEAD && git show --name-only --format=fuller HEAD --`
+- `unset CLAUDECODE && uv run pytest tests/test_pi_runtime_harness.py -q`
+- `unset CLAUDECODE && uv run pytest tests/test_pi_reuse_dispatch_live.py --runtime pi -v -s`
+
+### Changed Files
+
+- `docs/plans/pi-runtime-compatibility-baseline.md`
+
+### Findings
+
+- No blocking defects were identified in the latest progressive-timeout implementation slice.
+- The prior implementation note that the live rerun was interrupted is superseded by the successful live validation above.
