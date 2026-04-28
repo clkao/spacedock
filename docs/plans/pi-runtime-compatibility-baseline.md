@@ -507,3 +507,18 @@ PASSED after the validation fix. The pyproject collection scope is appropriate f
 - `tests/README.md`
 - `tests/test_pytest_collection_config.py`
 - `docs/plans/pi-runtime-compatibility-baseline.md`
+
+## Stage Report: implementation
+
+- DONE: Root-caused temp-repo commit failures as missing git author/committer identity when global/home config is isolated.
+  Evidence: `create_test_project()` previously ran `git commit --allow-empty -m init` directly after `git init` with no repo-local `user.name`/`user.email`, so environments with isolated `HOME`/`XDG_CONFIG_HOME` and no `GIT_AUTHOR_*`/`GIT_COMMITTER_*` fail.
+- DONE: Bootstrapped deterministic repo-local identity in test repo setup.
+  Evidence: `scripts/test_lib.py:create_test_project()` now sets `git config user.name "Spacedock Test"` and `git config user.email "spacedock-test@example.invalid"` before the initial empty commit.
+- DONE: Added regression coverage for isolated HOME/XDG and unset git identity env vars.
+  Evidence: `tests/test_test_lib_helpers.py::test_create_test_project_bootstraps_repo_local_git_identity` isolates `HOME`/`XDG_CONFIG_HOME`, unsets `GIT_AUTHOR_*`/`GIT_COMMITTER_*`, calls `create_test_project()`, verifies commit creation, and asserts local config values.
+- DONE: Revalidated focused and static checks with uv-backed commands.
+  Evidence: `unset CLAUDECODE && uv run pytest tests/test_test_lib_helpers.py -k create_test_project_bootstraps_repo_local_git_identity -v` passed; `unset CLAUDECODE && make test-static` passed.
+
+### Summary
+
+The regression came from relying on ambient git identity during temp-repo bootstrap. The helper now sets deterministic repo-local identity before the first commit, and a focused regression test locks this behavior under isolated config environments.

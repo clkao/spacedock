@@ -20,6 +20,7 @@ from test_lib import (
     TestRunner,
     _isolated_claude_env,
     bash_command_targets_write,
+    create_test_project,
     emit_skip_result,
     headless_inbox_polling_hint,
     plugin_location_hint,
@@ -175,6 +176,52 @@ def test_test_runner_uses_configured_temp_root(monkeypatch, tmp_path):
 
     assert runner.test_dir.parent == configured_root
     assert runner.test_dir.name.startswith("spacedock-test-")
+
+
+def test_create_test_project_bootstraps_repo_local_git_identity(monkeypatch, tmp_path):
+    home_dir = tmp_path / "isolated-home"
+    xdg_config_home = tmp_path / "isolated-xdg-config"
+    home_dir.mkdir()
+    xdg_config_home.mkdir()
+    monkeypatch.setenv("HOME", str(home_dir))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg_config_home))
+    for name in (
+        "GIT_AUTHOR_NAME",
+        "GIT_AUTHOR_EMAIL",
+        "GIT_COMMITTER_NAME",
+        "GIT_COMMITTER_EMAIL",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    runner = TestRunner("create_test_project identity", keep_test_dir=True)
+    project_dir = create_test_project(runner)
+
+    user_name = subprocess.run(
+        ["git", "config", "--local", "user.name"],
+        capture_output=True,
+        text=True,
+        check=True,
+        cwd=project_dir,
+    ).stdout.strip()
+    user_email = subprocess.run(
+        ["git", "config", "--local", "user.email"],
+        capture_output=True,
+        text=True,
+        check=True,
+        cwd=project_dir,
+    ).stdout.strip()
+
+    assert user_name == "Spacedock Test"
+    assert user_email == "spacedock-test@example.invalid"
+    assert (
+        subprocess.run(
+            ["git", "rev-parse", "--verify", "HEAD"],
+            capture_output=True,
+            check=True,
+            cwd=project_dir,
+        ).returncode
+        == 0
+    )
 
 
 def test_prepare_codex_skill_home_creates_writable_codex_home_when_real_home_missing(
