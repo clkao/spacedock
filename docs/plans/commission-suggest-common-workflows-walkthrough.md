@@ -167,9 +167,111 @@ The silence-watcher framing prose (from the refinement template's Adoption-secti
 
 ---
 
+## Walkthrough 5 — Post-generation README-edit nudge + `review stages` flow (cycle 2 scope)
+
+This walkthrough picks up after Phase 2 file generation has completed for any of the prior four scenarios — same captain, same mission. Phase 3 Step 1 fires.
+
+**Commission says (announce):**
+
+> Workflow generated! Here's what I created:
+> - `docs/.../README.md` — workflow schema and stage definitions
+> - {seed entity files}
+> - `docs/.../_mods/pr-merge.md` — PR merge mod {if installed}
+
+**Commission says (README-edit nudge — AC-7):**
+
+> Quick heads-up before we start: the README I just generated is the **living spec** for this workflow. Each stage in `docs/.../README.md` has three per-stage bullets — `Outputs:` (what the worker produces), `Good:` (your quality bar), and `Bad:` (anti-patterns to avoid). I drafted those as best-guesses from the mission text, but they are not commitments — they are starting prose for you to tighten so they reflect your actual standards. Open `docs/.../README.md` and edit the bullets under each `### {stage_name}` heading before the first dispatch. Tightening costs minutes now; un-tightening after agents have been dispatched against vague bullets costs more.
+
+**Commission says (review stages offer — AC-8):**
+
+> Type `review stages` if you'd like me to walk you through each stage's expectations one at a time and offer amendments inline — otherwise we'll proceed to the pilot run with the README as-is.
+
+### Branch A — captain proceeds without review
+
+**Captain:** "looks good, proceed"
+
+→ Commission falls through to the agents/launch announcement, then Phase 3 Step 2 (assume first-officer role). No README edits applied.
+
+**What this branch demonstrates:**
+- AC-7: nudge is surfaced and the captain can decide on their own.
+- AC-8: `review stages` offer is opt-in, not blocking.
+
+### Branch B — captain triggers `review stages`
+
+**Captain:** `review stages`
+
+→ Commission enters Step 1a. Pre-pass scan reads the generated README (in this walkthrough, the development template applied to a "ship feature work" mission from Walkthrough 1). The five stages are `backlog`, `ideation`, `implementation`, `validation`, `done`. Pre-pass flags candidates per the stretch-bullet heuristics:
+
+- `backlog` — Outputs bullet "A seed task file with title, source, brief description" is workflow-specific (not flagged). Good bullet "Clear enough to recognize what the task is about" is moderately generic — flagged as candidate for tightening with a workflow-specific bar.
+- `ideation` — Outputs bullets are detailed (problem statement, AC, test plan) — not flagged. Good bullet "Behavior-first, scoped, addresses a real need" is moderately generic — flagged.
+- `implementation` — Outputs bullet "The deliverable committed to the worktree branch with a stage report" — workflow-specific because it names worktree branch and stage report — not flagged. Good bullet "Minimal changes that satisfy the AC, clean code" — moderately generic — flagged.
+- `validation` — Outputs/Good/Bad are tightly tied to AC verification. Not flagged.
+- `done` — terminal state, sparse bullets. Not flagged.
+
+**Commission says (per-stage walk, stage 1 of 5 — backlog):**
+
+> **Stage `backlog`** (1 of 5)
+>
+> What the task is sitting in: A task that has been proposed but has not yet had design work done.
+>
+> **Outputs** (what the worker produces):
+> - A seed task file with title, source, brief description
+>
+> **Good** (your quality bar):
+> - Clear enough to recognize what the task is about *— flagged: moderately generic; for this workflow, what does "clear enough" actually mean? (e.g., title + 1-line problem statement + how the captain would describe it in standup.)*
+>
+> **Bad** (anti-patterns to avoid):
+> - Empty stub that even the captain cannot triage
+>
+> What would you like to do? Options:
+> - `keep` — accept this stage as-is, move on
+> - `tighten outputs` / `tighten good` / `tighten bad`
+> - `drop {section} {n}` / `add {section}: {text}`
+> - `next stage`
+>
+> Or describe what you want changed in your own words and I'll apply it.
+
+**Captain:** `tighten good`
+
+> What's the actual quality bar for a task to be considered "ready enough" to sit in backlog? (Replace the bullet "Clear enough to recognize what the task is about" with what?)
+
+**Captain:** "title under 80 chars, one-line problem statement, captain or contributor name on `source`"
+
+→ Commission `Edit`s `docs/.../README.md`, anchoring on the `### backlog` heading and the bullet text being replaced. New bullet:
+
+> - Title under 80 chars, one-line problem statement, captain or contributor name on `source`
+
+**Commission confirms:**
+
+> Tightened backlog Good bullet: replaced with "Title under 80 chars, one-line problem statement, captain or contributor name on `source`". Anything else for this stage, or move on?
+
+**Captain:** `next stage`
+
+→ Commission proceeds through `ideation`, `implementation`, `validation`, `done` with the same pattern. Captain accepts most as-is, tightens one Good bullet on `implementation`.
+
+**Final confirmation:**
+
+> Stage review complete. Here's what got tightened:
+> - `backlog`: Good bullet 1 tightened
+> - `implementation`: Good bullet 1 tightened
+>
+> The README at `docs/.../README.md` reflects these edits. Ready to proceed to the pilot run? (yes / let me make more edits)
+
+**Captain:** "yes"
+
+→ Commission falls through to the agents/launch announcement, then Phase 3 Step 2.
+
+**What this branch demonstrates:**
+- AC-7: README is positioned as the living spec; the captain understands they are tightening it before the first dispatch.
+- AC-8: `review stages` walks one stage at a time (progressive disclosure); pre-pass flags stretch bullets proactively (mixed-inference); per-bullet amendment options work; inline `Edit` applies changes; final confirmation summarizes.
+- The proactive flag on `backlog`'s Good bullet correctly identifies "Clear enough to recognize what the task is about" as moderately generic — it would read identically in a research workflow's backlog or a content-production workflow's backlog.
+- The non-flagged stages (`validation`, `done`) correctly skip the proactive prompt; the captain still has the per-stage options if they want to amend.
+
+---
+
 ## Walkthrough findings summary
 
-All four scenarios exercise the new prose end-to-end:
+The five scenarios exercise the new prose end-to-end:
 
 | Scenario | Template | Variant | Layers | Mods | Convention pushback? |
 |---|---|---|---|---|---|
@@ -177,6 +279,7 @@ All four scenarios exercise the new prose end-to-end:
 | 2: hypothesis-test | experiment | — | parked-stages | silence-watcher (offered, mod TODO) | none needed |
 | 3: iterate-on-doc | refinement | (default) | none | none | none needed |
 | 4: outreach pipeline | refinement | outreach | parked-stages | silence-watcher (offered, mod TODO) | none needed |
+| 5: post-gen UX (cycle 2) | (any) | — | — | — | n/a — exercises Phase 3 Step 1 README-edit nudge + `review stages` flow |
 
 No real friction surfaced that maps to the staff-UX-reviewer's deferred concerns:
 
