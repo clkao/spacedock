@@ -1,7 +1,7 @@
 ---
 id: 222
 title: "status --boot crashes with ValueError when stage YAML has inline comment on value line"
-status: implementation
+status: validation
 source: "GitHub issue #163 (filed by Kent Chen / iamcxa, 2026-04-29)"
 started: 2026-04-29T14:56:54Z
 completed:
@@ -9,8 +9,8 @@ verdict:
 score: 0.65
 worktree: .worktrees/spacedock-ensign-status-parser-strip-inline-yaml-comments
 issue: "#163"
-pr:
-mod-block:
+pr: #167
+mod-block: merge:pr-merge
 ---
 
 The hand-rolled YAML parser in `skills/commission/bin/status` (around line 266 in `parse_stages_block`) crashes with `ValueError: invalid literal for int() with base 10: '2  # teammate-debate mode'` when a stage frontmatter has an inline `#` comment on a numeric value line.
@@ -139,3 +139,15 @@ Validation re-ran every `Verified by:` clause from this worktree: the new pytest
 ### Summary
 
 Two commits on `spacedock-ensign/status-parser-strip-inline-yaml-comments`: `9097bf9b` swaps the naive `split('#', 1)[0]` helper for a whitespace-anchored `re.sub(r'\s+#.*$', '', value).rstrip()` per YAML 1.2.2 §6.6, with docstring noting the explicitly-accepted `pr: #44` gap; `f4b27acf` adds `test_parse_stages_preserves_hash_in_values` with negative-case fixtures (`model: opus#beta`, `agent: prefix#hash`, `feedback-to: "#161"`) that lock in the spec-correct behavior. Existing positive-case test unchanged. Targeted run green, full `make test-static` green at 536/536 (+1 from baseline).
+
+### Feedback Cycles
+
+**Cycle 1 — captain-flagged spec-correctness gap, post-PR (2026-04-29 ~15:20 UTC).**
+
+PR #167 opened with the helper implemented as `value.split('#', 1)[0].strip()` per the issue reporter's pseudo-fix. Captain caught that this is naive: YAML 1.2.2 §6.6 specifies `#` is a comment marker only when preceded by whitespace (or at start of line) AND not inside a quoted scalar. The naive split mangles legitimate values like `github#23`, `opus#beta`, and `"#160"` (the repo's own `pr:`/`issue:` field convention).
+
+Fix: swap the helper to a whitespace-anchored regex `re.sub(r'\s+#.*$', '', value).rstrip()` and add negative tests covering `prefix#hash`, `model: opus#beta`, and quoted `"#160"` to lock the spec-correct behavior in. Same branch (`spacedock-ensign/status-parser-strip-inline-yaml-comments`); PR #167 auto-updates with new commits.
+
+**Cycle 1 resolved (2026-04-29 ~15:30 UTC).** Cycle-2 implementation landed three commits (`9097bf9b` whitespace-anchored regex, `f4b27acf` negative-case fixtures, `dcda005c` cycle-2 stage report). Targeted test run green, `make test-static` 536/536. Branch pushed; PR #167 picks up new commits.
+
+Out of scope: the `pr: #44` corner case (unquoted value starting with `#`). The hand-rolled parser strips leading whitespace before yielding the value, so the helper sees no whitespace marker. Fixing this perfectly requires source-text context. None of the in-scope fields naturally start with `#`, so we accept this gap rather than thread source-line context through.
