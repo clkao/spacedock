@@ -667,6 +667,62 @@ class TestIdStyleStrategies(unittest.TestCase):
             self.assertIn('dup-b', result.stderr)
             self.assertIn('path=', result.stderr)
 
+    def test_sd_b32_accepts_legacy_numeric_ids_in_mixed_workflow(self):
+        sd_id = sd_b32_id('ab')
+        with tempfile.TemporaryDirectory() as tmpdir:
+            make_pipeline(
+                tmpdir,
+                readme_with_id_style('sd-b32'),
+                entities={
+                    'new-task.md': entity(sd_id, 'New Task', 'backlog'),
+                    'legacy-one.md': entity('1', 'Legacy One', 'backlog'),
+                    'legacy-two.md': entity('2', 'Legacy Two', 'backlog'),
+                },
+            )
+
+            validation = run_status(tmpdir, '--validate', script_path=self.script_path)
+            self.assertEqual(validation.returncode, 0, validation.stderr)
+            self.assertEqual(validation.stdout, 'VALID\n')
+
+            boot = run_status(tmpdir, '--boot', script_path=self.script_path)
+            self.assertEqual(boot.returncode, 0, boot.stderr)
+
+            table = run_status(tmpdir, script_path=self.script_path)
+            self.assertEqual(table.returncode, 0, table.stderr)
+            self.assertIn('1', table.stdout)
+            self.assertIn('2', table.stdout)
+            self.assertIn(sd_id[:2], table.stdout)
+
+    def test_sd_b32_mixed_workflow_next_id_yields_sd_b32(self):
+        sd_id = sd_b32_id('ab')
+        with tempfile.TemporaryDirectory() as tmpdir:
+            make_pipeline(
+                tmpdir,
+                readme_with_id_style('sd-b32'),
+                entities={
+                    'new-task.md': entity(sd_id, 'New Task', 'backlog'),
+                    'legacy-one.md': entity('1', 'Legacy One', 'backlog'),
+                    'legacy-two.md': entity('2', 'Legacy Two', 'backlog'),
+                },
+            )
+            result = run_status(tmpdir, '--next-id', script_path=self.script_path)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertRegex(result.stdout.strip(), r'^[0123456789abcdefghjkmnpqrstvwxyz]{24}$')
+
+    def test_sd_b32_mixed_workflow_rejects_numeric_duplicate(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            make_pipeline(
+                tmpdir,
+                readme_with_id_style('sd-b32'),
+                entities={
+                    'dup-a.md': entity('1', 'Dup A', 'backlog'),
+                    'dup-b.md': entity('1', 'Dup B', 'backlog'),
+                },
+            )
+            result = run_status(tmpdir, '--validate', script_path=self.script_path)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('duplicate', result.stderr)
+
     def test_fail_fast_modes_do_not_print_normal_output_when_validation_fails(self):
         duplicate = sd_b32_id('aa')
         with tempfile.TemporaryDirectory() as tmpdir:
