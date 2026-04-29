@@ -1,7 +1,7 @@
 ---
 id: 221
 title: "Commission should suggest common workflows"
-status: implementation
+status: validation
 source: "GitHub issue #156 (filed by CL, 2026-04-28)"
 started: 2026-04-28T21:17:43Z
 completed:
