@@ -9,8 +9,8 @@ verdict:
 score: 0.5
 worktree: .worktrees/spacedock-ensign-commission-suggest-common-workflows
 issue: "#156"
-pr:
-mod-block:
+pr: "#161"
+mod-block: merge:pr-merge
 ---
 
 ## Problem
@@ -176,6 +176,15 @@ Verified by: `grep -nE "tighten|edit.*README|living spec|per-stage" skills/commi
 **AC-8 — `review stages` interactive command shipped.**
 After the README-editing nudge, the commission skill offers an interactive `review stages` flow gated on the literal trigger phrase. When triggered, the flow walks {captain} through one stage at a time (progressive disclosure), surfaces each stage's name + bucket-noun framing + Outputs/Good/Bad bullets, offers per-stage amendment options (keep / tighten Outputs / tighten Good / tighten Bad / drop a bullet / add a bullet / next stage) and applies edits inline to the README, and ends with a confirmation summarizing what got tightened. When auto-generated bullets are clearly stretches (e.g., generic "produce deliverable"), the flow proactively flags them as candidates for tightening rather than waiting for {captain} to notice — same mixed-inference / explicit-ask discipline as Trait Detection.
 Verified by: `grep -n "review stages" skills/commission/SKILL.md` returns at least 2 hits (offer + handler); the handler section describes progressive per-stage display, per-bullet amendment options, inline README edits, and a final confirmation; the proactive-flag behavior is documented in the handler.
+
+**AC-9 — Skill is self-contained: no file under `skills/commission/` references `docs/plans/` or `_archive/` as runtime data.**
+Verified by: `! grep -nE "docs/plans/|_archive/" skills/commission/SKILL.md skills/commission/references/`.
+
+**AC-10 — Templates with branching stage flow declare a `transitions:` block.**
+Verified by: `grep -A1 'transitions:' skills/commission/references/templates/experiment.md` returning the non-linear edges.
+
+**AC-11 — Variant per-stage detail deferral documented.**
+Verified by: `grep -nE "review stages|materialized at commission time" skills/commission/references/templates/refinement.md` returning at least one match in the variants section.
 
 ## Test plan
 
@@ -372,3 +381,26 @@ Cycle 2 added the captain-facing post-generation UX: a README-edit nudge that fr
 ### Summary
 
 Cycle-2 validation independently reproduced all eight AC `Verified by:` clauses against the worktree, confirmed the five claimed cycle-2 commits exist with content matching their messages, verified AC-7 grep hits sit inside Phase 3 Step 1 of SKILL.md, verified AC-8 handler section covers progressive disclosure + pre-pass proactive flagging + per-bullet amendments + inline `Edit` + final confirmation, and cross-checked walkthrough scenario 5 against the shipped `review stages` prose with no missing-prose dependencies. Recommend PASSED.
+
+### Feedback Cycles
+
+**Cycle 1 — validation REJECTED (2026-04-29 ~05:08 UTC), captain-routed scope expansion.**
+
+- Validator's structural verdict was PASSED (all AC `Verified by:` reproduced; walkthrough cross-checked clean against shipped prose).
+- AC-2 / experiment-template tension: validator passed `accepted`/`rejected` as state-flavored bucket names. Re-reading ideation Round 2, this is correct — the design relaxed past-participle ban to verbose-prefix-only and listed `accepted` as valid. AC-2's literal text is outdated; align it with the locked design.
+- Captain rejected the gate to expand scope: add post-commission README-editing hints + an optional `review stages` interactive command for progressive per-stage review and amendment. The rejection is not about AC-2 per se; it's about adding two captain-facing UX features before the task ships.
+
+Routed back to implementation ensign (alive on standby; context budget 10.2%, reuse_ok). Fresh validator will re-verify after fixes.
+
+**Cycle 1 resolved (2026-04-29 ~05:27 UTC).** Cycle 2 implementation landed five commits (AC-2 alignment + AC-7/AC-8 additions, Phase 3 Step 1 README-edit nudge, `review stages` interactive flow, walkthrough scenario 5, cycle-2 stage report). Cycle-2 validation reproduced all 8 ACs cleanly and recommended PASSED. Captain approved the gate. Advancing to merge.
+
+**Cycle 2 — PR-time independent review (2026-04-29 ~06:15 UTC), Request Changes.**
+
+PR #161 review by `even-wei` flagged two blockers + three mediums + two lows. Captain triaged:
+
+- **Blocker #1 (FIX):** layer-assembly fallback in SKILL.md:131 points at `## Decomposed snippets` *in this plan doc*. Post-archive that pointer breaks. Extract the section to `skills/commission/references/decomposed-snippets.md` and update the pointer.
+- **Medium #3 (FIX, lifted to scope):** `experiment.md` ships implicit non-linear transitions (`analysis → holdout|rejected`, `smoke → run|hypothesis|rejected`, `holdout → accepted|rejected`) without a `transitions:` frontmatter block. SKILL.md:302 requires it for non-linear flows.
+- **Blocker #2 (DEFER, document the deferral):** refinement variants list stages but lack per-stage Inputs/Outputs/Good/Bad detail. Captain's call: leave variant per-stage detail to commission time — captains customize via the new `review stages` flow and auto-generated bullets, or specialize the variant into its own template file later. Document this design decision in refinement.md so future reviewers don't re-flag it.
+- Mediums #4, #5 and lows #6, #7: deferred to follow-up issues if needed.
+
+Routing to a fresh implementation ensign. PR branch also has merge conflicts (created from old main, never rebased through #200's merge + Cycle 1 Feedback Cycles); resolve as part of the same cycle by merging main into the branch.

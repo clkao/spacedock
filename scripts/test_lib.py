@@ -272,7 +272,51 @@ def _clean_env() -> dict[str, str]:
     return {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
 
 
-def _isolated_claude_env() -> dict[str, str] | None:
+_STAGED_PLUGIN_ENV_KEY = "SPACEDOCK_STAGED_PLUGIN_DIR"
+_PLUGIN_STAGE_PARTS = (".claude-plugin", ".codex-plugin", "skills", "agents",
+                       "references", "mods")
+
+
+def _stage_plugin(repo_root: Path, dest_root: Path) -> Path:
+    """Copy the spacedock plugin into ``dest_root/spacedock-plugin/``.
+
+    The FO subprocess is launched with ``--plugin-dir`` pointing at this
+    staged copy instead of the live repo. Doing so keeps every absolute
+    plugin path that surfaces in haiku's tool-result context confined to
+    the per-test isolated HOME, eliminating the gravitational pull toward
+    the real spacedock checkout that triggered Pattern A wrong-discovery
+    on weaker models (#200).
+
+    Only the directories the FO actually needs are staged; tests/, docs/,
+    .git/ are intentionally excluded so the staged tree contains no
+    workflow READMEs that could pollute ``status --discover``.
+    """
+    staged = dest_root / "spacedock-plugin"
+    staged.mkdir(parents=True, exist_ok=True)
+    for part in _PLUGIN_STAGE_PARTS:
+        src = repo_root / part
+        if not src.exists():
+            continue
+        dst = staged / part
+        if dst.exists():
+            shutil.rmtree(dst)
+        shutil.copytree(src, dst, symlinks=False)
+    return staged
+
+
+def _plugin_dir_for(env: dict[str, str] | None, repo_root: Path) -> str:
+    """Return the ``--plugin-dir`` value to pass to ``claude -p``.
+
+    Prefers the staged plugin path written into ``env`` by
+    ``_isolated_claude_env``; falls back to the live repo root for
+    callers running without isolation.
+    """
+    if env and env.get(_STAGED_PLUGIN_ENV_KEY):
+        return env[_STAGED_PLUGIN_ENV_KEY]
+    return str(repo_root)
+
+
+def _isolated_claude_env(repo_root: Path | None = None) -> dict[str, str] | None:
     """Return an env dict with an isolated HOME whenever any auth mechanism is available.
 
     Isolation is unconditional as long as the process can authenticate to the
@@ -318,11 +362,15 @@ def _isolated_claude_env() -> dict[str, str] | None:
         env["HOME"] = clean_home
         env["CLAUDE_CODE_OAUTH_TOKEN"] = token
         env.pop("ANTHROPIC_API_KEY", None)
+        if repo_root is not None:
+            env[_STAGED_PLUGIN_ENV_KEY] = str(_stage_plugin(repo_root, Path(clean_home)))
         return env
     if os.environ.get("ANTHROPIC_API_KEY"):
         clean_home = tempfile.mkdtemp(prefix="spacedock-clean-home-")
         env = _clean_env()
         env["HOME"] = clean_home
+        if repo_root is not None:
+            env[_STAGED_PLUGIN_ENV_KEY] = str(_stage_plugin(repo_root, Path(clean_home)))
         return env
     return None
 
@@ -802,9 +850,10 @@ def run_first_officer(
 ) -> int:
     """Run claude -p --plugin-dir ... --agent <agent_id>. Returns exit code."""
     log_path = runner.log_dir / log_name
+    env = _isolated_claude_env(runner.repo_root) or _clean_env()
     cmd = [
         "claude", "-p", prompt,
-        "--plugin-dir", str(runner.repo_root),
+        "--plugin-dir", _plugin_dir_for(env, runner.repo_root),
         "--agent", agent_id,
         "--permission-mode", "bypassPermissions",
         "--verbose",
@@ -813,7 +862,6 @@ def run_first_officer(
     if extra_args:
         cmd.extend(extra_args)
 
-    env = _isolated_claude_env() or _clean_env()
     with open(log_path, "w") as log_file:
         try:
             result = subprocess.run(
@@ -855,9 +903,10 @@ def run_first_officer_streaming(
       at context exit, terminate+kill if exceeded
     """
     log_path = runner.log_dir / log_name
+    env = _isolated_claude_env(runner.repo_root) or _clean_env()
     cmd = [
         "claude", "-p", prompt,
-        "--plugin-dir", str(runner.repo_root),
+        "--plugin-dir", _plugin_dir_for(env, runner.repo_root),
         "--agent", agent_id,
         "--permission-mode", "bypassPermissions",
         "--verbose",
@@ -866,7 +915,6 @@ def run_first_officer_streaming(
     if extra_args:
         cmd.extend(extra_args)
 
-    env = _isolated_claude_env() or _clean_env()
     start = time.monotonic()
     log_file = open(log_path, "w")
     try:

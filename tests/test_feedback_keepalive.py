@@ -73,13 +73,14 @@ def test_feedback_keepalive(test_project, model, effort):
     # sentinel was designed to prevent. Opus-4-7 follows the discipline
     # (round-6d green at 4m36s); haiku does not. Haiku has no reasoning-effort
     # tiers, so the --effort flag does not change this behavior.
-    if model == "claude-haiku-4-5" or model == "haiku" or "haiku" in model.lower():
+    if "haiku" in model.lower():
         pytest.xfail(
             reason=(
-                "pending haiku-teams keepalive — haiku-4-5 drops the "
+                "pending #200 — haiku-teams keepalive: haiku-4-5 drops the "
                 "keep-alive Bash-probe discipline at `system init` cycle "
                 "boundaries and hallucinates teardown "
-                "(anthropics/claude-code#26426 class; opus-4-7 green)"
+                "(anthropics/claude-code#26426 class; opus-4-7 green). "
+                "Classifier widened to all haiku variants per #200 AC-1."
             )
         )
 

@@ -26,28 +26,10 @@ from test_lib import (  # noqa: E402
 @pytest.mark.live_claude
 @pytest.mark.live_codex
 @pytest.mark.serial
-def test_gate_guardrail(test_project, runtime, model, effort, request):
+def test_gate_guardrail(test_project, runtime, model, effort):
     """FO halts at a gate and does not self-approve (claude + codex)."""
     t = test_project
     agent_id = "spacedock:first-officer"
-
-    team_mode_opt = request.config.getoption("--team-mode")
-    if team_mode_opt in ("teams", "bare"):
-        resolved_team_mode = team_mode_opt
-    else:
-        import os as _os
-        _env = _os.environ.get("CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS", "").strip().lower()
-        resolved_team_mode = "teams" if _env in ("1", "true") else "bare"
-    if runtime == "claude" and model == "claude-haiku-4-5" and resolved_team_mode in ("bare", "teams"):
-        pytest.xfail(
-            reason=(
-                "pending #200 — haiku FO bootstrap failure "
-                "(cd-to-wrong-cwd + {PWD} brace-bug). "
-                "Scope widened to teams mode after PR #133 CI surfaced the same "
-                "Pattern A bootstrap-skip on team_mode=teams + haiku "
-                "(FO cd'd to spacedock repo root, status --discover empty, gave up)."
-            )
-        )
 
     # --- Phase 1: Set up test project from static fixture ---
     print("--- Phase 1: Set up test project from fixture ---")
@@ -94,6 +76,14 @@ def test_gate_guardrail(test_project, runtime, model, effort, request):
         log = CodexLogParser(t.log_dir / "codex-fo-log.txt")
         log.write_text(t.log_dir / "codex-fo-text.txt")
         fo_text_output = log.full_text()
+
+    # #200 AC-6: opus extended-thinking content can leak literal `<thinking>...</thinking>`
+    # blocks into the FO's text output. Those blocks may contain the model's internal
+    # reasoning prose ("approved ... advancing") which would falsely trigger the
+    # self-approval scrub below. Strip them here (single chokepoint upstream of the
+    # gate-review and self-approval checks) so the assertions only see externalized FO
+    # output, not internal reasoning. Non-greedy + DOTALL so multi-line blocks match.
+    fo_text_output = re.sub(r"<thinking>.*?</thinking>", "", fo_text_output, flags=re.DOTALL)
 
     print()
     print("[Gate Hold Behavior]")
