@@ -48,8 +48,8 @@ The prefix-lookup branch at status:1593 (`stored_id.startswith(value)`) operates
   Verified by: new pytest case in `tests/test_status_script.py` exits 0 (assert returncode == 0 and empty stderr for the validation lines).
 - AC2: Validator still rejects a malformed stored id under `id-style: sd-b32` (e.g., `not-valid-sd-b32-id`) with the existing `invalid sd-b32 stored id` error.
   Verified by: existing `test_sd_b32_validate_rejects_duplicate_full_id_invalid_id_and_missing_id` continues to pass unchanged.
-- AC3: Validator still rejects duplicate stored ids (sd-b32-sd-b32 collision and numeric-numeric collision) and missing stored ids under `id-style: sd-b32`.
-  Verified by: existing duplicate/missing assertions in `test_sd_b32_validate_rejects_duplicate_full_id_invalid_id_and_missing_id` continue to pass; new pytest case adds a numeric-numeric duplicate under sd-b32 mode and asserts `duplicate sd-b32 stored id` (or new shared message) appears in stderr.
+- AC3: Validator still rejects duplicate stored ids when at least one duplicate is active (sd-b32-sd-b32 collision and numeric-numeric collision); archive-only duplicate groups are tolerated.
+  Verified by: existing duplicate/missing assertions in `test_sd_b32_validate_rejects_duplicate_full_id_invalid_id_and_missing_id` continue to pass (active-vs-active); `test_sd_b32_mixed_workflow_rejects_numeric_duplicate` covers the active-vs-active numeric case; `test_sd_b32_mixed_workflow_tolerates_archive_only_numeric_duplicate` covers both the archive-only-tolerance positive case and the active-vs-archive rejection case.
 - AC4: New entity creation in a mixed-mode workflow produces an sd-b32 stored id, not a numeric id.
   Verified by: new pytest case runs `status --next-id` against the mixed fixture and asserts `is_valid_sd_b32_id(output)` (using the same `SD_B32_ALPHABET`/regex helpers already imported in the test module).
 - AC5: Display table for the mixed fixture shows the numeric stored id verbatim and an sd-b32 short prefix for the sd-b32 entity, with both rows present.

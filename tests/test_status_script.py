@@ -723,6 +723,42 @@ class TestIdStyleStrategies(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn('duplicate', result.stderr)
 
+    def test_sd_b32_mixed_workflow_tolerates_archive_only_numeric_duplicate(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            make_pipeline(
+                tmpdir,
+                readme_with_id_style('sd-b32'),
+                entities={
+                    'fresh.md': entity(sd_b32_id('ab'), 'Fresh', 'backlog'),
+                },
+                archived={
+                    'old-a.md': entity('131', 'Old A', 'done'),
+                    'old-b.md': entity('131', 'Old B', 'done'),
+                },
+            )
+
+            validation = run_status(tmpdir, '--validate', script_path=self.script_path)
+            self.assertEqual(validation.returncode, 0, validation.stderr)
+            self.assertEqual(validation.stdout, 'VALID\n')
+
+            boot = run_status(tmpdir, '--boot', script_path=self.script_path)
+            self.assertEqual(boot.returncode, 0, boot.stderr)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            make_pipeline(
+                tmpdir,
+                readme_with_id_style('sd-b32'),
+                entities={
+                    'active.md': entity('131', 'Active', 'backlog'),
+                },
+                archived={
+                    'old.md': entity('131', 'Old', 'done'),
+                },
+            )
+            result = run_status(tmpdir, '--validate', script_path=self.script_path)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('duplicate', result.stderr)
+
     def test_fail_fast_modes_do_not_print_normal_output_when_validation_fails(self):
         duplicate = sd_b32_id('aa')
         with tempfile.TemporaryDirectory() as tmpdir:
