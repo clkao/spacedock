@@ -26,6 +26,28 @@ stages:
       terminal: true
     - name: rejected
       terminal: true
+  transitions:
+    - from: smoke
+      to: run
+      label: smoke evidence supports the hypothesis; proceed to the main run
+    - from: smoke
+      to: hypothesis
+      label: smoke surfaces a flawed hypothesis; revise and re-smoke
+    - from: smoke
+      to: rejected
+      label: smoke evidence is decisive against the hypothesis; reject without running
+    - from: analysis
+      to: holdout
+      label: analysis supports the hypothesis; promote to out-of-sample holdout
+    - from: analysis
+      to: rejected
+      label: analysis fails the hypothesis; reject
+    - from: holdout
+      to: accepted
+      label: holdout confirms the run result; accept
+    - from: holdout
+      to: rejected
+      label: holdout disconfirms the run result; reject
 ---
 
 # Experiment Workflow Template
