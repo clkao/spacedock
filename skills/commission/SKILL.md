@@ -128,7 +128,7 @@ The Phase 2c y/n confirmations remain — that is the file-generation install st
 When trait detection fires layer cues but no template matches cleanly (e.g., a mission that mixes repo-mutation with parked stages and does not look like development or experiment), do not force-fit a template. Instead:
 
 1. Skip the template `Read`.
-2. Use the `## Decomposed snippets` reference (entity file at `docs/plans/commission-suggest-common-workflows.md` until extracted to its own references file) as the source list of base scaffolding + layer snippets.
+2. Use the Decomposed snippets reference at `skills/commission/references/decomposed-snippets.md` as the source list of base scaffolding + layer snippets.
 3. Assemble the suggested stage list from base scaffolding plus the layer snippets the cues fired.
 4. Use the generic per-layer framing from the **Layer framing reference** at the bottom of this file when surfacing mod offers.
 
@@ -318,7 +318,7 @@ Each {entity_label} lives as either:
 - a flat markdown file `{slug}.md` (default — use this unless the entity produces many artifacts), or
 - a folder `{slug}/` containing `index.md` as the canonical entity file, when the {entity_label} produces per-stage artifacts (draft versions, transcripts, outputs) that belong alongside the tracker.
 
-Slugs are lowercase, hyphens, no spaces. Example: `my-feature-idea.md` or `my-feature-idea/index.md`. The status scanner recognizes both forms; `--set` and `--archive` resolve the slug either way, and folder entities archive as a whole folder into `_archive/{slug}/`.
+Slugs are lowercase, hyphens, no spaces. Example: `my-feature-idea.md` or `my-feature-idea/index.md`. The status scanner recognizes both forms; `--set` and `--archive` resolve the slug either way, and folder entities archive as a whole folder into the workflow's archive directory.
 
 ## Schema
 

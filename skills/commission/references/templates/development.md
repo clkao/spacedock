@@ -104,7 +104,7 @@ A task moves to validation after implementation is complete. A fresh agent indep
 Terminal state. The task's PR is merged and the entity is archived.
 
 - **Inputs:** A merged PR (tracked via the `pr` field and the `pr-merge` mod's startup/idle hooks)
-- **Outputs:** None — terminal. `completed` set, `verdict: PASSED`, archived to `_archive/`.
+- **Outputs:** None — terminal. `completed` set, `verdict: PASSED`, entity archived.
 - **Good:** Reached terminal via real merge, not by manual flag flip
 - **Bad:** Marking done before the PR actually merged
 
