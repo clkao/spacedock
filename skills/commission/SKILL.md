@@ -543,7 +543,11 @@ Then surface the **README-edit nudge** — a one-paragraph reminder that the per
 
 > Quick heads-up before we start: the README I just generated is the **living spec** for this workflow. Each stage in `{dir}/README.md` has three per-stage bullets — `Outputs:` (what the worker produces), `Good:` (your quality bar), and `Bad:` (anti-patterns to avoid). I drafted those as best-guesses from the mission text, but they are not commitments — they are starting prose for you to tighten so they reflect your actual standards. Open `{dir}/README.md` and edit the bullets under each `### {stage_name}` heading before the first dispatch. Tightening costs minutes now; un-tightening after agents have been dispatched against vague bullets costs more.
 
-Then continue with the agents/launch announcement:
+Then offer the **`review stages`** interactive flow as an opt-in alternative to opening the file in an editor:
+
+> Type `review stages` if you'd like me to walk you through each stage's expectations one at a time and offer amendments inline — otherwise we'll proceed to the pilot run with the README as-is.
+
+Wait for {captain} to either type `review stages` (the literal trigger phrase) or signal proceed (any other response, including "go", "proceed", "looks good", or just continuing the conversation). If the trigger fires, hand off to **Step 1a — Review Stages Handler** below; otherwise continue with the agents/launch announcement:
 
 > Agents are shipped with the Spacedock plugin — no local agent files needed:
 > - `spacedock:first-officer` — workflow orchestrator
@@ -556,6 +560,72 @@ Then continue with the agents/launch announcement:
 > ```
 >
 > Starting the initial run now...
+
+### Step 1a — Review Stages Handler (triggered by `review stages`)
+
+When {captain} types the literal phrase `review stages`, walk them through each stage of the generated README one at a time, offering amendments per stage. **Progressive disclosure**: never dump the whole README at once. The goal is for a captain who has never edited a Spacedock README to feel guided rather than interrogated.
+
+#### Pre-pass: scan for stretch bullets
+
+Before starting the per-stage walk, read `{dir}/README.md` and scan each stage's `Outputs:` / `Good:` / `Bad:` bullets for **stretch bullets** — auto-generated content that is generic enough to be a candidate for tightening regardless of the workflow specifics. Flag candidates include:
+
+- Outputs bullets that read as generic verbs (`produce deliverable`, `generate output`, `complete the work`)
+- Good bullets that are platitudes (`high quality`, `well-written`, `correct`, `addresses the problem`)
+- Bad bullets that are tautologies (`low quality`, `incomplete`, `wrong`, `does not address the problem`)
+- Any bullet whose specifics could be lifted unchanged into a different workflow's README — that is a sign the bullet is not workflow-specific yet
+
+Build a per-stage flag list. When you reach a stage during the walk, surface its flagged bullets proactively rather than waiting for {captain} to notice:
+
+> Heads up — the `Outputs:` bullet "produce the deliverable" reads as generic. For *this* workflow, what does the deliverable actually look like at this stage? (e.g., a merged PR with passing CI, a transcript file at `{path}`, a row in `{table}` with status=done.)
+
+This is the same mixed-inference / explicit-ask discipline as Trait Detection: when the auto-generated bullet is clearly a stretch, infer it needs tightening and proactively prompt; when it is plausibly workflow-specific already, present it without flagging and let {captain} decide.
+
+#### Per-stage walk
+
+For each stage in the README's `## Stages` section (in order), surface a focused view:
+
+> **Stage `{stage_name}`** ({position} of {total})
+>
+> What the {entity_label} is sitting in: {one-line bucket-noun framing — pull from the stage's first sentence in the README}
+>
+> **Outputs** (what the worker produces):
+> {for each Outputs bullet: "- {bullet}{if flagged: " *— flagged: {flag reason}*"}"}
+>
+> **Good** (your quality bar):
+> {for each Good bullet: "- {bullet}{if flagged: " *— flagged: {flag reason}*"}"}
+>
+> **Bad** (anti-patterns to avoid):
+> {for each Bad bullet: "- {bullet}{if flagged: " *— flagged: {flag reason}*"}"}
+>
+> What would you like to do? Options:
+> - `keep` — accept this stage as-is, move on
+> - `tighten outputs` — I'll ask what to replace each Outputs bullet with
+> - `tighten good` — same for Good
+> - `tighten bad` — same for Bad
+> - `drop {section} {n}` — remove bullet {n} from {section} (e.g., `drop outputs 2`)
+> - `add {section}: {text}` — append a new bullet to {section} (e.g., `add good: passes CI on first try`)
+> - `next stage` — same as `keep`, move on
+>
+> Or describe what you want changed in your own words and I'll apply it.
+
+Wait for {captain}'s response. Apply the requested changes by `Edit`-ing `{dir}/README.md` in place — anchor on the stage's `### {stage_name}` heading and the bullet text being modified. After each change, briefly confirm what was applied ("Tightened Outputs bullet 2: `produce deliverable` → `merged PR with passing CI`") and then re-prompt with the same options until {captain} chooses `keep` / `next stage`.
+
+Track per-stage which bullets were `tighten`-ed vs kept as-is — this feeds the final confirmation.
+
+#### Final confirmation
+
+Once all stages have been reviewed (each one moved past via `keep` or `next stage`), summarize what got tightened:
+
+> Stage review complete. Here's what got tightened:
+>
+> {for each stage that had any change:}
+> - `{stage_name}`: {short description of what changed — e.g., "Outputs bullet 1 tightened, Bad bullet 3 dropped"}
+>
+> {if no stages were changed: "All stages kept as-is."}
+>
+> The README at `{dir}/README.md` reflects these edits. Ready to proceed to the pilot run? (yes / let me make more edits)
+
+If {captain} says yes (or any proceed signal), continue with the agents/launch announcement from Step 1 (the part after the `review stages` offer). If {captain} wants more edits, ask what they want to change and apply directly — do not re-walk the per-stage flow unless they ask for it explicitly.
 
 ### Step 2 — Assume First-Officer Role
 
