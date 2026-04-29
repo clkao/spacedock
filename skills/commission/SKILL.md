@@ -84,9 +84,59 @@ Examples:
 - "an implementation task" → label: `task`, plural: `tasks`, type: `implementation_task`
 - "a PR" → label: `pr`, plural: `prs`, type: `pr`
 
+### Trait Detection
+
+Before Question 2 (Stages), apply trait detection to the mission text and the Q1 answers. The goal is to land the workflow on one of three captain-facing templates (or fall back to layer-assembly when no template fits cleanly), and to surface layer activations that drive scaffolding decisions and mod offers. Trait detection sits here because it needs Q1's mission and entity description as input, and because its output pre-fills the stage list Q2 then proposes.
+
+#### Cue → captain-facing template
+
+| Cue in mission text or Q1 answers | Lands on |
+|---|---|
+| "implement / build / ship / PR / merge / feature / refactor / land code" | `development` |
+| "hypothesis / experiment / test / learn / accept / promote / tier / probation / A/B / eval" | `experiment` |
+| "track / iterate / draft / refine / publish / send / outreach / lead / contact / sync / ingest" — or no strong signal | `refinement` |
+| Within `refinement`: "contact / lead / send / followup", "ingest / sync / external", "publish / blog / article", "PRD / RFC / design doc" | refinement + suggest the matching variant from the refinement template's Adoption section |
+
+#### Cue → layer (independent of template)
+
+| Cue | Layer fires |
+|---|---|
+| Any stage modifies the repo (write code, edit files, generate artifacts in-tree) | repo-mutation layer (worktree on those stages; pr-merge mod offered if shipping ritual is PR review) |
+| Any stage waits on external response, evidence accumulation, or time passing | parked-stages layer (parked flag on the waiting stages; silence-watcher idle-mod offered if timeout/nudge semantics apply) |
+
+#### Inference strategy: silent-with-confirmation, or explicit-ask
+
+- **Strong signal in mission text or Q1**: infer silently and surface as a one-shot confirmation. Example: *"This looks like a development workflow (you mentioned shipping code via PR). I'll use the development template, which sets up backlog → ideation → implementation → validation → done with worktrees on the build tiers and the pr-merge mod for the PR step. Sound right?"*
+- **Ambiguous or no signal**: ask explicitly. Example: *"Is this workflow about (a) shipping code through review, (b) testing a hypothesis through tiers of evidence, or (c) iterating on an artifact until it is good enough? Or something else — describe and I will assemble the stages from the cues."*
+
+Apply the same strategy to layers: if the cue is strong, fold the layer activation (and any tied mod offer, framed per the template's Adoption section) into the template confirmation prose; if ambiguous, ask explicitly during Q2.
+
+#### Template loading
+
+Once the template is selected, **`Read` the template file** at `references/templates/{template}.md` (resolve relative to the commission skill directory). Then **follow the template's `## Adoption` section directly** — that section tells you what stages to pre-fill, what layers to fire, what mods to offer with what framing prose, what entity-template snippet to inject, what variants to surface, and what confirmation prose to show in Phase 1.
+
+The three templates available are `refinement`, `development`, and `experiment` — each at `references/templates/{name}.md`. The commission skill itself owns trait detection (this section), the Stage Naming Convention (Q2), the layer-assembly fallback (below), and the generic per-layer mod-framing reference (bottom of this file). Template-specific behavior — the development template's pr-merge stages-stay-clean framing, the experiment template's smoke/holdout teaching prose and silence-watcher offer, the refinement template's variant menu — lives in each template's Adoption section. Adding a fourth template later means dropping a new file in `references/templates/` with an Adoption section, not editing this skill.
+
+#### Generic mod offer mechanism
+
+When a layer fires during trait detection and a corresponding mod exists, surface the offer as part of the Phase 1 confirmation. The **framing prose** comes from the selected template's Adoption section — the development template carries the pr-merge stages-stay-clean prose, the experiment template carries the silence-watcher prose. When no template was selected (layer-assembly fallback), use the generic per-layer framing from the **Layer framing reference** at the bottom of this file.
+
+The Phase 2c y/n confirmations remain — that is the file-generation install step, separate from the Phase 1 design-time framing.
+
+#### Layer-assembly fallback
+
+When trait detection fires layer cues but no template matches cleanly (e.g., a mission that mixes repo-mutation with parked stages and does not look like development or experiment), do not force-fit a template. Instead:
+
+1. Skip the template `Read`.
+2. Use the Decomposed snippets reference at `skills/commission/references/decomposed-snippets.md` as the source list of base scaffolding + layer snippets.
+3. Assemble the suggested stage list from base scaffolding plus the layer snippets the cues fired.
+4. Use the generic per-layer framing from the **Layer framing reference** at the bottom of this file when surfacing mod offers.
+
+The fallback exists so commission gracefully handles novel intents instead of pushing every workflow into one of three boxes.
+
 ### Question 2 — Stages
 
-Based on the mission, suggest default stages. Present them as an itemized list and ask {captain} to review:
+If a template was selected during Trait Detection, use the template's Adoption-section pre-fill as the suggested stage list (with any layer-driven adjustments already applied per the template's framing). Otherwise (layer-assembly fallback), assemble the suggested list from the Decomposed snippets reference. Present the suggestion as an itemized list and ask {captain} to review:
 
 > Based on your workflow mission, here are the stages I'd suggest:
 >
@@ -94,7 +144,25 @@ Based on the mission, suggest default stages. Present them as an itemized list a
 >
 > Would you like to modify, add, or remove any stages? (confirm or describe changes)
 
+Apply the **Stage Naming Convention** (below) when proposing the default list and when accepting captain edits. Push back gently if the captain proposes a name that violates the convention; show the convention rule and offer the corrected name.
+
 Store the confirmed stages as `{stages}`. The first stage is `{first_stage}` and the last is `{last_stage}`.
+
+#### Stage Naming Convention
+
+**Stage names describe the bucket the entity is sitting in.** The bucket can be activity-flavored (`implementation`, `validation`, `analysis`, `draft`, `review`) when the captain is actively working, or state-flavored (`proposed`, `evaluated`, `sent`, `published`, `triaged`, `accepted`) when the entity has reached a state of having been X-ed. Both pass the test "the entity is in `{name}`."
+
+**Avoid pleonasm**: when the bucket already implies sitting/in-progress, do not prefix it with `awaiting_`, `in_`, `pending_`, or `being_`. The bucket itself is the verb-of-being. Examples to push back on:
+
+- `awaiting_validation` → `validation` (the entity is in validation)
+- `in_review` → `review` (the entity is in review)
+- `pending_merge` → drop the stage; PR/merge is mod-managed via the `pr` field, not modeled as a stage (see the development template's pr-merge framing)
+- `being_evaluated` → `evaluated` (state-flavored) or `evaluation` (activity-flavored)
+- `awaiting_response` → `watching` (state-flavored, parked) or `outreach` (activity-flavored, parked)
+
+**Exception**: `done` is the universally-understood terminal and stays as-is.
+
+When the captain proposes a name that violates the convention, surface the rule and the corrected name as a suggestion — do not silently rewrite. Example pushback: *"`awaiting_validation` reads as 'the entity is in awaiting_validation', which double-states the in-progress posture. The bucket itself is the verb-of-being — would `validation` work? (You can keep `awaiting_validation` if there is a reason — let me know.)"*
 
 ### Question 3 — Seed Entities
 
@@ -250,7 +318,7 @@ Each {entity_label} lives as either:
 - a flat markdown file `{slug}.md` (default — use this unless the entity produces many artifacts), or
 - a folder `{slug}/` containing `index.md` as the canonical entity file, when the {entity_label} produces per-stage artifacts (draft versions, transcripts, outputs) that belong alongside the tracker.
 
-Slugs are lowercase, hyphens, no spaces. Example: `my-feature-idea.md` or `my-feature-idea/index.md`. The status scanner recognizes both forms; `--set` and `--archive` resolve the slug either way, and folder entities archive as a whole folder into `_archive/{slug}/`.
+Slugs are lowercase, hyphens, no spaces. Example: `my-feature-idea.md` or `my-feature-idea/index.md`. The status scanner recognizes both forms; `--set` and `--archive` resolve the slug either way, and folder entities archive as a whole folder into the workflow's archive directory.
 
 ## Schema
 
@@ -418,9 +486,11 @@ pr:
 
 ### 2c. Install Mods (conditional)
 
-Check the README frontmatter for any stages with `worktree: true`. If at least one stage uses a worktree, offer the pr-merge mod:
+Mod **framing prose** was already surfaced during Phase 1's Trait Detection step (per the selected template's Adoption section, or the generic Layer framing reference for the layer-assembly fallback). This step is the file-generation install confirmation only — the captain already knows *why* the mod is being offered.
 
-> This workflow has worktree stages. Install the **pr-merge** mod? (Pushes branches and creates GitHub PRs for completed entities.)
+Check the README frontmatter for any stages with `worktree: true`. If at least one stage uses a worktree, confirm the pr-merge install:
+
+> Install the **pr-merge** mod now? (We discussed this during design — it manages the PR lifecycle so the workflow's stage list stays clean.)
 >
 > (y/n, default: y)
 
@@ -433,7 +503,7 @@ mkdir -p {dir}/_mods
 cp "{spacedock_plugin_dir}/mods/pr-merge.md" {dir}/_mods/pr-merge.md
 ```
 
-If no stage uses a worktree, skip this step entirely — do not offer pr-merge.
+If no stage uses a worktree, skip the pr-merge confirmation entirely. For other layer-tied mods (e.g., silence-watcher when the parked-stages layer fired with timeout/nudge semantics), confirm the install here using the same pattern: a brief y/n callback to the Phase 1 framing, default y when the layer fired during design.
 
 
 ### Generation Checklist
@@ -468,7 +538,17 @@ Tell {captain} what was generated:
 > - `{dir}/README.md` — workflow schema and stage definitions
 > - {for each seed entity: "`{dir}/{slug}.md` — {title}"}
 > - {if pr-merge mod was installed: "`{dir}/_mods/pr-merge.md` — PR merge mod"}
->
+
+Then surface the **README-edit nudge** — a one-paragraph reminder that the per-stage prose is a starting point, not a commitment, and that the captain should tighten it before the first dispatch. The README is the living spec for what each stage means in this workflow; if the auto-generated bullets do not match the captain's actual quality bar, every dispatched agent will work from prose that is wrong-by-default. Edit time before first dispatch is cheap; edit time after agents have been dispatched against the wrong bar is not.
+
+> Quick heads-up before we start: the README I just generated is the **living spec** for this workflow. Each stage in `{dir}/README.md` has three per-stage bullets — `Outputs:` (what the worker produces), `Good:` (your quality bar), and `Bad:` (anti-patterns to avoid). I drafted those as best-guesses from the mission text, but they are not commitments — they are starting prose for you to tighten so they reflect your actual standards. Open `{dir}/README.md` and edit the bullets under each `### {stage_name}` heading before the first dispatch. Tightening costs minutes now; un-tightening after agents have been dispatched against vague bullets costs more.
+
+Then offer the **`review stages`** interactive flow as an opt-in alternative to opening the file in an editor:
+
+> Type `review stages` if you'd like me to walk you through each stage's expectations one at a time and offer amendments inline — otherwise we'll proceed to the pilot run with the README as-is.
+
+Wait for {captain} to either type `review stages` (the literal trigger phrase) or signal proceed (any other response, including "go", "proceed", "looks good", or just continuing the conversation). If the trigger fires, hand off to **Step 1a — Review Stages Handler** below; otherwise continue with the agents/launch announcement:
+
 > Agents are shipped with the Spacedock plugin — no local agent files needed:
 > - `spacedock:first-officer` — workflow orchestrator
 > - `spacedock:ensign` — stage worker agent
@@ -480,6 +560,72 @@ Tell {captain} what was generated:
 > ```
 >
 > Starting the initial run now...
+
+### Step 1a — Review Stages Handler (triggered by `review stages`)
+
+When {captain} types the literal phrase `review stages`, walk them through each stage of the generated README one at a time, offering amendments per stage. **Progressive disclosure**: never dump the whole README at once. The goal is for a captain who has never edited a Spacedock README to feel guided rather than interrogated.
+
+#### Pre-pass: scan for stretch bullets
+
+Before starting the per-stage walk, read `{dir}/README.md` and scan each stage's `Outputs:` / `Good:` / `Bad:` bullets for **stretch bullets** — auto-generated content that is generic enough to be a candidate for tightening regardless of the workflow specifics. Flag candidates include:
+
+- Outputs bullets that read as generic verbs (`produce deliverable`, `generate output`, `complete the work`)
+- Good bullets that are platitudes (`high quality`, `well-written`, `correct`, `addresses the problem`)
+- Bad bullets that are tautologies (`low quality`, `incomplete`, `wrong`, `does not address the problem`)
+- Any bullet whose specifics could be lifted unchanged into a different workflow's README — that is a sign the bullet is not workflow-specific yet
+
+Build a per-stage flag list. When you reach a stage during the walk, surface its flagged bullets proactively rather than waiting for {captain} to notice:
+
+> Heads up — the `Outputs:` bullet "produce the deliverable" reads as generic. For *this* workflow, what does the deliverable actually look like at this stage? (e.g., a merged PR with passing CI, a transcript file at `{path}`, a row in `{table}` with status=done.)
+
+This is the same mixed-inference / explicit-ask discipline as Trait Detection: when the auto-generated bullet is clearly a stretch, infer it needs tightening and proactively prompt; when it is plausibly workflow-specific already, present it without flagging and let {captain} decide.
+
+#### Per-stage walk
+
+For each stage in the README's `## Stages` section (in order), surface a focused view:
+
+> **Stage `{stage_name}`** ({position} of {total})
+>
+> What the {entity_label} is sitting in: {one-line bucket-noun framing — pull from the stage's first sentence in the README}
+>
+> **Outputs** (what the worker produces):
+> {for each Outputs bullet: "- {bullet}{if flagged: " *— flagged: {flag reason}*"}"}
+>
+> **Good** (your quality bar):
+> {for each Good bullet: "- {bullet}{if flagged: " *— flagged: {flag reason}*"}"}
+>
+> **Bad** (anti-patterns to avoid):
+> {for each Bad bullet: "- {bullet}{if flagged: " *— flagged: {flag reason}*"}"}
+>
+> What would you like to do? Options:
+> - `keep` — accept this stage as-is, move on
+> - `tighten outputs` — I'll ask what to replace each Outputs bullet with
+> - `tighten good` — same for Good
+> - `tighten bad` — same for Bad
+> - `drop {section} {n}` — remove bullet {n} from {section} (e.g., `drop outputs 2`)
+> - `add {section}: {text}` — append a new bullet to {section} (e.g., `add good: passes CI on first try`)
+> - `next stage` — same as `keep`, move on
+>
+> Or describe what you want changed in your own words and I'll apply it.
+
+Wait for {captain}'s response. Apply the requested changes by `Edit`-ing `{dir}/README.md` in place — anchor on the stage's `### {stage_name}` heading and the bullet text being modified. After each change, briefly confirm what was applied ("Tightened Outputs bullet 2: `produce deliverable` → `merged PR with passing CI`") and then re-prompt with the same options until {captain} chooses `keep` / `next stage`.
+
+Track per-stage which bullets were `tighten`-ed vs kept as-is — this feeds the final confirmation.
+
+#### Final confirmation
+
+Once all stages have been reviewed (each one moved past via `keep` or `next stage`), summarize what got tightened:
+
+> Stage review complete. Here's what got tightened:
+>
+> {for each stage that had any change:}
+> - `{stage_name}`: {short description of what changed — e.g., "Outputs bullet 1 tightened, Bad bullet 3 dropped"}
+>
+> {if no stages were changed: "All stages kept as-is."}
+>
+> The README at `{dir}/README.md` reflects these edits. Ready to proceed to the pilot run? (yes / let me make more edits)
+
+If {captain} says yes (or any proceed signal), continue with the agents/launch announcement from Step 1 (the part after the `review stages` offer). If {captain} wants more edits, ask what they want to change and apply directly — do not re-walk the per-stage flow unless they ask for it explicitly.
 
 ### Step 2 — Assume First-Officer Role
 
@@ -529,3 +675,17 @@ After Step 4 or Step 5 (whether the pilot run succeeded or failed), always concl
 > ```
 >
 > The first officer will read the workflow state, pick up where things left off, and dispatch agents for any entities ready for their next stage.
+
+---
+
+## Layer framing reference
+
+Used only when trait detection landed in the layer-assembly fallback (no template selected). When a template was selected, framing prose comes from that template's `## Adoption` section, not from this reference.
+
+### repo-mutation layer (no template)
+
+> One or more of your stages modifies the repo. I'll mark those stages with `worktree: true` so each entity gets a dedicated worktree branch and the main checkout stays clean. If your shipping ritual is "open a PR, get review, merge to main," I'd suggest installing the **pr-merge** mod — it tracks PR state on the entity's `pr` field, watches for merges, and advances the entity to terminal when the PR lands. That removes the need for a `pr_open` or `awaiting_merge` stage in your stage list. Skip the mod if you commit directly to main or do not ship via PR review.
+
+### parked-stages layer (no template)
+
+> One or more of your stages waits on external response, evidence accumulation, or time passing. I'll mark those stages parked so the FO knows entities sitting there are normal, not stalled. If a parked stage has "ping me after N days" or "auto-advance after timeout" semantics, the **silence-watcher** idle-mod handles that — it watches for stall thresholds you set per parked stage and either pings the captain or advances the entity per your rule. Skip the mod if no parked stage has timeout semantics — silence-watcher only earns its keep when "stuck for too long" is a real concern.
