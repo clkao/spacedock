@@ -310,3 +310,14 @@ Added a **template Adoption section** pattern: each template file carries its ow
 Routed back to implementation ensign (alive on standby; context budget 10.2%, reuse_ok). Fresh validator will re-verify after fixes.
 
 **Cycle 1 resolved (2026-04-29 ~05:27 UTC).** Cycle 2 implementation landed five commits (AC-2 alignment + AC-7/AC-8 additions, Phase 3 Step 1 README-edit nudge, `review stages` interactive flow, walkthrough scenario 5, cycle-2 stage report). Cycle-2 validation reproduced all 8 ACs cleanly and recommended PASSED. Captain approved the gate. Advancing to merge.
+
+**Cycle 2 — PR-time independent review (2026-04-29 ~06:15 UTC), Request Changes.**
+
+PR #161 review by `even-wei` flagged two blockers + three mediums + two lows. Captain triaged:
+
+- **Blocker #1 (FIX):** layer-assembly fallback in SKILL.md:131 points at `## Decomposed snippets` *in this plan doc*. Post-archive that pointer breaks. Extract the section to `skills/commission/references/decomposed-snippets.md` and update the pointer.
+- **Medium #3 (FIX, lifted to scope):** `experiment.md` ships implicit non-linear transitions (`analysis → holdout|rejected`, `smoke → run|hypothesis|rejected`, `holdout → accepted|rejected`) without a `transitions:` frontmatter block. SKILL.md:302 requires it for non-linear flows.
+- **Blocker #2 (DEFER, document the deferral):** refinement variants list stages but lack per-stage Inputs/Outputs/Good/Bad detail. Captain's call: leave variant per-stage detail to commission time — captains customize via the new `review stages` flow and auto-generated bullets, or specialize the variant into its own template file later. Document this design decision in refinement.md so future reviewers don't re-flag it.
+- Mediums #4, #5 and lows #6, #7: deferred to follow-up issues if needed.
+
+Routing to a fresh implementation ensign. PR branch also has merge conflicts (created from old main, never rebased through #200's merge + Cycle 1 Feedback Cycles); resolve as part of the same cycle by merging main into the branch.
