@@ -1,7 +1,7 @@
 ---
 id: 223
 title: "id-style change should be forward-only — accept legacy sequential IDs when README declares sd-b32"
-status: implementation
+status: validation
 source: "GitHub issue #169 (filed by CL, 2026-04-29)"
 started: 2026-04-29T21:21:01Z
 completed:
