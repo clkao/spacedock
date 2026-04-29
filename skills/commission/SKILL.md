@@ -538,7 +538,13 @@ Tell {captain} what was generated:
 > - `{dir}/README.md` — workflow schema and stage definitions
 > - {for each seed entity: "`{dir}/{slug}.md` — {title}"}
 > - {if pr-merge mod was installed: "`{dir}/_mods/pr-merge.md` — PR merge mod"}
->
+
+Then surface the **README-edit nudge** — a one-paragraph reminder that the per-stage prose is a starting point, not a commitment, and that the captain should tighten it before the first dispatch. The README is the living spec for what each stage means in this workflow; if the auto-generated bullets do not match the captain's actual quality bar, every dispatched agent will work from prose that is wrong-by-default. Edit time before first dispatch is cheap; edit time after agents have been dispatched against the wrong bar is not.
+
+> Quick heads-up before we start: the README I just generated is the **living spec** for this workflow. Each stage in `{dir}/README.md` has three per-stage bullets — `Outputs:` (what the worker produces), `Good:` (your quality bar), and `Bad:` (anti-patterns to avoid). I drafted those as best-guesses from the mission text, but they are not commitments — they are starting prose for you to tighten so they reflect your actual standards. Open `{dir}/README.md` and edit the bullets under each `### {stage_name}` heading before the first dispatch. Tightening costs minutes now; un-tightening after agents have been dispatched against vague bullets costs more.
+
+Then continue with the agents/launch announcement:
+
 > Agents are shipped with the Spacedock plugin — no local agent files needed:
 > - `spacedock:first-officer` — workflow orchestrator
 > - `spacedock:ensign` — stage worker agent
