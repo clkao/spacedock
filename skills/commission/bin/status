@@ -186,8 +186,15 @@ def parse_mod_metadata(filepath):
 
 
 def _strip_inline_comment(value):
-    """Strip a YAML-style inline ` # comment` from a scalar string value."""
-    return value.split('#', 1)[0].strip()
+    """Strip a YAML-style inline ` # comment` from a scalar string value.
+
+    Per YAML 1.2.2 §6.6, `#` opens a comment only when preceded by whitespace,
+    so values like `github#23`, `opus#beta`, or `"#160"` retain their `#`.
+    Known limitation: an unquoted value that itself begins with `#` (e.g.
+    `pr: #44`) cannot be distinguished here because the caller has already
+    stripped leading whitespace; no in-scope field naturally starts with `#`.
+    """
+    return re.sub(r'\s+#.*$', '', value).rstrip()
 
 
 def parse_stages_block(filepath):
