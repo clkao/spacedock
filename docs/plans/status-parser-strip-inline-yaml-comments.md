@@ -1,7 +1,7 @@
 ---
 id: 222
 title: "status --boot crashes with ValueError when stage YAML has inline comment on value line"
-status: implementation
+status: validation
 source: "GitHub issue #163 (filed by Kent Chen / iamcxa, 2026-04-29)"
 started: 2026-04-29T14:56:54Z
 completed:
