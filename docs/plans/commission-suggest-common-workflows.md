@@ -10,7 +10,7 @@ score: 0.5
 worktree: .worktrees/spacedock-ensign-commission-suggest-common-workflows
 issue: "#156"
 pr:
-mod-block:
+mod-block: merge:pr-merge
 ---
 
 ## Problem
