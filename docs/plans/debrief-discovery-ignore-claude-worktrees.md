@@ -110,3 +110,16 @@ Behavioral note: post-filtering preserves filesystem traversal cost into `.claud
 ### Summary
 
 Fix shape selected: post-filter the existing discovery `grep` with `grep -v '/\.claude/worktrees/'` rather than adding `--exclude-dir=worktrees`, so that user-committed sibling directories named `worktrees/` are not incidentally hidden. Acceptance criteria express end-state properties (discovery output contents and SKILL.md command shape) and each is verified by a single new pytest regression test with a fixture covering all four sensitivity classes (primary workflow, `.claude/worktrees/` duplicate, `.worktrees/` duplicate, user `worktrees/` sibling). The change is additive to one line in `skills/debrief/SKILL.md:22` and does not touch other skills.
+
+## Stage Report: implementation
+
+- DONE: `skills/commission/bin/status` `discover_workflows` adds path-anchored prune for `.claude/worktrees`; docstring updated.
+  Commit `bc832ccb`. Prune lives at the line right after the `DISCOVER_IGNORE_DIRS` filter: `if os.path.basename(dirpath) == '.claude' and 'worktrees' in dirnames: dirnames.remove('worktrees')`. Docstring gained a "Path-anchored prune" section explaining why `worktrees` is NOT in `DISCOVER_IGNORE_DIRS`.
+- DONE: `skills/debrief/SKILL.md` Phase 1 Step 1 replaces inline `grep -rl ...` recipe with `{spacedock_plugin_dir}/skills/commission/bin/status --discover` invocation; existing 'exactly one / multiple / none' branching prose preserved.
+  Commit `37ca52af`. The two-step recipe is now (1) run the helper, (2) branch on result count. Phase 2e (8x's territory) untouched.
+- DONE: `tests/test_status_discover_ignores_claude_worktrees.py` with three test functions per the entity body's Test plan; `make test-static` green.
+  Commit `455428d8`. Tests: `test_discover_drops_claude_worktrees_duplicates`, `test_discover_preserves_existing_dot_worktrees_exclusion`, `test_discover_keeps_sibling_worktrees_directory`. Per-test fixtures built at `tmp_path` (the unittest-style `tempfile.TemporaryDirectory()`). `make test-static`: `554 passed, 26 deselected, 15 subtests passed in 27.75s` (was 551 before this stage; 3 new tests).
+
+### Summary
+
+Implementation chose a stronger fix shape than the ideation's grep post-filter: prune `.claude/worktrees/` inside `discover_workflows` at the source, then point debrief Phase 1 Step 1 at `status --discover`. This keeps discovery semantics (prune list, frontmatter rule, symlink dedup) in a single canonical owner. The literal name `worktrees` was deliberately NOT added to `DISCOVER_IGNORE_DIRS` so a sibling `worktrees/` directory at any other location is preserved (AC3 sensitivity class). Three commits stacked above 8x's three: `bc832ccb` (status), `37ca52af` (debrief Phase 1), `455428d8` (tests).
