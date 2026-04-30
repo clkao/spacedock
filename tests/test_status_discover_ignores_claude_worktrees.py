@@ -1,9 +1,8 @@
-# ABOUTME: Regression tests for `status --discover` ignoring `.claude/worktrees/` workflow copies.
-# ABOUTME: Verifies path-anchored prune of agent worktree duplicates while preserving sibling `worktrees/` dirs.
+# ABOUTME: Regression tests for `status --discover` honoring .gitignore directory entries.
+# ABOUTME: Verifies that gitignore-augmented DISCOVER_IGNORE_DIRS suppresses .claude/worktrees/ duplicates.
 
 import os
 import tempfile
-import textwrap
 import unittest
 
 from test_status_script import build_status_script, make_workflow_readme, run_status
@@ -15,8 +14,14 @@ def _write_readme(path, commissioned_by='spacedock@1.0'):
         f.write(make_workflow_readme(commissioned_by=commissioned_by))
 
 
-class TestDiscoverIgnoresClaudeWorktrees(unittest.TestCase):
-    """`status --discover` must drop `.claude/worktrees/` copies of workflow READMEs."""
+def _write_gitignore(tmpdir, entries):
+    with open(os.path.join(tmpdir, '.gitignore'), 'w') as f:
+        for entry in entries:
+            f.write(entry + '\n')
+
+
+class TestDiscoverHonorsGitignore(unittest.TestCase):
+    """`status --discover` augments DISCOVER_IGNORE_DIRS with gitignore directory entries."""
 
     def setUp(self):
         self._script_dir = tempfile.mkdtemp()
@@ -27,11 +32,11 @@ class TestDiscoverIgnoresClaudeWorktrees(unittest.TestCase):
         os.rmdir(self._script_dir)
 
     def _build_fixture(self, tmpdir):
-        # Primary workflow in the main checkout.
+        _write_gitignore(tmpdir, ['.claude/worktrees/'])
+
         primary = os.path.join(tmpdir, 'workflows', 'planning', 'README.md')
         _write_readme(primary)
 
-        # Two duplicate copies under .claude/worktrees/<branch>/...
         for branch in ('ensign-foo', 'ensign-bar'):
             dup = os.path.join(
                 tmpdir, '.claude', 'worktrees', branch,
@@ -39,24 +44,18 @@ class TestDiscoverIgnoresClaudeWorktrees(unittest.TestCase):
             )
             _write_readme(dup)
 
-        # Existing top-level .worktrees/ duplicate must remain excluded.
         legacy = os.path.join(
             tmpdir, '.worktrees', 'legacy-slug',
             'workflows', 'planning', 'README.md',
         )
         _write_readme(legacy)
 
-        # User-committed sibling `worktrees/` (no leading dot, not under .claude/)
-        # MUST NOT be excluded — the prune is path-anchored to `.claude/worktrees/`.
-        sibling = os.path.join(tmpdir, 'worktrees', 'docs', 'README.md')
-        _write_readme(sibling)
-
-        return primary, sibling
+        return primary
 
     def test_discover_drops_claude_worktrees_duplicates(self):
-        """Discovery returns the primary workflow and skips every `.claude/worktrees/` copy."""
+        """A `.gitignore` entry of `.claude/worktrees/` suppresses every duplicate copy."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            primary, _sibling = self._build_fixture(tmpdir)
+            primary = self._build_fixture(tmpdir)
 
             result = run_status(tmpdir, '--discover', '--root', tmpdir,
                                 script_path=self.script_path)
@@ -69,7 +68,7 @@ class TestDiscoverIgnoresClaudeWorktrees(unittest.TestCase):
                                  f'discovery returned a `.claude/worktrees/` path: {line}')
 
     def test_discover_preserves_existing_dot_worktrees_exclusion(self):
-        """The existing top-level `.worktrees/` exclusion still suppresses duplicates."""
+        """The hardcoded `.worktrees/` baseline still suppresses duplicates."""
         with tempfile.TemporaryDirectory() as tmpdir:
             self._build_fixture(tmpdir)
 
@@ -79,26 +78,33 @@ class TestDiscoverIgnoresClaudeWorktrees(unittest.TestCase):
             lines = [ln for ln in result.stdout.strip().split('\n') if ln]
 
             for line in lines:
-                self.assertFalse(
-                    line.startswith(os.path.realpath(tmpdir) + os.sep + '.worktrees' + os.sep)
-                    or os.sep + '.worktrees' + os.sep in line,
+                self.assertNotIn(
+                    os.sep + '.worktrees' + os.sep, line,
                     f'discovery returned a `.worktrees/` path: {line}',
                 )
 
-    def test_discover_keeps_sibling_worktrees_directory(self):
-        """A user-committed `worktrees/` directory (no leading dot) is NOT pruned."""
+    def test_discover_without_gitignore_entry_returns_claude_worktrees(self):
+        """Without the gitignore entry, duplicates leak through — confirms gitignore is the mechanism."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            _primary, sibling = self._build_fixture(tmpdir)
+            _write_gitignore(tmpdir, [])
+
+            primary = os.path.join(tmpdir, 'workflows', 'planning', 'README.md')
+            _write_readme(primary)
+
+            dup = os.path.join(
+                tmpdir, '.claude', 'worktrees', 'ensign-foo',
+                'workflows', 'planning', 'README.md',
+            )
+            _write_readme(dup)
 
             result = run_status(tmpdir, '--discover', '--root', tmpdir,
                                 script_path=self.script_path)
             self.assertEqual(result.returncode, 0, result.stderr)
             lines = [ln for ln in result.stdout.strip().split('\n') if ln]
 
-            self.assertIn(
-                os.path.realpath(os.path.dirname(sibling)),
-                lines,
-                f'expected sibling `worktrees/docs` to be discovered, got: {lines}',
+            self.assertTrue(
+                any('/.claude/worktrees/' in ln for ln in lines),
+                f'expected `.claude/worktrees/` duplicate to leak through without gitignore entry, got: {lines}',
             )
 
 
