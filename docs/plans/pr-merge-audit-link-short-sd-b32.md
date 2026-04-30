@@ -86,3 +86,20 @@ Verified by: full static suite run.
 ### Summary
 
 Added `status --short-id REF` that returns the shortest-unique-prefix used by the ID column for sd-b32, and the literal stored ID/slug for sequential/slug. Updated both pr-merge mod copies to call `status --short-id` when rendering the audit-link `[{entity-id}]` slot, fixing the unreadable 24-char render seen on PR #179. AC-3 byte-parity is preserved (mod copies identical, `[Mod Install Freshness]` green); AC-5 full static suite is green at 561/561.
+
+## Stage Report: validation
+
+- DONE: Run `make test-static` and `unset CLAUDECODE && uv run pytest tests/test_status_short_id.py tests/test_pr_merge_template.py -v` from the worktree; cite exit codes and pass/fail counts.
+  `make test-static` exit 0, 561 passed / 26 deselected / 15 subtests passed. Targeted pytest exit 0, 32 passed (4 short-id + 28 pr-merge-template).
+- DONE: For each AC-1..AC-5 in the entity body, name the cited test from its `Verified by:` clause and confirm it appears green in the run.
+  - AC-1 (sd-b32 prefix, sequential/slug literals): `tests/test_status_short_id.py::TestShortId::test_short_id_sd_b32_returns_shortest_unique_prefix`, `::test_short_id_sequential_returns_literal_id`, `::test_short_id_slug_returns_literal_slug` — all PASSED.
+  - AC-2 (active+archived collision lengthens prefix): `tests/test_status_short_id.py::TestShortId::test_short_id_sd_b32_lengthens_prefix_when_active_archived_collide` — PASSED.
+  - AC-3 (mod byte-parity): direct `diff mods/pr-merge.md docs/plans/_mods/pr-merge.md` returns no output (exit 0). `[Mod Install Freshness]` continues green inside `make test-static`.
+  - AC-4 (audit-link template references `status --short-id`): grep on both copies shows the `## Hook: merge` instruction prose ("compute the short entity-id slot for the audit link by running `status --short-id {entity ref}`") and the extraction-rule row (`[{short-id}](...)`) at lines 40 and 68 of each copy. `tests/test_pr_merge_template.py::TestAuditMetadata::test_audit_link_uses_short_id_command` and `::test_template_describes_audit_link_format` — both PASSED.
+  - AC-5 (`make test-static` green): full static run exit 0 at 561 passed.
+- DONE: Issue PASSED or REJECTED.
+  PASSED.
+
+### Summary
+
+All five acceptance criteria verified with cited evidence. `make test-static` is green at 561/561; the targeted suite covering the new short-id helper and the pr-merge template is green at 32/32. Mod byte-parity confirmed by direct `diff` (exit 0) in addition to the `[Mod Install Freshness]` regression guard. Recommendation: PASSED.
