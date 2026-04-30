@@ -82,3 +82,16 @@ PASS
 - AC items are end-state properties with concrete `Verified by:` clauses: AC1 (fixture passes), AC2 (skill prose contains required tokens), AC3 (degraded-mode self-annotation), AC4 (diff scoped to this skill + fixture only).
 - Adjacency to #5a noted in the entity body without coordination dependency.
 - No worktree; edited the entity file directly.
+
+## Stage Report: implementation
+
+- DONE: Rewrite Phase 2e in `skills/debrief/SKILL.md` per the entity body's Approach
+  Commit `4a0bf553`; primary = `{spacedock_plugin_dir}/skills/commission/bin/status --workflow-dir {dir}` (with `--next`), legacy = `{dir}/status` gated on plugin-shipped unreachable AND local exists, degraded = frontmatter scan with self-annotation `_(reconstructed from entity frontmatter — no status helper available)_`.
+- DONE: Add regression fixture `tests/fixtures/debrief-no-local-status/` + `tests/test_debrief_skill.py`
+  Commit `d463331a`; fixture has README (commissioned-by spacedock@0.11.0) + 3 entities spanning backlog / review-gated / build-with-worktree, no local `status`. Test host has 12 prose-guard tests covering AC2/AC3 plus fixture sanity.
+- DONE: Local verification — `make test-static` green; targeted `pytest tests/test_debrief_skill.py -v` green
+  Targeted: `12 passed in 0.04s`. Static: `551 passed, 26 deselected, 15 subtests passed in 36.86s`.
+
+### Summary
+
+Phase 2e now documents a primary/legacy/degraded fallback chain instead of treating `{dir}/status` as mandatory; the legacy local script remains a back-compat path for spacedock<=0.10.x workflows, and a frontmatter scan is the self-describing degraded mode. Two commits on the worktree branch — one for the SKILL.md rewrite, one for the fixture + new test host. AC1's behavioral check (agent-in-the-loop debrief run) is intentionally pilot-driven per the test plan; AC2/AC3 are guarded statically; AC4 (scope) holds — diff touches only `skills/debrief/SKILL.md`, `tests/fixtures/debrief-no-local-status/`, and `tests/test_debrief_skill.py`.
