@@ -69,26 +69,73 @@ def _recent_team_evidence():
     return False
 
 
+_HEADING_DECORATION_CHARS = str.maketrans('', '', '`*_~')
+
+
+def _heading_tokens(line):
+    """Return the content tokens of a `### `-prefixed heading, or ``None``.
+
+    Strips Markdown inline decoration (`` ` ``, `*`, `_`, `~`) and treats
+    `(` and `[` as token terminators so trailing annotations like
+    `*(captain-interactive)*` or `[terminal]` do not merge with the name.
+    """
+    stripped = line.strip()
+    if not stripped.startswith('### '):
+        return None
+    rest = stripped[4:].strip()
+    rest = rest.translate(_HEADING_DECORATION_CHARS)
+    for ch in '([':
+        rest = rest.replace(ch, ' ')
+    return rest.split()
+
+
+def _heading_first_token(line):
+    """Return the first content token of a `### ` heading, or ``None``."""
+    tokens = _heading_tokens(line)
+    if not tokens:
+        return None
+    return tokens[0]
+
+
 def extract_stage_subsection(readme_path, stage_name):
     r"""Extract the full ### {stage_name} subsection from a workflow README.
 
-    Accepts backtick-quoted (`### \`work\``) and bare (`### work`) headings,
-    each optionally followed by a parenthetical annotation like
-    `### \`triaged\` (terminal)` — the annotation is informational; the
-    canonical truth source for terminal/middle/etc. is the YAML frontmatter.
+    Heading match is permissive: any `###` line whose first content token
+    (after stripping `` ` ``, `*`, `_`, `~` and treating `(` / `[` as token
+    terminators) equals ``stage_name`` is treated as a match. This survives
+    common Markdown decorations captains use for inline metadata: backticks,
+    italic (`*` / `_`), bold (`**` / `__`), parentheticals, square-bracket
+    annotations, and trailing em-dash text.
+
+    If no permissive match is found but some `###` line in the README mentions
+    the stage name as a substring, raise ``ValueError`` with line number, the
+    raw heading text, and the parsing requirement — this surfaces the
+    captain's malformed heading instead of silently returning ``None``.
+
+    Returns ``None`` only when no `###` line mentions the stage name at all
+    (genuinely missing stage).
     """
     with open(readme_path, 'r') as f:
         text = f.read()
     lines = text.splitlines()
-    heading_re = re.compile(
-        rf'^###\s+`?{re.escape(stage_name)}`?(?:\s+\([^)]*\))?\s*$'
-    )
     start = None
     for i, line in enumerate(lines):
-        if heading_re.match(line.strip()):
+        if _heading_first_token(line) == stage_name:
             start = i
             break
     if start is None:
+        for i, line in enumerate(lines):
+            tokens = _heading_tokens(line)
+            if tokens and stage_name in tokens:
+                stripped = line.strip()
+                raise ValueError(
+                    f"stage heading at line {i + 1} mentions '{stage_name}' "
+                    f"but does not parse as a stage heading: {stripped!r}. "
+                    f"The stage name must be the first content token of the "
+                    f"heading after stripping Markdown decoration "
+                    f"(backticks, *, _, ~) and treating '(' and '[' as "
+                    f"token terminators."
+                )
         return None
     end = len(lines)
     for i in range(start + 1, len(lines)):
@@ -266,7 +313,10 @@ def cmd_build(args):
         return _build_error(f"derived name '{derived_name}' contains invalid characters")
 
     # Extract stage subsection from README
-    stage_subsection = extract_stage_subsection(readme_path, stage)
+    try:
+        stage_subsection = extract_stage_subsection(readme_path, stage)
+    except ValueError as e:
+        return _build_error(str(e))
     if stage_subsection is None:
         return _build_error(f"stage '{stage}' heading not found in {readme_path}")
 
