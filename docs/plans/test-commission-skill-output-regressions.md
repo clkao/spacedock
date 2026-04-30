@@ -35,75 +35,50 @@ The fifth lives in `refit-command.md` (a generated entity body, not a template):
 ### Failure 3 (historical, currently passing): `no absolute paths in generated files`
 The `[No Absolute Paths]` section now passes (5a cycle 2 added the `[README Portability]` section and 5a's portability fix landed in commit `2906988e commission: replace per-machine status snippets with FO-invocation prose`). This failure class is already resolved upstream and out of scope for #197.
 
-## Architectural conflict (must be resolved before fix)
+## Captain decision (cycle 2): Option B-ii + A2
 
-The current pr-merge runtime mechanism only discovers hooks from `{workflow_dir}/_mods/*.md` (`skills/commission/bin/status:863-877`, `skills/first-officer/references/codex-first-officer-runtime.md:187`, `skills/first-officer/references/claude-first-officer-runtime.md:259`). The plugin-shipped `mods/pr-merge.md` is NOT auto-discovered. So the `cp` command is currently the *install mechanism*, not redundant duplication. Simply deleting it would break PR-merge behavior end-to-end (no startup PR-state checks, no merge-hook gate, no mod-block enforcement).
+Captain reviewed cycle-1 ideation and picked **Option B-ii + A2** (not Option A). Reasoning:
 
-The dispatch framing implies the captain wants to stop the duplicate-copy. Two real paths to that end-state, picked here so the captain can ratify the architectural direction at the gate:
+The 4 leaks inside `_mods/pr-merge.md` (`{number}`, `{branch}` x2, `{entity title}`, `{constructed body}`) are not commission-time slots that should be resolved at generation. They are documentation prose telling the FO what to substitute at merge-hook execution time. The mod is correctly written. The test's leak-scan was overly broad for `_mods/*.md`.
 
-### Option A — Plugin-mods auto-discovery (preferred)
-Extend `scan_mods` (`skills/commission/bin/status:863-877`) to ALSO scan `{spacedock_plugin_dir}/mods/*.md` for hook headings, with workflow-local `_mods/*.md` taking precedence on filename collision. Update FO runtime references to document the fallback. Drop the `cp` from `skills/commission/SKILL.md:482-483` and the checklist line at `skills/commission/SKILL.md:495`. Workflow-local `_mods/` becomes opt-in for per-workflow overrides.
+Option A's architectural shift (plugin-mods auto-discovery + opt-out mechanism) is unwarranted for this task. Keep the install model — commission continues to `cp` plugin pr-merge.md into the workflow's `_mods/`. Refine the test instead so it stops flagging legitimate runtime placeholders inside mod files, and add a freshness signal that catches accidental edits or stale-after-plugin-upgrade drift. Fix the 5th leak (refit-command.md `{current_version}`) at content source.
 
-Pros: solves both failures in one fix path (no `_mods/pr-merge.md` → no leaks from it); plugin upgrades to pr-merge.md propagate automatically to every workflow without per-workflow refit; aligns with the existing "plugin-shipped status viewer" model that 5a's cycle just enshrined for status.
-Cons: changes mechanism, not just commission prose; need to update mod-block enforcement (`status --set` / `status --archive`'s "registered merge hooks" check at `skills/first-officer/references/first-officer-shared-core.md:250`) to consult the plugin scan as well.
+## Proposed approach (Option B-ii + A2)
 
-### Option B — Keep the local copy; refine the test
-Accept that `_mods/pr-merge.md` is the install mechanism. Refine `test_commission`'s leak scan to either (a) skip `_mods/*.md` files entirely (mods are documented templates), or (b) compare `_mods/pr-merge.md` byte-for-byte against `{spacedock_plugin_dir}/mods/pr-merge.md` and fail only on drift. Drop the "workflow-local pr-merge mod is not generated" check — replace with "workflow-local pr-merge mod matches plugin source byte-for-byte".
-
-Pros: smallest mechanism delta; no FO runtime changes.
-Cons: leaves the duplicate-copy install model in place; per-workflow plugin upgrades still require manual `cp` refresh; doesn't address the captain's apparent intent to stop redundant generation.
-
-### Recommendation
-Option A. The captain's framing in the dispatch ("the file should NOT exist locally — the plugin already ships it") plus the existing "plugin-shipped status viewer" precedent both point at plugin-resident shared assets being first-class. Option B preserves a workflow-pollution pattern the test was built to flag.
-
-The fifth leak (`refit-command.md` `{current_version}` prose) is independent of A/B. Two narrow sub-options:
-- **A1**: tighten the test regex to also exclude lines starting with `Verified by:` (the leak-pattern is in plain English describing refit semantics, not a template slot).
-- **A2**: tweak commission prose so the seeded refit-command.md AC uses backticks-around-words instead of `{var}` syntax (e.g., "reads the current spacedock version").
-
-Recommendation: A2 (fix at content-source). The test regex was correct to flag braces in generated entity bodies; the LLM should not write `{var}` syntax in entity prose. Adjust the seed-entity scaffolding prose in `skills/commission/SKILL.md` so the refit-command seed example doesn't model bracey prose.
-
-## Proposed approach (assuming Option A + A2)
-
-1. **Extend `scan_mods` in `skills/commission/bin/status`** to scan the plugin `mods/` directory in addition to `{workflow_dir}/_mods/`. Workflow-local files of the same name shadow plugin files. Return mod entries tagged with their source so callers can render them in `--boot` output. Resolve the plugin path the same way the script already resolves itself (`os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))` walks `bin/ → commission/ → skills/ → plugin_root`).
-2. **Update FO runtime references** (`first-officer-shared-core.md`, `claude-first-officer-runtime.md`, `codex-first-officer-runtime.md`) to note that `MODS` in `--boot` output may resolve to plugin-shipped or workflow-local mods, and that workflow-local entries shadow plugin entries by filename.
-3. **Update mod-block enforcement** at `status --set` / `status --archive`. The "registered merge hooks" check (currently scans `_mods/*.md` for `## Hook: merge`) must also see plugin-shipped merge hooks — otherwise terminal transitions stop being guarded for workflows that rely on plugin pr-merge.
-4. **Drop `cp` from commission**. Remove `skills/commission/SKILL.md:481-484` and the checklist line at `:495`. Update `:520`'s announcement bullet to drop the `_mods/pr-merge.md` mention. Keep the y/n install confirmation prose (still controls the "do you want pr-merge for this workflow" decision; the answer flips a workflow-config flag rather than copying a file — see #5).
-5. **Add an opt-out mechanism**. Plugin-mods auto-discovery means EVERY workflow sees the plugin pr-merge by default. Workflows that opt out (captain says "no pr-merge") need a way to suppress it. Simplest: a `_mods/disabled.txt` (or a frontmatter list in README) listing mod names to skip. Commission writes the opt-out file when the captain declines pr-merge install. `scan_mods` honors the suppression list.
-6. **Adjust commission prose for refit-command seed entity** (`skills/commission/SKILL.md` — the seed-entity blocks for the refinement template) so the refit-command AC doesn't write `{current_version}` / `{template variable}` syntax in plain English. Replace bracey wording with backticked or natural-language descriptions.
+1. **`tests/test_commission.py` — exclude `_mods/*.md` from the leak scan** (around lines 315-330). The `rglob("*.md")` walk should skip any file whose path contains `_mods/`. These files legitimately contain runtime placeholders documented for FO substitution.
+2. **`tests/test_commission.py` — add a `[Mod Install Freshness]` check** (or fold into `[File Existence]` / `[PR Merge Mod]`). For each `{workflow_dir}/_mods/{name}.md`, byte-compare against `{spacedock_plugin_dir}/mods/{name}.md`. Pass when bytes match; fail and report a one-line diff summary on drift. This catches accidental edits to the local copy and stale copies after plugin upgrades.
+3. **`tests/test_commission.py` — delete or replace the `workflow-local pr-merge mod is not generated` check** at line 79. Under B-ii the file IS expected to exist (it's the install). Replace with the byte-compare freshness check from step 2 if not folded in there. The `[File Existence]` section keeps its other checks unchanged.
+4. **`skills/commission/SKILL.md` — adjust the refit-command seed-entity scaffolding prose (A2)** so the LLM doesn't model `{current_version}`-style brace-syntax in entity body text. Replace bracey example phrasing with backticks-around-words or natural-language descriptions (e.g., "reads the current spacedock version" instead of `spacedock@{current_version}`). Locate the seed-entity block in SKILL.md that demonstrates the refit-command AC and rewrite the example AC line so it parses cleanly under the leak-scan regex.
 
 ## Acceptance criteria
 
-End-state properties; each AC has a `Verified by:` clause naming the existing extended `test_commission` (no new test infrastructure needed — 5a cycle 2 already extended it to 68 checks).
+End-state properties; each AC has a `Verified by:` clause naming the existing extended `test_commission`.
 
-- **AC1**: `[File Existence] workflow-local pr-merge mod is not generated` PASSES — commission does not produce `{workflow_dir}/_mods/pr-merge.md` for a fresh `make test-live-claude` run.
-  Verified by: `tests/test_commission.py:79` runs against the live commission output and `t.check` records PASS.
-- **AC2**: `[No Leaked Template Variables] no leaked template variables` PASSES — no `*.md` file under the generated `workflow_dir` contains `{lower_word}` patterns (excluding `${...}` and lines with `slug`).
-  Verified by: `tests/test_commission.py:315-330` scan returns an empty `leaked` list.
-- **AC3**: PR-merge runtime behavior is preserved end-to-end — startup hook still scans entities for `pr` field and reports merged PRs; merge hook still gates terminal transitions; `mod-block` enforcement still refuses terminal updates when a registered merge hook hasn't run.
-  Verified by: `tests/fixtures/merge-hook-pipeline` and `tests/fixtures/push-main-pipeline` continue to pass under existing test runners (`pytest tests/test_status.py -k "merge_hook or pr_merge"`).
-- **AC4**: Captain opt-out path exists — when commission's pr-merge install confirmation is declined, the resulting workflow does not run plugin pr-merge hooks.
-  Verified by: a single targeted unit test on `scan_mods` that asserts the suppression mechanism (e.g., `_mods/disabled.txt` listing `pr-merge`) returns no pr-merge hooks even when the plugin file is present. Add this test as part of implementation.
-- **AC5**: The `refit-command.md` seed-entity prose generated by commission contains no `\{[a-z_]+\}` patterns in entity-body text.
-  Verified by: AC2's scan covers this — `refit-command.md` is in `workflow_dir` and is included in the `rglob("*.md")` walk.
-- **AC6**: The `xfail(strict=False, reason="pending #197 …")` decorator on `test_commission` is left in place by this task. Removal is a follow-up after 2-3 CI cycles confirm xpass on all three claude variants. The current `strict=False` semantic tolerates xpass without breaking CI.
-  Verified by: `tests/test_commission.py` diff shows the decorator unchanged after this task's PR merges; a follow-up issue is filed against #197 to remove it later.
+- **AC1**: Workflow-local mods match plugin source byte-for-byte. For each `{workflow_dir}/_mods/{name}.md`, bytes equal `{spacedock_plugin_dir}/mods/{name}.md`.
+  Verified by: new `[Mod Install Freshness]` (or equivalent) check in `tests/test_commission.py` reads both files and asserts byte-equality. Drift is a real bug — accidental edit to the local copy or stale-after-plugin-upgrade.
+- **AC2**: No `{lower_word}` patterns in entity-body `*.md` files (excluding `_mods/*.md` which legitimately use runtime placeholders).
+  Verified by: `tests/test_commission.py:315-330` leak scan, modified to skip files whose path contains `_mods/`. Returns an empty `leaked` list against fresh commission output.
+- **AC3**: The `refit-command.md` seed-entity prose generated by commission contains no `\{[a-z_]+\}` patterns in entity-body text.
+  Verified by: AC2's scan covers it — `refit-command.md` is in `workflow_dir`, NOT in `_mods/`, so it's still scanned.
+- **AC4**: The `xfail(strict=False, reason="pending #197 …")` decorator on `test_commission` is left in place by this task. Removal is a follow-up after CI confirms xpass on a few cycles; `strict=False` tolerates xpass without breaking CI.
+  Verified by: `tests/test_commission.py` diff shows the decorator unchanged after this task's PR merges; a follow-up note (or separate issue) tracks the eventual removal.
 
 ## Test plan
 
 The existing `test_commission` (extended to 68 checks via 5a cycle 2 commit `12f1fa87`) is the authoritative proof. After this task:
 
 1. **Pre-fix baseline (already captured)**: `66 passed, 2 failed (out of 68 checks)` against 5a worktree HEAD `8a19c7e6`.
-2. **Post-fix expected**: `68 passed, 0 failed` → pytest reports `XPASS` (tolerated by `strict=False`).
+2. **Post-fix expected**: leak scan now excludes `_mods/`, byte-compare freshness check added, refit-command seed prose tweaked. Total inner checks go from 68 to 68 (delete one, add one) or 69 (keep+add). Either way, expected outcome is `N passed, 0 failed` → pytest reports `XPASS` (tolerated by `strict=False`).
 3. **Run command**: `unset CLAUDECODE && uv run pytest tests/test_commission.py -v -s` from the worktree root. Wallclock ~100s for the live commission phase.
-4. **Regression coverage**: the existing `tests/test_status.py` (or whichever covers `scan_mods` and `--boot`) must continue passing. Extend it with the `disabled.txt` opt-out test.
-5. **No new test files needed** — both AC1 and AC2 are existing inner checks; AC3 leverages existing fixtures; AC4 needs one additional `scan_mods` test in the existing status-test file.
+4. **No regression coverage needed** beyond `test_commission`. Mechanism is unchanged — `scan_mods`, mod-block enforcement, FO runtime, and existing fixtures (`merge-hook-pipeline`, `push-main-pipeline`) are not touched.
+5. **No new test files needed** — all changes land inside the existing `tests/test_commission.py`.
 
 ## Out of scope for this task
 
-- **Decorator removal**. The xfail decorator stays. Filing a follow-up issue is acceptable; removal happens after CI confirms a few clean xpass cycles.
-- **Other mod types** (silence-watcher, comm-officer). Plugin-mods auto-discovery should be designed extensibly, but only pr-merge is migrated to plugin-resident-only in this task. Other mods follow as a separate refit pass.
-- **5a's portability section**. 5a (`commission-readme-portable-status-path`) edits the same `SKILL.md` but in different sections (the README-status-prose generation paths). No coordination needed; merge ordering is captain's call (5a is already PR #176; #197 will rebase on top once 5a merges).
-- **Refit propagation**. Existing workflows with `_mods/pr-merge.md` already in their tree continue to work (workflow-local shadows plugin-shipped). A `refit` pass to delete the local copies is a follow-up, not blocking.
+- **Decorator removal**. The xfail decorator stays. Removal happens after CI confirms a few clean xpass cycles.
+- **Plugin-mods auto-discovery**. Option A from cycle 1 is shelved — install model stays as-is.
+- **Mechanism changes**. `scan_mods`, mod-block enforcement, and FO runtime references are not touched.
+- **5a's portability section**. 5a (`commission-readme-portable-status-path`) edits the same `SKILL.md` but in different sections. No coordination needed; merge ordering is captain's call (5a is already PR #176; #197 bundles into the same PR per dispatch).
 
 ## Bundling
 
@@ -134,3 +109,20 @@ So the architectural shift in Option A (plugin-mods auto-discovery + opt-out mec
 Captain's chosen direction: **B-ii** — the one-line scope change replaces leak-scan on `_mods/*.md` with a byte-compare against plugin source. Same coverage for "no leaks", plus a freshness signal that catches accidental edits to the local copy or stale-after-plugin-upgrade drift. **A2** for the 5th leak (refit-command.md `{current_version}`) — fix at content source by adjusting commission's seed-entity scaffolding.
 
 Re-routing ideation to rewrite Approach + ACs + Test plan around B-ii + A2.
+
+## Stage Report: ideation (cycle 2 — Option B-ii adopted)
+
+- DONE: Replace cycle-1 architectural-conflict section with a short Captain-decision note recording the B-ii + A2 direction.
+  `## Architectural conflict` removed; `## Captain decision (cycle 2): Option B-ii + A2` added with reasoning condensed from captain's framing — pr-merge.md placeholders are correctly authored runtime substitutions, not commission-time slots.
+- DONE: Replace cycle-1 approach with a B-ii + A2 approach (test refinements + content-source fix for refit-command prose).
+  Four-step approach: (1) leak scan skips `_mods/*.md`, (2) add `[Mod Install Freshness]` byte-compare check, (3) delete/replace the `workflow-local pr-merge mod is not generated` check, (4) tweak commission's refit-command seed scaffolding so the LLM stops writing `{var}` syntax in entity prose.
+- DONE: Replace cycle-1 ACs with the new shorter list (drop AC1/AC3/AC4 mechanism-shift items; keep adjusted AC2/AC5/AC6; add byte-compare freshness AC).
+  New AC1 (byte-compare freshness), AC2 (leak scan with `_mods/` exclusion), AC3 (refit-command seed prose has no `{var}` patterns — covered by AC2's scan), AC4 (xfail decorator stays, removal as follow-up). All four ACs verified by `tests/test_commission.py` only.
+- DONE: Replace cycle-1 test plan with the simpler post-fix expectations (existing test, leak scan now excludes `_mods/`, byte-compare added, expect XPASS).
+  Test plan reduced to 5 numbered points; no new test files; no regression coverage outside `test_commission` because mechanism is unchanged.
+- DONE: Append `## Stage Report: ideation (cycle 2 — Option B-ii adopted)` at the end of the entity file.
+  This section.
+
+### Summary
+
+Captain rejected Option A (architectural shift) at the ideation gate and chose Option B-ii + A2. Reworked the entity body in place: shortened the architectural section into a Captain-decision note, replaced the proposed approach with four concrete test-and-prose refinements scoped to `tests/test_commission.py` and `skills/commission/SKILL.md`, replaced the AC list with four end-state properties verified entirely by the existing extended `test_commission`, and tightened the test plan to match. Implementation surface is now small: leak-scan exclusion, byte-compare freshness check, delete/replace one existence check, and a content-source tweak to the refit-command seed scaffolding. No mechanism changes, no new test files, no regression risk outside `test_commission`.
