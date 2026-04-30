@@ -461,7 +461,7 @@ issue:
 pr:
 ---
 
-{Description/thesis from {captain}'s seed input.}
+(Body: write the description or thesis from the captain's seed input as plain prose. Do NOT carry brace-syntax placeholders into the body — rewrite any `{var}` phrasing as natural language or backticked words.)
 ```
 
 ### 2c. Install Mods (conditional)
