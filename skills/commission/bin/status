@@ -1861,6 +1861,12 @@ def discover_workflows(root):
     Ignored directories (pruned during walk — canonical source of truth):
         .git, .worktrees, node_modules, vendor, dist, build, __pycache__, tests
 
+    Path-anchored prune:
+        ``.claude/worktrees/`` (agent-managed git worktree copies) is dropped
+        when the current directory's basename is ``.claude``. The literal
+        directory name ``worktrees`` is not in ``DISCOVER_IGNORE_DIRS`` so a
+        sibling ``worktrees/`` directory at any other location is preserved.
+
     Symlink handling:
         Symlinks are followed (``followlinks=True``). Paths are resolved with
         ``os.path.realpath`` before deduplication. When both a symlink and its
@@ -1883,6 +1889,8 @@ def discover_workflows(root):
         seen_real.add(real_dir)
 
         dirnames[:] = [d for d in dirnames if d not in DISCOVER_IGNORE_DIRS]
+        if os.path.basename(dirpath) == '.claude' and 'worktrees' in dirnames:
+            dirnames.remove('worktrees')
 
         if 'README.md' not in filenames:
             continue
