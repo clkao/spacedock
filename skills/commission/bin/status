@@ -1847,6 +1847,36 @@ def find_git_root(start_dir):
 DISCOVER_IGNORE_DIRS = {'.git', '.worktrees', 'node_modules', 'vendor', 'dist', 'build', '__pycache__', 'tests'}
 
 
+def _read_gitignore_dir_basenames(root):
+    """Return the basenames of directory-pattern entries in ``{root}/.gitignore``.
+
+    Only lines ending with ``/`` are treated as directory patterns. The
+    trailing slash is stripped and the basename of the remaining path is
+    returned, so ``.claude/worktrees/`` contributes ``worktrees`` and
+    ``build/`` contributes ``build``. Comments and blank lines are skipped.
+    Missing or unreadable ``.gitignore`` returns an empty set.
+    """
+    path = os.path.join(root, '.gitignore')
+    names = set()
+    try:
+        with open(path) as f:
+            lines = f.readlines()
+    except (OSError, IOError):
+        return names
+    for line in lines:
+        entry = line.strip()
+        if not entry or entry.startswith('#'):
+            continue
+        if entry.startswith('!'):
+            continue
+        if not entry.endswith('/'):
+            continue
+        basename = os.path.basename(entry.rstrip('/'))
+        if basename:
+            names.add(basename)
+    return names
+
+
 def discover_workflows(root):
     """Walk a directory tree and return workflow directories.
 
@@ -1858,14 +1888,17 @@ def discover_workflows(root):
         ``spacedock@``. Both ``spacedock@1.0`` and bare ``spacedock@`` (no
         version suffix) are accepted.
 
-    Ignored directories (pruned during walk — canonical source of truth):
-        .git, .worktrees, node_modules, vendor, dist, build, __pycache__, tests
-
-    Path-anchored prune:
-        ``.claude/worktrees/`` (agent-managed git worktree copies) is dropped
-        when the current directory's basename is ``.claude``. The literal
-        directory name ``worktrees`` is not in ``DISCOVER_IGNORE_DIRS`` so a
-        sibling ``worktrees/`` directory at any other location is preserved.
+    Ignored directories (pruned during walk):
+        The hardcoded baseline ``DISCOVER_IGNORE_DIRS`` (``.git``,
+        ``.worktrees``, ``node_modules``, ``vendor``, ``dist``, ``build``,
+        ``__pycache__``, ``tests``) is augmented at startup with the
+        directory-pattern basenames from ``{root}/.gitignore`` (lines ending
+        with ``/``). For example, a ``.gitignore`` entry of
+        ``.claude/worktrees/`` contributes the basename ``worktrees`` to the
+        ignore set, suppressing agent-managed worktree copies. The trade-off
+        is basename matching: a sibling directory anywhere in the tree
+        sharing a basename with a gitignored directory pattern is also
+        pruned.
 
     Symlink handling:
         Symlinks are followed (``followlinks=True``). Paths are resolved with
@@ -1878,6 +1911,7 @@ def discover_workflows(root):
         Sorted list of absolute, resolved directory paths.
     """
     root = os.path.abspath(root)
+    ignore_dirs = DISCOVER_IGNORE_DIRS | _read_gitignore_dir_basenames(root)
     seen_real = set()
     results = []
 
@@ -1888,9 +1922,7 @@ def discover_workflows(root):
             continue
         seen_real.add(real_dir)
 
-        dirnames[:] = [d for d in dirnames if d not in DISCOVER_IGNORE_DIRS]
-        if os.path.basename(dirpath) == '.claude' and 'worktrees' in dirnames:
-            dirnames.remove('worktrees')
+        dirnames[:] = [d for d in dirnames if d not in ignore_dirs]
 
         if 'README.md' not in filenames:
             continue
