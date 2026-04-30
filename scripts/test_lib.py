@@ -179,6 +179,34 @@ def _assemble_skill_contract(
     return parts, trace
 
 
+def build_pi_first_officer_invocation_prompt(
+    workflow_dir: str | Path,
+    run_goal: str | None = None,
+    local_skill_path: str | Path | None = None,
+    local_plugin_root: str | Path | None = None,
+) -> str:
+    workflow_dir = Path(workflow_dir)
+    prompt = f"/skill:first-officer Manage the Pi workflow at `{workflow_dir}`."
+    if local_skill_path is not None:
+        prompt = (
+            f"{prompt}\n\n"
+            f"The local first-officer skill directory is `{Path(local_skill_path)}`."
+        )
+    if local_plugin_root is not None:
+        plugin_root = Path(local_plugin_root)
+        prompt = (
+            f"{prompt}\n\n"
+            f"The local Spacedock plugin directory is `{plugin_root}`; the status helper is "
+            f"`{plugin_root / 'skills' / 'commission' / 'bin' / 'status'}`. "
+            f"Use the authoritative Pi worker runtime helper at `{plugin_root / 'scripts' / 'pi_worker_runtime.py'}` "
+            f"with the registry sidecar `{plugin_root / 'scripts' / 'pi_session_registry.py'}` instead of improvising Pi worker lifecycle behavior in-model."
+        )
+    if run_goal:
+        prompt = f"{prompt}\n\n{run_goal.strip()}"
+    return prompt
+
+
+
 def build_codex_first_officer_invocation_prompt(
     workflow_dir: str | Path,
     agent_id: str = "spacedock:first-officer",
@@ -204,6 +232,90 @@ def build_codex_first_officer_invocation_prompt(
     if run_goal:
         prompt = f"{prompt}\n\n{run_goal.strip()}"
     return prompt
+
+
+def build_pi_ensign_invocation_prompt(
+    workflow_dir: str | Path,
+    entity_path: str | Path,
+    stage_name: str,
+    stage_definition_text: str,
+    worktree_path: str | Path | None,
+    checklist: list[str],
+    local_skill_path: str | Path | None = None,
+    local_plugin_root: str | Path | None = None,
+    worker_label: str | None = None,
+) -> str:
+    """Assemble a Pi ensign prompt.
+
+    Shape this close to `skills/commission/bin/claude-team cmd_build` so the
+    Pi manual-dispatch path carries the same stage-definition, worktree, entity
+    read, completion checklist, and stage-report structure as the established
+    Claude helper path.
+    """
+    workflow_dir = Path(workflow_dir)
+    entity_path = Path(entity_path)
+    lines = ["/skill:ensign"]
+    if local_skill_path is not None:
+        lines.extend([
+            "",
+            f"The local ensign skill directory is `{Path(local_skill_path)}`.",
+        ])
+    if local_plugin_root is not None:
+        plugin_root = Path(local_plugin_root)
+        lines.extend(
+            [
+                "",
+                f"The local Spacedock plugin directory is `{plugin_root}`; the status helper is "
+                f"`{plugin_root / 'skills' / 'commission' / 'bin' / 'status'}`.",
+            ]
+        )
+    if worker_label:
+        lines.extend(["", f"Worker label: {worker_label}"])
+
+    lines.extend([
+        "",
+        f"Stage: {stage_name}",
+        "",
+        "### Stage definition:",
+        "",
+        stage_definition_text,
+        "",
+    ])
+    if worktree_path is not None:
+        worktree_path = Path(worktree_path)
+        lines.extend(
+            [
+                f"Your working directory is {worktree_path}",
+                f"All file reads and writes MUST use paths under {worktree_path}.",
+                "",
+            ]
+        )
+    lines.extend(
+        [
+            f"Read the entity file at {entity_path} for the full spec.",
+            f"Workflow directory: {workflow_dir}",
+            "",
+            "### Completion checklist",
+            "",
+        ]
+    )
+    lines.extend(f"- {item}" for item in checklist)
+    lines.extend(
+        [
+            "",
+            "### Stage report",
+            "",
+            "Append a Stage Report section at the end of the entity file using the shared-core Stage Report Protocol.",
+            f"Use the title `Stage Report: {stage_name}`.",
+            "Account for every checklist item above with a `- DONE:` / `- SKIPPED:` / `- FAILED:` entry.",
+            "Use the checklist item text verbatim when possible.",
+            "",
+            "Completion rule:",
+            "After you finish the assignment, write the stage report, commit your work, return one concise completion summary, and stop immediately.",
+        ]
+    )
+    return "\n".join(lines)
+
 
 
 def build_codex_worker_bootstrap_prompt(
@@ -692,6 +804,18 @@ def create_test_project(runner: TestRunner, name: str = "test-project") -> Path:
     project_dir = runner.test_dir / name
     subprocess.run(["git", "init", str(project_dir)], capture_output=True, check=True)
     subprocess.run(
+        ["git", "config", "user.name", "Spacedock Test"],
+        capture_output=True,
+        check=True,
+        cwd=project_dir,
+    )
+    subprocess.run(
+        ["git", "config", "user.email", "spacedock-test@example.invalid"],
+        capture_output=True,
+        check=True,
+        cwd=project_dir,
+    )
+    subprocess.run(
         ["git", "commit", "--allow-empty", "-m", "init"],
         capture_output=True, check=True, cwd=project_dir,
     )
@@ -777,7 +901,7 @@ def assembled_agent_content(runner: TestRunner, agent_name: str, runtime: str = 
     instructs the agent to read, so tests can check the full behavioral
     contract without running the agent.
     """
-    if runtime not in {"claude", "codex"}:
+    if runtime not in {"claude", "codex", "pi"}:
         raise ValueError(f"Unknown runtime: {runtime}")
     skill_root = runner.repo_root / "skills"
     if agent_name == "first-officer":
@@ -967,6 +1091,589 @@ def run_first_officer_streaming(
             if not log_file.closed:
                 log_file.close()
             raise
+
+
+@dataclass
+class PiBackgroundProcess:
+    proc: subprocess.Popen
+    log_path: Path
+    session_dir: Path
+    log_file: object
+
+    def poll(self) -> int | None:
+        return self.proc.poll()
+
+    def wait(self, timeout: float | None = None) -> int:
+        return self.proc.wait(timeout=timeout)
+
+    def terminate(self) -> None:
+        self.proc.terminate()
+
+    def close(self) -> None:
+        if not self.log_file.closed:
+            self.log_file.close()
+
+
+class PiLogWatcher:
+    POLL_INTERVAL_S = 0.2
+
+    def __init__(self, process: PiBackgroundProcess):
+        self.process = process
+
+    def _wait_for_parser(self, timeout_s: float) -> PiLogParser:
+        deadline = time.monotonic() + timeout_s
+        while True:
+            parser = PiLogParser(self.process.log_path)
+            if parser.session_id():
+                return parser
+            if self.process.poll() is not None and time.monotonic() >= deadline:
+                raise StepFailure(
+                    f"Pi worker exited before session id appeared in {self.process.log_path}",
+                    label="pi_session_id",
+                    exit_code=self.process.poll(),
+                )
+            if time.monotonic() >= deadline:
+                raise StepTimeout(
+                    f"Pi worker session id did not appear within {timeout_s}s in {self.process.log_path}",
+                    label="pi_session_id",
+                )
+            time.sleep(self.POLL_INTERVAL_S)
+
+    def wait_for_session_id(self, timeout_s: float) -> str:
+        return self._wait_for_parser(timeout_s).session_id() or ""
+
+    def wait_for_session_file(self, timeout_s: float) -> Path:
+        deadline = time.monotonic() + timeout_s
+        while True:
+            parser = self._wait_for_parser(min(timeout_s, max(deadline - time.monotonic(), 0.1)))
+            session_file = parser.session_file(self.process.session_dir)
+            if session_file is not None:
+                return session_file
+            if self.process.poll() is not None and time.monotonic() >= deadline:
+                raise StepFailure(
+                    f"Pi worker exited before session file appeared in {self.process.log_path}",
+                    label="pi_session_file",
+                    exit_code=self.process.poll(),
+                )
+            if time.monotonic() >= deadline:
+                raise StepTimeout(
+                    f"Pi worker session file did not appear within {timeout_s}s in {self.process.log_path}",
+                    label="pi_session_file",
+                )
+            time.sleep(self.POLL_INTERVAL_S)
+
+    def wait_for_exit(self, timeout_s: float) -> int:
+        try:
+            return self.process.wait(timeout=timeout_s)
+        except subprocess.TimeoutExpired as exc:
+            self.process.terminate()
+            raise StepTimeout(
+                f"Pi worker did not exit within {timeout_s}s: {self.process.log_path}",
+                label="pi_expect_exit",
+            ) from exc
+        finally:
+            self.process.close()
+
+
+class PiFOStreamWatcher:
+    """Progressive watcher for non-interactive Pi first-officer JSON logs.
+
+    Unlike ``run_pi_first_officer()``, this watcher lets live tests advance on
+    observed stage evidence (helper dispatch/reuse commands or final FO text)
+    while timeouts remain labeled failure backstops.
+    """
+
+    POLL_INTERVAL_S = 0.2
+    _LOG_TAIL_LINES = 20
+
+    def __init__(self, process: PiBackgroundProcess):
+        self.process = process
+        self.log_path = process.log_path
+        self._fh = None
+        self._buffer = ""
+        self._log_text = ""
+        self._assistant_text = ""
+
+    def _ensure_handle(self) -> None:
+        if self._fh is None:
+            self._fh = open(self.log_path, "r")
+
+    @staticmethod
+    def _collect_content_text(content: object) -> str:
+        if isinstance(content, str):
+            return content
+        if not isinstance(content, list):
+            return ""
+        parts: list[str] = []
+        for block in content:
+            if not isinstance(block, dict):
+                continue
+            for key in ("text", "thinking"):
+                value = block.get(key)
+                if isinstance(value, str):
+                    parts.append(value)
+        return "\n".join(parts)
+
+    @classmethod
+    def _assistant_text_from_entry(cls, entry: dict) -> str:
+        messages: list[dict] = []
+        direct = entry.get("message")
+        if isinstance(direct, dict):
+            messages.append(direct)
+        event = entry.get("assistantMessageEvent")
+        if isinstance(event, dict):
+            for key in ("message", "partial"):
+                value = event.get(key)
+                if isinstance(value, dict):
+                    messages.append(value)
+        parts: list[str] = []
+        for message in messages:
+            if message.get("role") == "assistant":
+                text = cls._collect_content_text(message.get("content"))
+                if text:
+                    parts.append(text)
+        return "\n".join(parts)
+
+    def _drain_entries(self) -> list[dict]:
+        self._ensure_handle()
+        chunk = self._fh.read()
+        entries: list[dict] = []
+        if not chunk:
+            return entries
+        self._buffer += chunk
+        while True:
+            newline_idx = self._buffer.find("\n")
+            if newline_idx < 0:
+                break
+            line = self._buffer[:newline_idx]
+            self._buffer = self._buffer[newline_idx + 1:]
+            stripped = line.strip()
+            if not stripped:
+                continue
+            self._log_text += stripped + "\n"
+            try:
+                entry = json.loads(stripped)
+            except json.JSONDecodeError:
+                continue
+            entries.append(entry)
+            assistant_text = self._assistant_text_from_entry(entry)
+            if assistant_text:
+                self._assistant_text += assistant_text + "\n"
+        return entries
+
+    def _log_tail(self, max_lines: int = _LOG_TAIL_LINES) -> str:
+        if not self.log_path.is_file():
+            return ""
+        try:
+            return "\n".join(self.log_path.read_text().splitlines()[-max_lines:])
+        except OSError:
+            return ""
+
+    def expect(self, predicate: Callable[[dict], bool], timeout_s: float, label: str) -> dict:
+        deadline = time.monotonic() + timeout_s
+        while True:
+            for entry in self._drain_entries():
+                try:
+                    if predicate(entry):
+                        return entry
+                except Exception:
+                    continue
+            if self.process.poll() is not None:
+                for entry in self._drain_entries():
+                    try:
+                        if predicate(entry):
+                            return entry
+                    except Exception:
+                        continue
+                raise StepFailure(
+                    f"Pi FO subprocess exited (code={self.process.poll()}) before "
+                    f"step {label!r} matched.\nLog tail:\n{self._log_tail()}",
+                    label=label,
+                    exit_code=self.process.poll(),
+                )
+            if time.monotonic() >= deadline:
+                raise StepTimeout(
+                    f"Step {label!r} did not match within {timeout_s}s.\n"
+                    f"Log tail:\n{self._log_tail()}",
+                    label=label,
+                )
+            time.sleep(self.POLL_INTERVAL_S)
+
+    def expect_log_regex(self, pattern: str, timeout_s: float, label: str, flags: int = re.IGNORECASE | re.DOTALL) -> str:
+        deadline = time.monotonic() + timeout_s
+        compiled = re.compile(pattern, flags)
+        while True:
+            self._drain_entries()
+            match = compiled.search(self._log_text)
+            if match:
+                return match.group(0)
+            if self.process.poll() is not None:
+                self._drain_entries()
+                match = compiled.search(self._log_text)
+                if match:
+                    return match.group(0)
+                raise StepFailure(
+                    f"Pi FO subprocess exited (code={self.process.poll()}) before "
+                    f"step {label!r} matched.\nLog tail:\n{self._log_tail()}",
+                    label=label,
+                    exit_code=self.process.poll(),
+                )
+            if time.monotonic() >= deadline:
+                raise StepTimeout(
+                    f"Step {label!r} did not match within {timeout_s}s.\n"
+                    f"Log tail:\n{self._log_tail()}",
+                    label=label,
+                )
+            time.sleep(self.POLL_INTERVAL_S)
+
+    def expect_assistant_regex(self, pattern: str, timeout_s: float, label: str, flags: int = re.IGNORECASE | re.DOTALL) -> str:
+        deadline = time.monotonic() + timeout_s
+        compiled = re.compile(pattern, flags)
+        while True:
+            self._drain_entries()
+            match = compiled.search(self._assistant_text)
+            if match:
+                return match.group(0)
+            if self.process.poll() is not None:
+                self._drain_entries()
+                match = compiled.search(self._assistant_text)
+                if match:
+                    return match.group(0)
+                raise StepFailure(
+                    f"Pi FO subprocess exited (code={self.process.poll()}) before "
+                    f"step {label!r} matched.\nLog tail:\n{self._log_tail()}",
+                    label=label,
+                    exit_code=self.process.poll(),
+                )
+            if time.monotonic() >= deadline:
+                raise StepTimeout(
+                    f"Step {label!r} did not match within {timeout_s}s.\n"
+                    f"Log tail:\n{self._log_tail()}",
+                    label=label,
+                )
+            time.sleep(self.POLL_INTERVAL_S)
+
+    def expect_worker_runtime_stage(self, stage_name: str, mode: str, timeout_s: float, label: str | None = None) -> str:
+        stage = re.escape(stage_name)
+        mode_pat = re.escape(mode)
+        helper_call = rf"pi_worker_runtime\.py\s+{mode_pat}\b(?:(?!pi_worker_runtime\.py).)*--stage-name\s+{stage}\b"
+        json_stage = rf'"stage_name"\s*:\s*"{stage_name}"'
+        fallback = {
+            ("analysis", "dispatch"): r"`analysis` session\s*=|analysis stage report|Stage Report: analysis",
+            ("implementation", "reuse"): r"Implementation worker reused(?: for implementation)?:\s*yes|`implementation` session\s*=|Stage Report: implementation",
+            ("validation", "dispatch"): r"Validation dispatched fresh(?: for validation)?:\s*yes|`validation` session\s*=|Stage Report: validation",
+        }.get((stage_name, mode), r"$^")
+        return self.expect_log_regex(
+            rf"(?:{helper_call})|(?:{json_stage}.*?{re.escape(mode)})|(?:{fallback})",
+            timeout_s=timeout_s,
+            label=label or f"Pi {mode} {stage_name} milestone",
+        )
+
+    def expect_exit(self, timeout_s: float) -> int:
+        try:
+            return self.process.wait(timeout=timeout_s)
+        except subprocess.TimeoutExpired as exc:
+            self.process.terminate()
+            try:
+                self.process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self.process.proc.kill()
+                self.process.wait()
+            raise StepTimeout(
+                f"Pi FO subprocess did not exit within {timeout_s}s.\n"
+                f"Log tail:\n{self._log_tail()}",
+                label="pi_fo_expect_exit",
+            ) from exc
+        finally:
+            self._drain_entries()
+            self.close()
+            self.process.close()
+
+    def close(self) -> None:
+        if self._fh is not None:
+            try:
+                self._fh.close()
+            finally:
+                self._fh = None
+
+
+
+def _build_pi_command(
+    prompt: str,
+    *,
+    session_dir: Path | str,
+    session: Path | str | None = None,
+    extra_args: list[str] | None = None,
+    skill_paths: list[Path | str] | None = None,
+    no_context_files: bool = False,
+) -> tuple[list[str], Path]:
+    session_dir = Path(session_dir)
+    session_dir.mkdir(parents=True, exist_ok=True)
+    cmd = [
+        "pi",
+        "--mode",
+        "json",
+        "--print",
+        "--session-dir",
+        str(session_dir),
+    ]
+    if session is not None:
+        cmd.extend(["--session", str(session)])
+    if skill_paths:
+        for skill_path in skill_paths:
+            cmd.extend(["--skill", str(skill_path)])
+    cmd.extend(["--no-extensions", "--no-prompt-templates"])
+    if no_context_files:
+        cmd.append("--no-context-files")
+    if extra_args:
+        cmd[4:4] = list(extra_args)
+    cmd.append(prompt)
+    return cmd, session_dir
+
+
+
+def launch_pi_prompt_background(
+    runner: TestRunner,
+    prompt: str,
+    *,
+    session_dir: Path | str,
+    session: Path | str | None = None,
+    extra_args: list[str] | None = None,
+    log_name: str = "pi-log.jsonl",
+    cwd: Path | str | None = None,
+    skill_paths: list[Path | str] | None = None,
+    no_context_files: bool = False,
+) -> PiBackgroundProcess:
+    """Launch Pi non-interactively with output redirected to a dedicated log file."""
+    log_path = runner.log_dir / log_name
+    cmd, resolved_session_dir = _build_pi_command(
+        prompt,
+        session_dir=session_dir,
+        session=session,
+        extra_args=extra_args,
+        skill_paths=skill_paths,
+        no_context_files=no_context_files,
+    )
+    log_file = open(log_path, "w")
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            stdout=log_file,
+            stderr=subprocess.STDOUT,
+            cwd=cwd or runner.test_project_dir,
+            text=True,
+        )
+    except Exception:
+        log_file.close()
+        raise
+    return PiBackgroundProcess(proc=proc, log_path=log_path, session_dir=resolved_session_dir, log_file=log_file)
+
+
+
+def run_pi_prompt(
+    runner: TestRunner,
+    prompt: str,
+    *,
+    session_dir: Path | str,
+    session: Path | str | None = None,
+    extra_args: list[str] | None = None,
+    log_name: str = "pi-log.jsonl",
+    timeout_s: int = 120,
+    cwd: Path | str | None = None,
+    skill_paths: list[Path | str] | None = None,
+    no_context_files: bool = False,
+) -> int:
+    """Run a non-interactive Pi prompt and capture the JSON event stream."""
+    bg = launch_pi_prompt_background(
+        runner,
+        prompt,
+        session_dir=session_dir,
+        session=session,
+        extra_args=extra_args,
+        log_name=log_name,
+        cwd=cwd,
+        skill_paths=skill_paths,
+        no_context_files=no_context_files,
+    )
+    try:
+        result = bg.wait(timeout=timeout_s)
+    except subprocess.TimeoutExpired:
+        bg.terminate()
+        bg.close()
+        print(f"\n  TIMEOUT: pi prompt exceeded {timeout_s}s limit")
+        return 124
+    finally:
+        bg.close()
+
+    print()
+    if result != 0:
+        print(f"WARNING: pi prompt exited with code {result}")
+
+    return result
+
+
+
+def launch_pi_ensign_background(
+    runner: TestRunner,
+    prompt: str,
+    *,
+    session_dir: Path | str,
+    session: Path | str | None = None,
+    extra_args: list[str] | None = None,
+    log_name: str = "pi-ensign-log.jsonl",
+    cwd: Path | str | None = None,
+    skill_paths: list[Path | str] | None = None,
+    no_context_files: bool = False,
+) -> PiBackgroundProcess:
+    effective_skill_paths = list(skill_paths or [runner.repo_root / "skills" / "ensign"])
+    return launch_pi_prompt_background(
+        runner,
+        prompt,
+        session_dir=session_dir,
+        session=session,
+        extra_args=extra_args,
+        log_name=log_name,
+        cwd=cwd,
+        skill_paths=effective_skill_paths,
+        no_context_files=no_context_files,
+    )
+
+
+
+def run_pi_ensign(
+    runner: TestRunner,
+    prompt: str,
+    *,
+    session_dir: Path | str,
+    session: Path | str | None = None,
+    extra_args: list[str] | None = None,
+    log_name: str = "pi-ensign-log.jsonl",
+    timeout_s: int = 120,
+    cwd: Path | str | None = None,
+    skill_paths: list[Path | str] | None = None,
+    no_context_files: bool = False,
+) -> int:
+    """Run the Pi ensign skill via `pi --mode json` using the local repo skill."""
+    effective_skill_paths = list(skill_paths or [runner.repo_root / "skills" / "ensign"])
+    return run_pi_prompt(
+        runner,
+        prompt,
+        session_dir=session_dir,
+        session=session,
+        extra_args=extra_args,
+        log_name=log_name,
+        timeout_s=timeout_s,
+        cwd=cwd,
+        skill_paths=effective_skill_paths,
+        no_context_files=no_context_files,
+    )
+
+
+
+def run_pi_first_officer(
+    runner: TestRunner,
+    workflow_dir: str,
+    agent_id: str = "spacedock:first-officer",
+    run_goal: str | None = None,
+    extra_args: list[str] | None = None,
+    log_name: str = "pi-fo-log.jsonl",
+    timeout_s: int = 120,
+) -> int:
+    """Run the Pi first-officer skill via `pi --mode json`.
+
+    The first slice uses Pi's explicit skill-loading surface and JSON event
+    stream so the harness can evolve toward session-backed worker reuse without
+    inventing a separate Pi-only workflow contract.
+    """
+    workflow_path = (runner.test_project_dir / workflow_dir).resolve()
+    local_skill_path = runner.repo_root / "skills" / "first-officer"
+    prompt = build_pi_first_officer_invocation_prompt(
+        workflow_path,
+        run_goal=run_goal,
+        local_skill_path=local_skill_path,
+        local_plugin_root=runner.repo_root,
+    )
+    (runner.log_dir / "pi-fo-invocation.txt").write_text(prompt + "\n")
+
+    return run_pi_prompt(
+        runner,
+        prompt,
+        session_dir=runner.test_dir / "pi-sessions",
+        skill_paths=[local_skill_path],
+        extra_args=extra_args,
+        log_name=log_name,
+        timeout_s=timeout_s,
+    )
+
+
+@contextlib.contextmanager
+def run_pi_first_officer_streaming(
+    runner: TestRunner,
+    workflow_dir: str,
+    agent_id: str = "spacedock:first-officer",
+    run_goal: str | None = None,
+    extra_args: list[str] | None = None,
+    log_name: str = "pi-fo-log.jsonl",
+    hard_cap_s: int = 900,
+) -> Iterator[PiFOStreamWatcher]:
+    """Launch the Pi first-officer and yield a progressive log watcher.
+
+    Use this for live tests that need stage-by-stage progress assertions. The
+    context manager only enforces a final hard cap at teardown; happy-path test
+    progression should use the watcher's labeled ``expect_*`` methods.
+    """
+    workflow_path = (runner.test_project_dir / workflow_dir).resolve()
+    local_skill_path = runner.repo_root / "skills" / "first-officer"
+    prompt = build_pi_first_officer_invocation_prompt(
+        workflow_path,
+        run_goal=run_goal,
+        local_skill_path=local_skill_path,
+        local_plugin_root=runner.repo_root,
+    )
+    (runner.log_dir / "pi-fo-invocation.txt").write_text(prompt + "\n")
+
+    start = time.monotonic()
+    bg = launch_pi_prompt_background(
+        runner,
+        prompt,
+        session_dir=runner.test_dir / "pi-sessions",
+        skill_paths=[local_skill_path],
+        extra_args=extra_args,
+        log_name=log_name,
+    )
+    watcher = PiFOStreamWatcher(bg)
+    exception_exit = False
+    try:
+        yield watcher
+    except BaseException:
+        exception_exit = True
+        raise
+    finally:
+        try:
+            if bg.poll() is None:
+                if exception_exit:
+                    grace_s = 5
+                else:
+                    elapsed = time.monotonic() - start
+                    grace_s = max(hard_cap_s - elapsed, 1)
+                try:
+                    bg.wait(timeout=grace_s)
+                except subprocess.TimeoutExpired:
+                    bg.terminate()
+                    try:
+                        bg.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        bg.proc.kill()
+                        bg.wait()
+            watcher.close()
+            bg.close()
+            if bg.poll() is not None and bg.poll() != 0:
+                print(f"WARNING: pi first officer exited with code {bg.poll()}")
+        except Exception:
+            watcher.close()
+            bg.close()
+            raise
+
 
 
 def run_codex_first_officer(
@@ -1823,6 +2530,78 @@ class LogParser:
         """Write the agent prompt to a file."""
         with open(output_path, "w") as f:
             f.write(self.agent_prompt())
+
+
+class PiLogParser:
+    """Parses Pi `--mode json` logs."""
+
+    def __init__(self, log_path: Path | str):
+        self.log_path = Path(log_path)
+        self._raw_lines: list[str] | None = None
+        self._json_entries: list[dict] | None = None
+
+    def session_id(self) -> str | None:
+        for entry in self.json_entries:
+            if entry.get("type") == "session" and entry.get("id"):
+                return str(entry["id"])
+        return None
+
+    def session_file(self, session_dir: Path | str) -> Path | None:
+        session_id = self.session_id()
+        if not session_id:
+            return None
+        matches = sorted(Path(session_dir).glob(f"*_{session_id}.jsonl"))
+        return matches[0] if matches else None
+
+    def last_assistant_usage(self) -> dict[str, object]:
+        for entry in reversed(self.json_entries):
+            if entry.get("type") != "message_end":
+                continue
+            message = entry.get("message", {})
+            if not isinstance(message, dict) or message.get("role") != "assistant":
+                continue
+            usage = message.get("usage", {})
+            return usage if isinstance(usage, dict) else {}
+        return {}
+
+    @property
+    def raw_lines(self) -> list[str]:
+        if self._raw_lines is None:
+            self._raw_lines = self.log_path.read_text().splitlines() if self.log_path.exists() else []
+        return self._raw_lines
+
+    @property
+    def json_entries(self) -> list[dict]:
+        if self._json_entries is None:
+            entries: list[dict] = []
+            for line in self.raw_lines:
+                try:
+                    entries.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+            self._json_entries = entries
+        return self._json_entries
+
+    def assistant_texts(self) -> list[str]:
+        texts: list[str] = []
+        for entry in self.json_entries:
+            if entry.get("type") == "message_end":
+                message = entry.get("message", {})
+                if not isinstance(message, dict) or message.get("role") != "assistant":
+                    continue
+                for part in message.get("content", []) or []:
+                    if isinstance(part, dict) and part.get("type") == "text":
+                        text = part.get("text")
+                        if text:
+                            texts.append(str(text))
+        return texts
+
+    def full_text(self) -> str:
+        return "\n".join(self.assistant_texts())
+
+    def write_text(self, output_path: Path | str):
+        with open(output_path, "w") as f:
+            f.write(self.full_text())
 
 
 class CodexLogParser:
