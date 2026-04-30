@@ -1,7 +1,7 @@
 ---
 id: 8xyvkvsgb93sch31cmz6nf9w
 title: "debrief assumes workflow status executable exists"
-status: implementation
+status: validation
 source: "GitHub issue #175 (filed by Kent Chen / iamcxa, 2026-04-30)"
 started: 2026-04-30T19:47:24Z
 completed:
@@ -9,8 +9,8 @@ verdict:
 score: 0.55
 worktree: .worktrees/spacedock-ensign-debrief-tolerate-missing-workflow-status
 issue: "#175"
-pr:
-mod-block:
+pr: #177
+mod-block: merge:pr-merge
 ---
 
 ## Problem

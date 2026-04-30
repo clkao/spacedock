@@ -1,21 +1,23 @@
 ---
 id: s68tqg0gqqyy8hpc2py48gq9
 title: "debrief discovery should ignore .claude/worktrees workflow copies"
-status: ideation
+status: validation
 source: "GitHub issue #174 (filed by Kent Chen / iamcxa, 2026-04-30)"
 started: 2026-04-30T19:47:24Z
 completed:
 verdict:
 score: 0.55
-worktree:
+worktree: .worktrees/spacedock-ensign-debrief-tolerate-missing-workflow-status
 issue: "#174"
-pr:
-mod-block:
+pr: #177
+mod-block: merge:pr-merge
 ---
 
 `skills/debrief/SKILL.md:22` runs the workflow-discovery grep with `--exclude-dir=.worktrees` (among others) but does NOT exclude `.claude/worktrees`. In repos where agent-created git worktrees live under `.claude/worktrees/...`, every worktree carries a copy of the workflow README, so debrief discovery returns the primary workflow + N duplicate copies. The captain has to disambiguate even when there's a single intended workflow in the primary checkout.
 
-## Suggested fix
+## Suggested fix (intake — superseded by cycle 2 reframe)
+
+> **Note:** The two shapes below were the original intake framing. Cycle-1 ideation chose Option B (post-filter the inline `grep`); cycle-2 ideation reframed to delegate Phase 1 to `status --discover` and fix the exclusion at the canonical surface. Kept here for audit. The "Chosen approach" section below is authoritative.
 
 Add `.claude/worktrees` (or equivalent path filtering) to the discovery exclusion list at `skills/debrief/SKILL.md:22`. Two implementation shapes worth ideation:
 
@@ -24,79 +26,96 @@ Add `.claude/worktrees` (or equivalent path filtering) to the discovery exclusio
 
 Reporter (Kent Chen) flagged this for `spacedock@0.10.2`; the same code path is in current `0.11.0`. No regression test for discovery exclusion behavior currently exists.
 
-## Chosen approach: Option B (post-filter)
+## Chosen approach: delegate debrief Phase 1 to `status --discover`, fix the exclusion at the canonical surface
 
-Pipe the discovery `grep` through `grep -v '/\.claude/worktrees/'` so any README path that lives under a `.claude/worktrees/` segment is dropped after the recursive scan.
+Two changes, in one PR:
 
-Final command shape at `skills/debrief/SKILL.md:22`:
+1. **`skills/commission/bin/status` (canonical fix)**: extend `discover_workflows` so the `os.walk` prune drops `worktrees` whenever the parent directory is `.claude`. Concretely, after the existing `dirnames[:] = [d for d in dirnames if d not in DISCOVER_IGNORE_DIRS]` line at `skills/commission/bin/status:1885`, add a path-anchored guard: when `os.path.basename(dirpath) == '.claude'`, also remove `'worktrees'` from `dirnames`. This mirrors the reporter's expectation (skip the `.claude/worktrees/` segment specifically) without expanding `DISCOVER_IGNORE_DIRS` to a broad `worktrees` basename rule that would clobber user-committed `worktrees/` dirs.
+2. **`skills/debrief/SKILL.md:22` (delegate)**: replace the inline `grep -rl ...` recipe with an invocation of the canonical discovery surface. Phase 1 Step 1 becomes "run `{spacedock_plugin_dir}/skills/commission/bin/status --discover` (it already defaults `--root` to `git rev-parse --show-toplevel`); each line of stdout is an absolute resolved workflow directory."
 
-```bash
-grep -rl '^commissioned-by: spacedock@' \
-  --include='README.md' \
-  --exclude-dir=node_modules \
-  --exclude-dir=.worktrees \
-  --exclude-dir=.git \
-  --exclude-dir=vendor \
-  --exclude-dir=dist \
-  --exclude-dir=build \
-  --exclude-dir=__pycache__ \
-  "$project_root" \
-  | grep -v '/\.claude/worktrees/'
-```
+### Why this over the cycle-1 post-filter
 
-### Why Option B over Option A
+- **Single source of truth for discovery exclusion.** `status --discover` is the canonical workflow-discovery surface (used by the FO boot path; `DISCOVER_IGNORE_DIRS` at `skills/commission/bin/status:1847` is documented as the canonical ignore set). Debrief currently re-implements that scan inline with a slightly-different `--exclude-dir` set. Adding a `grep -v` post-filter to debrief's private scan would leave two divergent exclusion lists in the codebase.
+- **Future fixes propagate for free.** Once debrief delegates, every consumer of `status --discover` (FO, debrief, anything we add later) inherits exclusion changes from one edit.
+- **The `.claude/worktrees/` fix lives at the right altitude.** It applies to all discovery consumers, not just debrief.
+- **The cycle-1 surgical-precision concern (don't over-exclude user `worktrees/`) is preserved.** The path-anchored prune (`basename(dirpath) == '.claude'` then drop `worktrees`) is exactly as precise as the cycle-1 `grep -v '/\.claude/worktrees/'`, but lives in Python where `os.walk` can also short-circuit descent (no wasted traversal into the worktree copies).
 
-- Option A (`--exclude-dir=worktrees`, no leading dot) matches `grep`'s exclude-dir basename rule, so it would also hide any user-committed directory literally named `worktrees/` — e.g. a docs page `worktrees/README.md`. The reporter explicitly named `.claude/worktrees/` as the unwanted path; collateral damage to user-named dirs is not warranted.
-- Option B mirrors the reporter's expectation exactly and is path-anchored (`/.claude/worktrees/`), so a sibling directory just named `worktrees/` is preserved.
-- Cost of "more moving parts": one extra pipe stage and one regex. Trivial against the precision gained.
-- The existing `--exclude-dir=.worktrees` rule remains untouched; it still short-circuits the recursive descent into `.worktrees/` (cheaper than post-filtering), so we keep that and only add the post-filter for the `.claude/worktrees/` case where the descent has already happened by the time we know we want to skip.
+### Why NOT broaden `DISCOVER_IGNORE_DIRS` to include `'worktrees'`
 
-Behavioral note: post-filtering preserves filesystem traversal cost into `.claude/worktrees/` (grep still descends and reads matching READMEs). Acceptable: discovery runs once per debrief invocation, and the alternative (adding `--exclude-dir=.claude` blanket) would mask legitimate `.claude/` content the captain might later want to scan.
+`DISCOVER_IGNORE_DIRS` is a basename ignore set; adding `'worktrees'` would prune any directory literally named `worktrees/` anywhere in the tree, not just `.claude/worktrees/`. This is the same trade-off as cycle-1's Option A and was rejected for the same reason — collateral damage to user-committed `worktrees/` dirs (e.g. a docs subdir).
+
+### Why NOT broaden `DISCOVER_IGNORE_DIRS` to include `'.claude'`
+
+`.claude/` may host other content the captain wants discoverable in the future. The path-anchored prune limits the change to exactly what the reporter described.
+
+### Concrete edits
+
+- `skills/commission/bin/status` near line 1885: after the existing `DISCOVER_IGNORE_DIRS` filter, add the path-anchored prune for `.claude/worktrees`. Update the docstring at line 1861 to add `.claude/worktrees` to the documented ignored-paths list.
+- `skills/debrief/SKILL.md:21-23` (Phase 1 Step 1): replace the inline `grep -rl ...` recipe with a call to `{spacedock_plugin_dir}/skills/commission/bin/status --discover`. Output is one resolved workflow directory per line; existing "exactly one / multiple / none" branching at the end of Step 1 still applies.
+
+### Why we are NOT merging with #8x
+
+- **#8x is already approved and ready to implement.** Its ideation gate passed; merging would unwind that decision and force a fresh gate on a larger combined scope.
+- **Different code paths.** #174 (this task) edits Phase 1 Step 1 + the status discover function. #8x edits Phase 2e (extraction). They touch different lines of `skills/debrief/SKILL.md` and #8x explicitly scopes itself away from #174 in its AC4 ("Adjacent #174 ... and #5a ... remain independent").
+- **Different fix shapes.** This task delegates to an existing `status` subcommand and fixes one bug at the canonical site. #8x rewrites Phase 2e prose to add a primary/legacy/degraded fallback chain for the case where the local `{dir}/status` is missing. The narratives rhyme ("debrief should defer to status helpers") but the implementations don't share a line of code.
+- **Sequencing is fine in either order.** Neither change depends on the other; landing them in two cycles is cheap.
+- **Acknowledged narrative overlap.** Both cycles trend toward "debrief delegates to canonical status surfaces." That direction is recorded here and in #8x; we just don't bundle them into one PR.
 
 ## Acceptance criteria
 
-- **AC1:** When debrief discovery runs in a repo whose only `commissioned-by: spacedock@` README outside `.claude/worktrees/` is the primary workflow, and one or more identical READMEs exist under `.claude/worktrees/<branch>/...`, discovery returns exactly the primary workflow path and zero `.claude/worktrees/` paths.
-  Verified by: regression test `tests/test_debrief_discovery_excludes_claude_worktrees.py` (see test plan) asserts the post-filtered command output contains the primary path and no path containing `/.claude/worktrees/`.
-- **AC2:** The existing `.worktrees/` exclusion continues to suppress READMEs that live under a top-level `.worktrees/` directory.
-  Verified by: same regression test seeds a `.worktrees/<slug>/README.md` with `commissioned-by: spacedock@` frontmatter and asserts that path is also absent from discovery output.
-- **AC3:** A user-committed directory literally named `worktrees/` (no leading dot, not under `.claude/`) is NOT excluded by the discovery filter.
-  Verified by: same regression test seeds `worktrees/docs/README.md` with the marker frontmatter and asserts it IS present in discovery output, confirming the post-filter is path-anchored to `/.claude/worktrees/` and does not over-exclude.
-- **AC4:** The discovery command at `skills/debrief/SKILL.md:22` retains all current `--exclude-dir=` flags (`node_modules`, `.worktrees`, `.git`, `vendor`, `dist`, `build`, `__pycache__`) — the fix is additive, not a rewrite.
-  Verified by: a content assertion in the regression test that the SKILL.md line still contains every original `--exclude-dir=` token, plus the new pipe-to-`grep -v '/\.claude/worktrees/'` suffix.
+- **AC1:** `status --discover` does not return any path under `.claude/worktrees/`.
+  Verified by: new pytest in `tests/test_status_discover_ignores_claude_worktrees.py` builds a `tmp_path` containing a primary workflow README plus duplicate workflow READMEs under `.claude/worktrees/<branch>/.../README.md`, then invokes `skills/commission/bin/status --discover --root <tmp_path>` as a subprocess and asserts no output line contains `/.claude/worktrees/`.
+- **AC2:** Existing `.worktrees/` exclusion (and the rest of `DISCOVER_IGNORE_DIRS`) continue to work — no regression.
+  Verified by: same test seeds `.worktrees/<slug>/.../README.md` and `node_modules/foo/README.md` with the `commissioned-by: spacedock@` marker; asserts both are absent from `status --discover` output.
+- **AC3:** A user-committed directory literally named `worktrees/` (no leading dot, not under `.claude/`) is still discoverable — the prune is path-anchored to `.claude/worktrees`, not basename-broad.
+  Verified by: same test seeds `worktrees/docs/README.md` with the marker; asserts the resolved path is present in `status --discover` output.
+- **AC4:** `skills/commission/bin/status` docstring at `discover_workflows` (lines ~1861-1862) lists `.claude/worktrees` alongside `.worktrees` in the documented ignored-paths set, so the canonical exclusion list is self-describing.
+  Verified by: grep guard in the same test asserts the docstring substring `.claude/worktrees` appears in `skills/commission/bin/status`.
+- **AC5:** Debrief Phase 1 Step 1 delegates to `status --discover` rather than running its own `grep -rl ...`.
+  Verified by: grep guards on `skills/debrief/SKILL.md` — must contain `status --discover`; must NOT contain the legacy `grep -rl '^commissioned-by: spacedock@'` recipe nor the `--exclude-dir=` flag list. The branching prose ("exactly one / multiple / none") at the end of Step 1 is preserved.
+- **AC6:** Other consumers of `discover_workflows` (notably `spacedock:first-officer` boot via `status --boot` adjacency) continue to work.
+  Verified by: existing tests under `tests/` that exercise `status --discover` / FO boot continue to pass. No new regression suite needed for this AC; the existing suite is the verifier.
 
 ## Test plan
 
-### Regression test fixture and entrypoint
+### Regression test entrypoint and fixture
 
-- **New test file:** `tests/test_debrief_discovery_excludes_claude_worktrees.py`
-- **Fixture shape (built inside `tmp_path`):**
+- **New test file:** `tests/test_status_discover_ignores_claude_worktrees.py`
+- **Fixture shape (built inside `tmp_path` per test invocation; no permanent fixture directory needed since the file content is trivial markdown):**
   ```
   tmp_path/
-    .git/                                     # `git init` so `git rev-parse --show-toplevel` works
-    workflows/
-      planning/
-        README.md                             # frontmatter: commissioned-by: spacedock@0.11.0
+    workflows/planning/README.md                # commissioned-by: spacedock@<current>
     .claude/worktrees/
-      ensign-foo/workflows/planning/README.md # duplicate (same frontmatter)
-      ensign-bar/workflows/planning/README.md # duplicate (same frontmatter)
+      ensign-foo/workflows/planning/README.md   # duplicate marker
+      ensign-bar/workflows/planning/README.md   # duplicate marker
     .worktrees/
-      legacy-slug/workflows/planning/README.md # duplicate (same frontmatter, must stay excluded)
+      legacy/workflows/planning/README.md       # duplicate marker (must stay excluded)
     worktrees/
-      docs/README.md                          # marker frontmatter, must NOT be excluded
+      docs/README.md                            # marker (must NOT be excluded)
+    node_modules/
+      foo/README.md                             # marker (must stay excluded — sanity check on existing rules)
   ```
-- **Test entrypoint:** a single pytest function `test_discovery_filters_claude_worktrees` that:
-  1. Reads the literal command from `skills/debrief/SKILL.md` line 22 (or extracts it via a small parse) and runs it against the fixture's `tmp_path` as `$project_root`.
-  2. Asserts: result contains `workflows/planning/README.md` from the primary checkout AND `worktrees/docs/README.md`; result contains zero entries with `/.claude/worktrees/` or `/.worktrees/` in the path.
-  3. A second assertion (AC4) parses the SKILL.md line and confirms the original `--exclude-dir=` token set is preserved.
+- **Test function** `test_discover_excludes_claude_worktrees`:
+  1. Build the fixture tree, write the marker frontmatter into each README.
+  2. Subprocess-invoke `python skills/commission/bin/status --discover --root <tmp_path>`, capture stdout.
+  3. Assert `<tmp_path>/workflows/planning` is in output.
+  4. Assert `<tmp_path>/worktrees/docs` is in output (AC3).
+  5. Assert no output line contains `/.claude/worktrees/`, `/.worktrees/`, or `/node_modules/` (AC1, AC2).
+- **Test function** `test_discover_workflows_docstring_documents_claude_worktrees`:
+  1. Read `skills/commission/bin/status`, assert the substring `.claude/worktrees` appears (AC4).
+- **Test function** `test_debrief_skill_delegates_to_status_discover`:
+  1. Read `skills/debrief/SKILL.md`, assert the substring `status --discover` is present and the literal substring `grep -rl '^commissioned-by: spacedock@'` is absent (AC5).
 
 ### Manual smoke
 
-- In a real working spacedock repo with active `.claude/worktrees/` entries, run the discovery `grep` command from SKILL.md by hand, confirm it returns only the primary workflow path.
-- Run `/spacedock:debrief` (no argument) and confirm Phase 1 Step 1 reports a single workflow without prompting for disambiguation.
+- In a real spacedock repo with `.claude/worktrees/` entries, run `skills/commission/bin/status --discover` and confirm exactly the primary workflow path is returned.
+- Run `/spacedock:debrief` with no argument and confirm Phase 1 Step 1 reports a single workflow without prompting for disambiguation.
 
 ### Non-regression scope
 
-- No other skills reference `.claude/worktrees` exclusion today (`grep -rl` confirmed only `skills/debrief/SKILL.md` matches `exclude-dir`). Scope of the change is limited to that one line.
+- The change in `skills/commission/bin/status` is additive (one line of prune logic, one docstring line). All existing `DISCOVER_IGNORE_DIRS` behavior is preserved.
+- The change in `skills/debrief/SKILL.md` is a Phase 1 Step 1 rewrite; downstream debrief phases (2a-2f, 3, 4) are untouched.
+- No other skills reference `exclude-dir` for `.claude/worktrees/`; verified via `grep -rl exclude-dir skills/`.
 
 ## Stage Report: ideation
 
@@ -144,3 +163,27 @@ Implementation chose a stronger fix shape than the ideation's grep post-filter: 
 ### Summary
 
 Verdict: PASSED. All six dispatch-listed ACs reproduce against the s6 commits (`bc832ccb`, `37ca52af`, `455428d8`) in this shared 8x worktree. Targeted suite reports 3/3 green; full `make test-static` reports 554/554 with no regression versus the implementation stage report's baseline.
+### Feedback Cycles
+
+**Cycle 1 — rejected at ideation gate.** Captain raised two reframes:
+1. *Don't reinvent discovery.* `skills/commission/bin/status --discover` is the canonical workflow-discovery surface (used by FO boot via `status --boot`). Debrief's inline `grep -rl ...` duplicates it; adding a `grep -v` post-filter creates a second exclusion list that will drift from the canonical one in `DISCOVER_IGNORE_DIRS` at `skills/commission/bin/status:1847`. Re-ideate around delegating Phase 1 Step 1 to `status --discover` and fixing the exclusion at the canonical surface.
+2. *Consider merging with #8x.* `#8x debrief-tolerate-missing-workflow-status` has a thematically related "debrief should defer to canonical status helpers" shape. Captain asked whether to merge.
+
+Cycle-2 response (recorded in the new "Chosen approach" section above): adopted reframe 1 (delegate to `status --discover` + fix exclusion at canonical site). Declined merge with #8x: it is already approved at its ideation gate, touches a different code path (Phase 2e extraction, not Phase 1 discovery), and unwinding its gate to bundle would cost more than the narrative-coherence win.
+
+## Stage Report: ideation (cycle 2)
+
+- DONE: Reframe 1 — investigate `status --discover` and decide between (a) delegate or (b) keep post-filter with structural justification.
+  Chose (a) delegate. `status --discover` exists at `skills/commission/bin/status:1850-1902` with the canonical `DISCOVER_IGNORE_DIRS` set at line 1847. It defaults `--root` to `git rev-parse --show-toplevel`, emits one absolute resolved workflow dir per line on stdout, and is incompatible with all other status flags so its surface is stable. Debrief Phase 1 Step 1 can consume it directly.
+- DONE: Reframe 1 — locate and apply the exclusion fix at the canonical site.
+  Fix moves to `skills/commission/bin/status` at the `discover_workflows` walk loop near line 1885. After the existing `DISCOVER_IGNORE_DIRS` basename prune, add a path-anchored guard: when `os.path.basename(dirpath) == '.claude'`, also drop `'worktrees'` from `dirnames`. This short-circuits descent into `.claude/worktrees/` without expanding the basename ignore set. Docstring at line 1861-1862 updated to list `.claude/worktrees` alongside `.worktrees`.
+- DONE: Reframe 2 — decide whether to merge with #8x; flag trade-off explicitly.
+  Stay separate. #8x is already past its ideation gate, scopes itself away from #174 in its AC4, and edits Phase 2e (extraction) while this task edits Phase 1 (discovery) plus `skills/commission/bin/status`. The two share narrative direction ("debrief delegates to canonical status surfaces") but no implementation lines. Merging would unwind an approved gate; sequential cycles are cheap.
+- DONE: Rewrite Approach + ACs + Test plan around the reframed direction; preserve the original "Suggested fix" prose for audit.
+  "Suggested fix (intake)" section flagged as superseded; "Chosen approach" rewritten to describe the canonical-site fix plus debrief delegation. Six ACs cover discovery exclusion (AC1), no-regression on existing prunes (AC2), no over-exclusion of user `worktrees/` (AC3), self-describing docstring (AC4), debrief delegation (AC5), and FO-boot non-regression via existing tests (AC6).
+- DONE: Add `### Feedback Cycles` section after the prior Stage Report.
+  Cycle 1 entry added with both reframes and the cycle-2 response summary.
+
+### Summary
+
+Reframed from "patch debrief's private discovery `grep`" to "delegate debrief Phase 1 to the canonical `status --discover` surface and fix the `.claude/worktrees/` exclusion inside `skills/commission/bin/status`." The fix is path-anchored (drop `worktrees` from dirnames only when the parent is `.claude`), preserving the cycle-1 precision concern (no over-exclusion of user `worktrees/`) while putting the rule at the right altitude. Six ACs cover the canonical fix, debrief delegation, and FO-boot non-regression; one new pytest file with three small functions verifies them. Declined merge with #8x — different code paths, #8x already approved, sequencing is cheap.

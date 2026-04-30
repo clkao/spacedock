@@ -1,16 +1,16 @@
 ---
 id: 5aqx95ck26bvj6dafmsa4rns
 title: "Commissioned README should not reference machine-specific paths or status usage"
-status: ideation
+status: validation
 source: "GitHub issue #172 (filed by Jared Scott / gcko, 2026-04-30)"
 started: 2026-04-30T19:47:24Z
 completed:
 verdict:
 score: 0.7
-worktree:
+worktree: .worktrees/spacedock-ensign-commission-readme-portable-status-path
 issue: "#172"
-pr:
-mod-block:
+pr: #176
+mod-block: merge:pr-merge
 ---
 
 ## Problem (as filed by reporter)
@@ -66,48 +66,17 @@ claude --agent spacedock:first-officer
 
 The `grep -l "status: {stage_name}" {dir}/*.md` snippet at line 421 is also dropped — it teaches a status-discovery technique that belongs in the FO skill, not the generated README. Captains who want raw filesystem access already know how to grep.
 
-## Refit constraint check (mechanism + UX)
+## Refit constraint check
 
-### Mechanism: substring grep guard on the commissioned README
+**Refit needs no new mechanism.** Phase 3b already implements the right pattern: generate what the current commission template would produce for this workflow, diff it against the user's existing README, present the diff, ask the captain to apply changes manually or call out specific edits.
 
-Refit's Phase 3b ("README — Show Diff") gains a new pre-diff step that scans `{dir}/README.md` for two prohibited-content patterns:
+Once the commission template no longer emits `{spacedock_plugin_dir}/.../bin/status` examples and instead emits the canonical FO-invocation prose, refit's existing Show-Diff naturally surfaces the drift: an old README that still has the three status-invocation snippets will diff against a new template that has the FO-invocation paragraph instead. The captain sees the drift in the diff output and decides whether to adopt the new shape — same UX they already use for any other template change.
 
-1. **Machine-specific path leakage** — substring match for either:
-   - literal unresolved placeholder `{spacedock_plugin_dir}`
-   - absolute cache path fragment `.claude/plugins/cache` (matches both `/Users/...` and `~/...` variants)
-2. **Status-usage prose leakage** — substring match for `bin/status`
+The constraint compliance is therefore a property of the commission template, not a new check in refit. Update the template, and refit's existing prose-and-diff pattern carries the rest.
 
-Substring grep was chosen over markdown-section parsing because:
-- both patterns are unique enough not to false-positive in normal mission/stage prose (no legitimate workflow README would contain `bin/status` or `.claude/plugins/cache` in its content)
-- AST/section-presence checks add markdown parsing complexity for no marginal benefit
-- a future captain-authored mention (e.g., a stage that genuinely involves running `bin/status`) would be unusual enough to warrant a one-line confirmation prompt rather than a silent allowlist
+### Residual-case note
 
-### Check signature (refit Phase 3b addition)
-
-In `skills/refit/SKILL.md` Phase 3b, before the existing "generate template diff" step, insert a portability scan:
-
-```
-For each pattern in [`{spacedock_plugin_dir}`, `.claude/plugins/cache`, `bin/status`]:
-  if pattern present in {dir}/README.md body text:
-    record a drift finding with pattern + line numbers
-```
-
-If any drift findings recorded, surface them to the captain BEFORE the standard template diff:
-
-> **Portability drift detected in `{dir}/README.md`:**
->
-> Found {N} patterns that break multi-operator workflows:
-> - `{pattern}` at line {N} — {one-line explanation: machine-specific path / status invocation in generated content}
->
-> The current commission template no longer emits these patterns. The first officer skill encapsulates status access; captains run `claude --agent spacedock:first-officer` instead.
->
-> Regenerate the affected README sections to the new shape? (y / n / show diff first)
-
-On `y`, edit the README to replace the `## Workflow State` section with the canonical FO-invocation prose (same content as the new commission template emits) and remove any other lines containing the flagged patterns. On `n`, leave the README untouched and continue with the standard template diff. On `show diff first`, render the proposed edit as a diff and re-prompt.
-
-### Cross-skill consistency
-
-The canonical "## Workflow State" replacement prose lives in one place — `skills/commission/SKILL.md` heredoc — and refit reads it from there at runtime when offering regeneration. Refit does not duplicate the prose; it reads the current commission template and lifts the section. This keeps the two skills from drifting apart.
+The pattern that won't surface cleanly via plain template-diff is one where the README has heavy captain customizations interleaved with the old status-invocation snippets, making the diff noisy enough that the captain might miss the deletion of the offending lines. This is plausible but not load-bearing: refit already documents that "differences may be template improvements or your intentional customizations" and asks the captain to review. The defense for the noisy-diff case is the existing review prose, not new machinery. If this case proves common in practice, a future minimal addendum to refit Phase 3b could call out machine-specific-path lines explicitly in the diff summary — but that's a follow-on, not part of this task's scope.
 
 ## Acceptance criteria
 
@@ -120,35 +89,27 @@ Verified by: grep `bin/status` in a freshly commissioned `{dir}/README.md` retur
 **AC-3 — Generated README's runtime-entrypoint section is the canonical FO-invocation prose.**
 Verified by: `{dir}/README.md` contains a `## Workflow State` heading followed by prose mentioning `claude --agent spacedock:first-officer` and no other invocation examples in that section.
 
-**AC-4 — Refit detects machine-specific paths in an existing commissioned README and surfaces the drift.**
-Verified by: running refit against a fixture README containing `{spacedock_plugin_dir}/skills/commission/bin/status ...` produces a drift-detected prompt to the captain naming the offending pattern and line number, before the standard template diff.
+**AC-4 — Refit's existing Show-Diff surfaces the drift when run against an old README.**
+Verified by: running refit's Phase 3b template-diff against a fixture README containing the old status-invocation snippets produces a diff whose deletions include `{spacedock_plugin_dir}` and `bin/status` lines, and whose additions include the canonical FO-invocation paragraph. No new refit code is added; this verifies the existing prose-and-diff pattern carries the constraint once the commission template is updated.
 
-**AC-5 — Refit detects status-usage prose in an existing commissioned README and surfaces the drift.**
-Verified by: running refit against a fixture README containing `bin/status` produces a drift-detected prompt naming the offending pattern.
-
-**AC-6 — Refit's offer-to-regenerate replaces the `## Workflow State` section with the canonical FO-invocation prose when accepted.**
-Verified by: applying refit's regeneration to a drift fixture produces a README whose `## Workflow State` section matches the canonical prose emitted by the current commission template (same source of truth, lifted at runtime).
-
-**AC-7 — Setup-time interpolations in `SKILL.md` (lines 503, 634, 662) remain unchanged.**
+**AC-5 — Setup-time interpolations in `SKILL.md` (lines 503, 634, 662) remain unchanged.**
 Verified by: diff of `skills/commission/SKILL.md` shows changes only inside the README heredoc bounds (roughly lines 279–455); `{spacedock_plugin_dir}` references at the three setup sites are preserved verbatim.
 
 ## Test plan
 
 Static / parser-level (no live commission run needed):
 
-1. **Unit-equivalent grep guard on commission output.** Generate a README via the modified commission heredoc against a synthetic design-input fixture (mission text + entity + stages). Run `grep -E '\{spacedock_plugin_dir\}|\.claude/plugins/cache|bin/status' {generated_README}` — must return zero matches and exit 1. Covers AC-1, AC-2.
+1. **Grep guard on commission output.** Generate a README via the modified commission heredoc against a synthetic design-input fixture (mission text + entity + stages). Run `grep -E '\{spacedock_plugin_dir\}|\.claude/plugins/cache|bin/status' {generated_README}` — must return zero matches and exit 1. Covers AC-1, AC-2.
 
 2. **Section-presence check on commission output.** Same generated README. Assert the `## Workflow State` section exists and contains the substring `claude --agent spacedock:first-officer`. Covers AC-3.
 
-3. **Refit drift-detection check against drift fixtures.** Two fixtures: (a) a README with `{spacedock_plugin_dir}/skills/commission/bin/status --workflow-dir docs/foo` baked in, (b) a README with the canonical FO-invocation already present. Run refit's Phase 3b scan against each. Fixture (a) must produce drift findings naming both `{spacedock_plugin_dir}` and `bin/status` patterns; fixture (b) must produce zero drift findings. Covers AC-4, AC-5.
+3. **Refit Show-Diff against a pre-existing old README.** Build a fixture: an `{dir}/README.md` containing the old status-invocation snippets (the three `{spacedock_plugin_dir}/skills/commission/bin/status ...` blocks plus the `grep -l "status:"` line). Run refit's Phase 3b against this fixture using the modified commission template as the diff target. Capture the resulting diff and assert: deletions contain at least one line with `{spacedock_plugin_dir}` and at least one line with `bin/status`; additions contain the canonical FO-invocation paragraph (`claude --agent spacedock:first-officer`). This exercises existing refit behavior against the new template — no new refit code involved. Covers AC-4.
 
-4. **Refit regeneration round-trip.** Apply refit's offer-to-regenerate to fixture (a). Re-run the grep guard from test 1 against the regenerated file — must return zero matches. Then assert the `## Workflow State` section content matches what the current commission template emits (string-equal after stripping leading/trailing whitespace). Covers AC-6.
-
-5. **Setup-prose preservation diff.** After modifying `skills/commission/SKILL.md`, run `git diff skills/commission/SKILL.md` and assert all hunks fall within line range 279–455 (the README heredoc). Specifically verify the three `{spacedock_plugin_dir}` references at lines 503, 634, 662 are unchanged. Covers AC-7.
+4. **Setup-prose preservation diff.** After modifying `skills/commission/SKILL.md`, run `git diff skills/commission/SKILL.md` and assert all hunks fall within line range 279–455 (the README heredoc). Specifically verify the three `{spacedock_plugin_dir}` references at lines 503, 634, 662 are unchanged. Covers AC-5.
 
 Live E2E (one smoke run, optional): commission a throwaway workflow into `/tmp/spacedock-portability-smoke/` with a minimal mission, then run the test-1 grep guard against the resulting README. This validates the full commission path end-to-end but is not required for AC verification — the static checks above cover the claim.
 
-No live refit E2E is needed; the drift-detection check is pure prose scanning and the regeneration step is a deterministic Edit. Fixture-based testing is sufficient.
+No live refit E2E is needed; test 3 exercises Phase 3b's diff-generation step against a fixture, which is sufficient to verify that the existing prose-and-diff pattern surfaces the drift once the template is updated.
 
 ## Out of scope
 
@@ -174,3 +135,27 @@ No live refit E2E is needed; the drift-detection check is pure prose scanning an
 ### Summary
 
 Pinned the implementation path to two surgical edits: replace the `## Workflow State` heredoc section in `skills/commission/SKILL.md` with a single FO-invocation paragraph (drops the three `{spacedock_plugin_dir}/.../bin/status` examples plus the `grep -l "status:"` snippet), and add a substring grep guard to `skills/refit/SKILL.md` Phase 3b that surfaces drift before the standard template diff. Key clarification: the entity-body intake misclassified line 662 — it's setup-time prose in Phase 3 Step 5, not generated content, and stays. Acceptance is testable entirely via static grep + fixture-based refit checks; no live E2E is required.
+
+### Feedback Cycles
+
+**Cycle 1 (rejected by captain).** Captain rejected the gate on two grounds:
+
+1. **Refit-mechanism reframe.** Cycle 1 proposed a new substring grep guard + custom drift-detection prompt in refit Phase 3b. Captain pushed back: refit already has a Show-Diff strategy for README.md, and once the commission template is updated, the diff naturally surfaces the drift. No new refit machinery needed. Constraint compliance is a property of the commission template, not new code in refit.
+2. **Test plan reshape.** Tests 3 and 4 (drift-detection-fixture check and regeneration round-trip) were testing the new mechanism that no longer exists. They needed to be dropped and replaced with a single test that exercises refit's existing Show-Diff against a fixture old README, asserting the diff surfaces the right deletions and additions.
+
+Cycle 2 reworked: dropped the new-mechanism prose from `## Refit constraint check`, replaced with "no new mechanism needed" prose plus a residual-case note. Dropped AC-4/5/6 (mechanism-specific), added a new AC-4 (existing diff surfaces drift), renumbered the setup-preservation AC to AC-5. Reshaped the test plan from five tests to four — dropped tests 3 and 4, added a new test 3 that exercises Phase 3b's existing diff against an old-README fixture against the new commission template.
+
+## Stage Report: ideation (cycle 2)
+
+- DONE: Replace `## Refit constraint check (mechanism + UX)` section with shorter "uses existing Show-Diff" prose
+  Reframed section now states refit needs no new mechanism — constraint compliance is a property of the commission template, and refit's existing Phase 3b Show-Diff carries the rest. Residual-case note flags the noisy-customized-diff scenario as a possible future minimal addendum but explicitly out of scope here.
+- DONE: Drop AC-4, AC-5, AC-6 (mechanism-specific); add AC about existing diff surfacing the new template against an old README
+  AC-4 (drift detection prompt), AC-5 (status-prose detection prompt), AC-6 (regeneration round-trip) removed. New AC-4 verifies refit's existing Show-Diff against a fixture old README produces a diff with the expected deletions (lines containing `{spacedock_plugin_dir}` and `bin/status`) and additions (the canonical FO-invocation paragraph). Setup-preservation AC renumbered from AC-7 to AC-5.
+- DONE: Reshape Test plan section per the reframe
+  Dropped test 3 (drift-detection fixture scan) and test 4 (regeneration round-trip). New test 3 builds an old-README fixture, runs refit Phase 3b's existing diff against the modified commission template, and asserts the diff content. Test count went from 5 to 4. Optional live E2E and rationale for skipping live refit E2E preserved.
+- DONE: Add `### Feedback Cycles` section after the prior Stage Report
+  Cycle 1 entry added documenting both reframe grounds and the cycle-2 response shape.
+
+### Summary
+
+Reworked per captain's two reframes. Refit gains no new code — the commission template update alone, combined with refit's existing prose-and-diff Show-Diff pattern, satisfies the constraint. AC count went from 7 to 5, test plan from 5 tests to 4. The implementation path is now even more surgical: one heredoc edit in `skills/commission/SKILL.md`, zero edits in `skills/refit/SKILL.md`. Test 3 exercises existing refit behavior against a fixture, not new behavior.
