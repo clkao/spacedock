@@ -143,3 +143,20 @@ Regression guard: existing seven `TestExtractStageSubsection` tests must remain 
 ### Summary
 
 Reframed the ideation away from the original brittle regex-extension toward a two-direction approach: a permissive first-content-token extractor (Direction A) that survives any reasonable Markdown decoration, plus a fail-loud `ValueError` diagnostic (Direction B) integrated with `cmd_build` so unparseable-but-mentioned headings surface a structured error instead of silent fallthrough to break-glass. AC items are end-state properties with explicit `Verified by:` clauses; test plan covers both directions plus regression preservation of the seven existing #138/PR-145 tests. No prior stage report existed, so no feedback cycle marker was needed.
+
+## Stage Report: implementation
+
+- DONE: Replace `extract_stage_subsection` regex match with the permissive Direction A approach (strip decoration → check first content token equals stage name)
+  Implemented `_heading_tokens` + `_heading_first_token` helpers; `extract_stage_subsection` now matches when the heading's first content token equals `stage_name` after stripping `` ` *_~ `` and treating `(` / `[` as token terminators. Commit `c0e4b8f6`.
+- DONE: Add Direction B fail-loud path: raise `ValueError` with line number + raw heading + parsing requirement when stage name appears as a heading token but not the first one; return `None` when genuinely absent
+  Secondary scan uses `_heading_tokens` (token-level, not raw substring) so partial-name lookups like `wor` against `### \`work\`` still return `None`. Error message includes line number, `repr(heading)`, and the phrase "first content token". Commit `c0e4b8f6`.
+- DONE: Update `cmd_build` to catch `ValueError` from `extract_stage_subsection` and surface via `_build_error`
+  `try`/`except ValueError` wraps the call at `claude-team:269-273` and forwards `str(e)` to `_build_error`, giving the captain a structured stderr diagnostic with non-zero exit. Commit `c0e4b8f6`.
+- DONE: Add regression tests to `tests/test_claude_team.py::TestExtractStageSubsection` per entity test plan (8 new permissive-parser tests + 2 fail-loud) + E2E test in `TestBuildStageHeadingParentheticalE2E`
+  Added 11 unit tests (italic, underscore-italic, bold-name, bold-annotation, mixed-decoration, square-bracket, trailing-text, 4 parameterized real-world #178 cases, fail-loud-when-mentioned, return-None-when-absent) and 1 subprocess E2E test (`test_build_surfaces_unparseable_heading_diagnostic`). Existing 7 TestExtractStageSubsection tests + existing E2E test unchanged and green. Commit `2c5d7ca6`.
+- DONE: Local verification — `unset CLAUDECODE && uv run pytest tests/test_claude_team.py -v` and `make test-static`
+  `tests/test_claude_team.py`: 105 passed (22 in the two affected classes). `make test-static`: 553 passed, 26 deselected, 15 subtests passed in 28.87s.
+
+### Summary
+
+Implemented Direction A (permissive first-content-token extractor) and Direction B (fail-loud `ValueError` for headings that mention the stage name but don't parse) in `skills/commission/bin/claude-team`, plus `cmd_build` `try`/`except` to surface the diagnostic on stderr. Refined Direction B's substring check to operate on tokens rather than raw substring so the existing `test_rejects_partial_match` (`wor` against `### \`work\``) continued to return `None` instead of raising — only headings that contain the stage name as a real word now trigger fail-loud. All 7 prior `TestExtractStageSubsection` tests + the prior E2E test remain unchanged and green. Two commits per stage discipline: `c0e4b8f6` (source) and `2c5d7ca6` (tests).
