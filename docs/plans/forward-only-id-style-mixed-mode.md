@@ -107,3 +107,5 @@ Captain decision: drop archive-only duplicate-checking entirely (option 2 from F
 This conceptual reframe explains the existing sequential-branch tolerance: archive entries are historical record, not workflow state. The sd-b32 branch should match.
 
 Routing cycle 2 to the implementation ensign on standby (context 5.3%, reuse_ok). New AC + new test case for archive-only duplicate tolerance; small code mirror of the existing sequential-branch logic into the sd-b32 branch.
+
+**Cycle 1 resolved (2026-04-29 ~21:54 UTC).** Cycle 2 implementation landed three commits (f88f722c validator restructure, 7b1a81ff archive-only dup tolerance test, 8fcdf8c7 cycle-2 stage report). Cycle-2 validation reproduced all 7 ACs cleanly AND the driving-use-case spot-check: flipping `docs/plans/README.md` to `id-style: sd-b32` against 50 active + 175 archived entities now yields `VALID` exit 0. The four pre-existing archive-only dup pairs are tolerated as designed. Captain approved the gate. Advancing to merge.
