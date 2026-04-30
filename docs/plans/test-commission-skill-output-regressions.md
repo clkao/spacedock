@@ -63,3 +63,22 @@ This task tracks commission-skill output-quality regressions. #154 was strictly 
 ### Summary
 
 Two surgical commits land the Option B-ii + A2 fix on top of 5a's branch. Test changes cover three of four checklist items: leak scan now skips `_mods/*.md`, a new `[Mod Install Freshness]` block byte-compares each workflow-local mod against its plugin source, and the obsolete `workflow-local pr-merge mod is not generated` existence check is removed (replaced by the freshness check). The SKILL.md tweak rewrites the seed-entity body example so it no longer models brace-syntax in entity prose, which was the source of the `{current_version}`-style leaks in `refit-command.md`. Live `test_commission` run reports `68 passed, 0 failed` (XPASS, tolerated by `strict=False`); static suite stays at 539 passed.
+
+## Stage Report: validation
+
+- DONE: AC1 — workflow-local mods byte-equal plugin source; `[Mod Install Freshness]` check passes.
+  Live output: `[Mod Install Freshness] PASS: workflow-local _mods/pr-merge.md matches plugin source byte-for-byte`. Code at `tests/test_commission.py:314-331` (read_bytes byte-compare loop).
+- DONE: AC2 — leak scan returns empty for entity-body files (excluding `_mods/*.md`); leak scan skips `_mods/*.md`.
+  Live output: `[No Leaked Template Variables] PASS: no leaked template variables`. Skip clause confirmed at `tests/test_commission.py:338-339` (`if "_mods" in md_file.parts: continue`).
+- DONE: AC3 — refit-command.md seed prose has no `{var}` patterns; verified via the leak scan covering it.
+  AC2 leak scan walks `workflow_dir.rglob("*.md")` (covers refit-command.md) and reports clean. Root-cause fix at `skills/commission/SKILL.md:464` rewrites the seed-entity body example from `{Description/thesis from {captain}'s seed input.}` to a parenthetical instruction explicitly forbidding brace-syntax in entity prose.
+- DONE: AC4 — xfail decorator on test_commission stays unchanged.
+  Verified by reading `tests/test_commission.py:22`: `@pytest.mark.xfail(strict=False, reason="pending #197 — commission-skill output regressions (template leaks, abs paths, workflow-local pr-merge); see docs/plans/test-commission-skill-output-regressions.md")` — identical to baseline.
+- DONE: Live `unset CLAUDECODE && uv run pytest tests/test_commission.py -v -s` and `make test-static` re-runs.
+  Live: `68 passed, 0 failed (out of 68 checks)` → `1 xpassed in 113.12s (0:01:53)`. Static: `539 passed, 26 deselected, 15 subtests passed in 27.08s`. Pre-fix baseline `66/68` → post-fix `68/68` confirmed.
+- DONE: Spot-check SKILL.md seed-entity scaffolding edit.
+  `skills/commission/SKILL.md:464` — body example replaced with "(Body: write the description or thesis from the captain's seed input as plain prose. Do NOT carry brace-syntax placeholders into the body — rewrite any `{var}` phrasing as natural language or backticked words.)" — LLM is no longer modeled to write `{var}` syntax in entity prose. Frontmatter `{var}` slots above are preserved (correct — they are template slots in the YAML scaffold, not entity body prose).
+
+### Verdict
+
+PASSED. All four ACs reproduced from this worktree with live test output. The two #197 commits (`6c0c774a` test refinements, `fe99ba74` SKILL.md seed prose tweak) are surgical and correctly scoped. Live test_commission lifts from `66/68` (xfailed) to `68/68` (xpassed under `strict=False`); static regression suite remains green.
