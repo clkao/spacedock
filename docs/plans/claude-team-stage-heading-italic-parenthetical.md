@@ -160,3 +160,23 @@ Reframed the ideation away from the original brittle regex-extension toward a tw
 ### Summary
 
 Implemented Direction A (permissive first-content-token extractor) and Direction B (fail-loud `ValueError` for headings that mention the stage name but don't parse) in `skills/commission/bin/claude-team`, plus `cmd_build` `try`/`except` to surface the diagnostic on stderr. Refined Direction B's substring check to operate on tokens rather than raw substring so the existing `test_rejects_partial_match` (`wor` against `### \`work\``) continued to return `None` instead of raising — only headings that contain the stage name as a real word now trigger fail-loud. All 7 prior `TestExtractStageSubsection` tests + the prior E2E test remain unchanged and green. Two commits per stage discipline: `c0e4b8f6` (source) and `2c5d7ca6` (tests).
+
+## Stage Report: validation
+
+- DONE: Run `make test-static` and `unset CLAUDECODE && uv run pytest tests/test_claude_team.py::TestExtractStageSubsection tests/test_claude_team.py::TestBuildStageHeadingParentheticalE2E -v` from the worktree; cite exit codes and pass/fail counts in the report.
+  `make test-static` → exit 0, 553 passed, 26 deselected, 15 subtests passed in 28.81s. Targeted run → exit 0, 22 passed in 0.11s (7 prior TestExtractStageSubsection + 13 new TestExtractStageSubsection + 2 TestBuildStageHeadingParentheticalE2E).
+- DONE: For each AC-1..AC-7 in the entity body, name the cited test from its `Verified by:` clause and confirm the run in step 1 covered it. Flag any AC whose cited test does not appear in the run output.
+  AC-1 → `test_matches_italic_wrapped_parenthetical`, `test_matches_underscore_italic_parenthetical`, `test_matches_bold_wrapped_name`, `test_matches_bold_annotation`, `test_matches_mixed_decoration`, `test_matches_square_bracket_annotation`, `test_matches_trailing_text_after_name` — all PASSED.
+  AC-2 → `test_raises_when_stage_mentioned_but_not_first_token` — PASSED.
+  AC-3 → `test_rejects_nonexistent_stage` — PASSED (also `test_returns_none_when_stage_truly_absent` PASSED).
+  AC-4 → `test_rejects_partial_match` — PASSED.
+  AC-5 → `TestBuildStageHeadingParentheticalE2E::test_build_surfaces_unparseable_heading_diagnostic` — PASSED.
+  AC-6 → `test_matches_real_world_178_examples` (4 parameterized cases: brainstorm, capture, pr-review, handoff) — all PASSED.
+  AC-7 → 7 prior TestExtractStageSubsection tests (`test_matches_backtick_bare_heading`, `test_matches_bare_heading`, `test_matches_backtick_heading_with_parenthetical`, `test_matches_bare_heading_with_parenthetical`, `test_matches_backtick_heading_with_arbitrary_parenthetical`, `test_rejects_nonexistent_stage`, `test_rejects_partial_match`) — all PASSED with no test changes.
+  No AC has a missing cited test.
+- DONE: Issue a PASSED or REJECTED recommendation. If REJECTED, name the failing AC and the missing or contradictory evidence.
+  PASSED.
+
+### Summary
+
+Validation cross-check: `make test-static` is green (553 passed) and the targeted `TestExtractStageSubsection` + `TestBuildStageHeadingParentheticalE2E` run is green (22 passed, 0 failures). Every AC-1..AC-7 has its cited `Verified by:` test present in the run output and passing — including the 7 regression-guard tests for AC-7 unchanged. Recommendation: PASSED.
