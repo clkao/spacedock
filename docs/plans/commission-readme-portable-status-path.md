@@ -159,3 +159,16 @@ Cycle 2 reworked: dropped the new-mechanism prose from `## Refit constraint chec
 ### Summary
 
 Reworked per captain's two reframes. Refit gains no new code — the commission template update alone, combined with refit's existing prose-and-diff Show-Diff pattern, satisfies the constraint. AC count went from 7 to 5, test plan from 5 tests to 4. The implementation path is now even more surgical: one heredoc edit in `skills/commission/SKILL.md`, zero edits in `skills/refit/SKILL.md`. Test 3 exercises existing refit behavior against a fixture, not new behavior.
+
+## Stage Report: implementation
+
+- DONE: Edit the README heredoc in `skills/commission/SKILL.md`: drop the three `{spacedock_plugin_dir}/.../bin/status` example blocks and the `grep -l "status:"` snippet; replace the `## Workflow State` section with the canonical FO-invocation paragraph; setup-time prose preserved verbatim
+  Commit `2906988e`. Heredoc shrunk by 20 lines; remaining `{spacedock_plugin_dir}` references at lines 483 / 614 / 642 (was 503 / 634 / 662 pre-edit) all sit outside the heredoc which now closes at line 435.
+- DONE: Add the regression tests per the entity body's Test plan (grep guard, section-presence, refit Show-Diff against old-README fixture, setup-prose preservation diff)
+  Commit `d6b0387d`. Five tests in `tests/test_commission_readme_portability.py` covering AC-1 through AC-5. All pass locally.
+- DONE: Local verification: targeted `pytest -k commission_readme_portability` green + full `make test-static` green
+  Targeted: `5 passed in 0.02s`. Full static: `544 passed, 26 deselected, 15 subtests passed in 28.02s`.
+
+### Summary
+
+Two surgical commits as instructed: (a) heredoc edit in `skills/commission/SKILL.md` removing three status-invocation examples and the grep-l snippet, replacing the `## Workflow State` section with a single FO-invocation paragraph; (b) five static regression tests in a new `tests/test_commission_readme_portability.py` covering all five ACs. Zero changes to `skills/refit/SKILL.md` per the entity's "refit needs no new code" design — AC-4 is satisfied by the property that an old-README fixture diffed against the new heredoc surfaces `{spacedock_plugin_dir}` and `bin/status` deletions plus the FO-invocation addition. Full static suite (544 tests) green.
