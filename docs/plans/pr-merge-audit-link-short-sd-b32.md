@@ -73,3 +73,16 @@ Verified by: full static suite run.
 
 - Filed alongside `06z0dycs40qr0a9b35waxaxf` (refit-docs-plans-readme) which the captain ordered in the same turn.
 - The existing `[Mod Install Freshness]` byte-compare from #197 (PR #176) is the regression guard for AC-3.
+
+## Stage Report: implementation
+
+- DONE: Implement `status --short-id REF` in `skills/commission/bin/status`. For sd-b32 workflows return the shortest-unique-prefix across active+archived. For sequential and slug return the literal stored ID/slug. Reuse the existing prefix computation that powers the ID column.
+  Added `parse_short_id_arg` and `print_short_id_or_exit` (reuses `compute_sd_b32_display_ids` and `resolve_reference_candidates` with `include_archived=True`); wired into `main()` with incompat checks parallel to `--resolve`.
+- DONE: Update BOTH pr-merge mod copies identically (`mods/pr-merge.md` and `docs/plans/_mods/pr-merge.md`) so the audit-link rendering step calls `status --short-id` and inserts the result into the `[{entity-id}]` slot. After the edit, confirm `diff mods/pr-merge.md docs/plans/_mods/pr-merge.md` is empty.
+  Added a short-id computation step in `## Hook: merge` and updated the extraction-rule row to `[{short-id}](...)`; `diff` reports identical and `[Mod Install Freshness]` test is green.
+- DONE: Add `tests/test_status_short_id.py` covering AC-1 (3 id-styles) and AC-2 (sd-b32 active+archived collision forces prefix lengthening); run it and `make test-static` from the worktree and cite both pass counts in the report.
+  4/4 new short-id tests pass. `make test-static` 561 passed, 26 deselected. Updated `tests/test_pr_merge_template.py::test_template_describes_audit_link_format` to pin `[{short-id}]` and added a sibling `test_audit_link_uses_short_id_command`.
+
+### Summary
+
+Added `status --short-id REF` that returns the shortest-unique-prefix used by the ID column for sd-b32, and the literal stored ID/slug for sequential/slug. Updated both pr-merge mod copies to call `status --short-id` when rendering the audit-link `[{entity-id}]` slot, fixing the unreadable 24-char render seen on PR #179. AC-3 byte-parity is preserved (mod copies identical, `[Mod Install Freshness]` green); AC-5 full static suite is green at 561/561.

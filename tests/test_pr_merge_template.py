@@ -199,7 +199,11 @@ class TestAuditMetadata(unittest.TestCase):
     def test_template_describes_audit_link_format(self):
         text = read_pr_merge()
         self.assertIn('[{entity-id}](/{owner}/{repo}/blob/{short-sha}/{path-to-entity-file})', text)
-        self.assertIn('[{id}](/{owner}/{repo}/blob/{short-sha}/{path})', text)
+        self.assertIn('[{short-id}](/{owner}/{repo}/blob/{short-sha}/{path})', text)
+
+    def test_audit_link_uses_short_id_command(self):
+        text = read_pr_merge()
+        self.assertIn('status --short-id', text)
 
     def test_workflow_entity_verbose_line_removed(self):
         text = read_pr_merge()

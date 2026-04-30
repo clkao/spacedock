@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # commissioned-by: spacedock@{spacedock_version}
 # ABOUTME: Workflow status viewer — shows entity overview from YAML frontmatter.
-# ABOUTME: Supports default table, --archived, --next, --next-id, --boot, --validate, --resolve, and --discover.
+# ABOUTME: Supports default table, --archived, --next, --next-id, --boot, --validate, --resolve, --short-id, and --discover.
 #
 # goal: Show one-line-per-{entity_label} workflow overview from YAML frontmatter.
 #
@@ -1307,6 +1307,21 @@ def parse_resolve_arg(args):
     return None
 
 
+def parse_short_id_arg(args):
+    """Parse --short-id <ref> from argv. Returns ref or None."""
+    i = 0
+    while i < len(args):
+        if args[i] == '--short-id':
+            if i + 1 >= len(args):
+                raise ValueError('--short-id requires a reference argument')
+            ref = args[i + 1]
+            if not ref or ref.startswith('--'):
+                raise ValueError('--short-id requires a reference argument')
+            return ref
+        i += 1
+    return None
+
+
 def parse_root_arg(args):
     """Parse --root <path> from argv. Returns root or None."""
     i = 0
@@ -1653,6 +1668,36 @@ def resolve_reference_or_exit(workflow_dir, ref, include_archived=False):
     print(format_resolve_line(workflow_dir, matches[0]))
 
 
+def print_short_id_or_exit(workflow_dir, ref):
+    """Resolve REF (across active+archived) and print its short display ID.
+
+    For sd-b32 the result is the shortest-unique-prefix used by the ID column.
+    For sequential the result is the stored numeric ID. For slug the result is
+    the slug literal. Always resolves across active+archived so prefixes account
+    for archived siblings that could otherwise collide with active entities.
+    """
+    id_style = workflow_id_style(workflow_dir)
+    fail_on_validation_errors(workflow_dir, find_git_root(workflow_dir), id_style)
+    status, matches, errors = resolve_reference_candidates(
+        workflow_dir, ref, include_archived=True, id_style=id_style
+    )
+    if status != 'ok':
+        for error in errors:
+            print(error, file=sys.stderr)
+        sys.exit(1)
+    entity = matches[0]
+    stored_id = entity.get('_stored_id', entity.get('id', ''))
+    if id_style == 'slug':
+        print(entity.get('slug', ''))
+    elif id_style == 'sd-b32':
+        git_root = find_git_root(workflow_dir)
+        all_entities = active_and_archived_entities(workflow_dir, git_root)
+        display = compute_sd_b32_display_ids(all_entities)
+        print(display.get(stored_id, stored_id))
+    else:
+        print(stored_id)
+
+
 def resolve_mutation_entity(workflow_dir, ref):
     """Resolve a mutation target in active scope, with archived read-only diagnostics."""
     id_style = workflow_id_style(workflow_dir)
@@ -1951,7 +1996,7 @@ def main():
             f for f in args if f in (
                 '--boot', '--next', '--next-id', '--archived', '--where',
                 '--set', '--archive', '--fields', '--all-fields', '--workflow-dir',
-                '--validate', '--resolve', '--id-seed', '--id-actor',
+                '--validate', '--resolve', '--short-id', '--id-seed', '--id-actor',
             )
         ]
         if incompatible:
@@ -2022,6 +2067,12 @@ def main():
 
     try:
         resolve_ref = parse_resolve_arg(args)
+    except ValueError as e:
+        print('Error: ' + str(e), file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        short_id_ref = parse_short_id_arg(args)
     except ValueError as e:
         print('Error: ' + str(e), file=sys.stderr)
         sys.exit(1)
@@ -2136,6 +2187,35 @@ def main():
             resolve_from_root_or_exit(root_path, resolve_ref, include_archived=include_archive)
         else:
             resolve_reference_or_exit(pipeline_dir, resolve_ref, include_archived=include_archive)
+        sys.exit(0)
+
+    if short_id_ref is not None:
+        incompatible = []
+        if show_next:
+            incompatible.append('--next')
+        if show_boot:
+            incompatible.append('--boot')
+        if show_next_id:
+            incompatible.append('--next-id')
+        if include_archive:
+            incompatible.append('--archived')
+        if where_filters:
+            incompatible.append('--where')
+        if has_fields_flag:
+            incompatible.append('--fields/--all-fields')
+        if archive_slug is not None:
+            incompatible.append('--archive')
+        if set_result is not None:
+            incompatible.append('--set')
+        if show_validate:
+            incompatible.append('--validate')
+        if root_path:
+            incompatible.append('--root')
+        if incompatible:
+            print(f'Error: --short-id cannot be combined with {", ".join(incompatible)}',
+                  file=sys.stderr)
+            sys.exit(1)
+        print_short_id_or_exit(pipeline_dir, short_id_ref)
         sys.exit(0)
 
     if root_path:

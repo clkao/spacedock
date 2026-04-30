@@ -37,7 +37,7 @@ Wait for the captain's explicit approval before pushing. Do NOT infer approval f
 
 **On approval:** First, push main to ensure the remote is up to date with local state commits: `git push origin main`. Then rebase the worktree branch onto main: `git rebase main` (from the worktree directory). Then push the worktree branch: `git push origin {branch}`. If any step fails (no remote, auth error, rebase conflict), report to the captain and fall back to local merge.
 
-Before constructing the PR body, compute the short SHA for the audit link by running `git rev-parse --short HEAD` in the worktree directory. If the command exits non-zero (no commits, detached HEAD), substitute the literal string `main` into the audit-link template instead and report the fallback to the captain. Resolve the owner/repo via `gh repo view --json nameWithOwner --jq '.nameWithOwner'`.
+Before constructing the PR body, compute the short SHA for the audit link by running `git rev-parse --short HEAD` in the worktree directory. If the command exits non-zero (no commits, detached HEAD), substitute the literal string `main` into the audit-link template instead and report the fallback to the captain. Resolve the owner/repo via `gh repo view --json nameWithOwner --jq '.nameWithOwner'`. Compute the short entity-id slot for the audit link by running `status --short-id {entity ref}` from the workflow directory — this returns the shortest-unique-prefix for sd-b32 workflows and the literal stored ID for sequential and slug workflows, matching what operators see in the status table's ID column.
 
 Create a PR. Build the PR body using the template below, then run: `gh pr create --base main --head {branch} --title "{entity title}" --body "{constructed body}"`. If `gh` is not available, warn the captain and fall back to local merge.
 
@@ -65,7 +65,7 @@ Lead with motivation + end-user value; audit metadata goes at the bottom. The go
 | What changed | Implementation stage report's `[x]` DONE items | One action-verb bullet per meaningful unit. Collapse sibling bullets that describe the same thing. Drop `[x]` markers. Do NOT include "what we deliberately did NOT change" bullets — scope boundaries belong in the task body, not the PR, unless a validation stage report flagged them as risk. |
 | Evidence | Validation stage report items that assert AC verification (typically rerun-test items) | One bullet per suite with `N/N passed` format. Include any quantitative result the stage report explicitly called out (wallclock delta, size %, perf). Fallback to implementation report's self-test items if no validation stage exists. |
 | Review guidance | Explicit "focus on X" / "risk here" notes in either stage report | 1 line. **Omit if no such note exists.** |
-| Audit link | Entity id from frontmatter, path from the file's repo-relative location, short SHA from `git rev-parse --short HEAD` run in the worktree directory | Format as `[{id}](/{owner}/{repo}/blob/{short-sha}/{path})` |
+| Audit link | Short entity id from `status --short-id {entity ref}` (shortest-unique-prefix for sd-b32, literal stored ID for sequential and slug), path from the file's repo-relative location, short SHA from `git rev-parse --short HEAD` run in the worktree directory | Format as `[{short-id}](/{owner}/{repo}/blob/{short-sha}/{path})` |
 | Closes | Entity frontmatter `issue` field (exactly as written) | Prefix `Closes ` |
 | Related | Explicit "related task" / "follow-up" mentions in stage reports | 1 line. **Omit if none.** |
 
