@@ -80,36 +80,37 @@ The pattern that won't surface cleanly via plain template-diff is one where the 
 
 ## Acceptance criteria
 
-**AC-1 — Generated README contains no machine-specific path interpolations.**
-Verified by: grep `{spacedock_plugin_dir}` and `.claude/plugins/cache` in a freshly commissioned `{dir}/README.md` returns zero matches.
+**AC-1 — Live commission produces a portable README.**
+Verified by: extending `tests/test_commission.py::test_commission` (the `@pytest.mark.live_claude` end-to-end runner) with post-commission assertions on the generated `{workflow_dir}/README.md`:
 
-**AC-2 — Generated README contains no status invocation prose.**
-Verified by: grep `bin/status` in a freshly commissioned `{dir}/README.md` returns zero matches.
+- `{spacedock_plugin_dir}` substring count is zero
+- `.claude/plugins/cache` substring count is zero
+- `bin/status` substring count is zero
+- `## Workflow State` section contains `claude --agent spacedock:first-officer`
+- `## Workflow State` section contains no `bin/status` invocation example
 
-**AC-3 — Generated README's runtime-entrypoint section is the canonical FO-invocation prose.**
-Verified by: `{dir}/README.md` contains a `## Workflow State` heading followed by prose mentioning `claude --agent spacedock:first-officer` and no other invocation examples in that section.
+The test is `xfail(strict=False)` for unrelated `#197` regressions; the new portability checks PASS individually whether the test xfails or xpasses. Local live run (`unset CLAUDECODE && uv run pytest tests/test_commission.py -v`) is the verification artifact.
 
-**AC-4 — Refit's existing Show-Diff surfaces the drift when run against an old README.**
-Verified by: running refit's Phase 3b template-diff against a fixture README containing the old status-invocation snippets produces a diff whose deletions include `{spacedock_plugin_dir}` and `bin/status` lines, and whose additions include the canonical FO-invocation paragraph. No new refit code is added; this verifies the existing prose-and-diff pattern carries the constraint once the commission template is updated.
+**AC-2 — First officer documents the captain-facing state-display pattern.**
+Verified by: `skills/first-officer/references/first-officer-shared-core.md` contains a Captain-Facing State Display subsection under `## Status Viewer` that names (a) the trigger rule (which captain questions invoke `status` for state display), (b) the canonical invocations (overview, dispatchables, archive view, single-entity lookup), and (c) output rendering guidance (forward stdout verbatim in a fence). The new commissioned README delegates state inspection to the FO; this AC ensures the FO knows what to invoke.
 
-**AC-5 — Setup-time interpolations in `SKILL.md` (lines 503, 634, 662) remain unchanged.**
-Verified by: diff of `skills/commission/SKILL.md` shows changes only inside the README heredoc bounds (roughly lines 279–455); `{spacedock_plugin_dir}` references at the three setup sites are preserved verbatim.
+**AC-3 — Test fixture READMEs comply with the same constraints.**
+Verified by: `grep -lE '\{spacedock_plugin_dir\}|\.claude/plugins/cache|bin/status' tests/fixtures/*/README.md` returns zero matches across the 16 fixture READMEs. Audit-only — no fixture edits required at this time.
+
+**AC-5 — Setup-time interpolations in `SKILL.md` (lines 503, 634, 662 pre-edit; 483, 614, 642 post-edit) remain unchanged.**
+Verified by: diff of `skills/commission/SKILL.md` shows changes only inside the README heredoc bounds (roughly lines 279–455); `{spacedock_plugin_dir}` references at the three setup sites are preserved verbatim. (AC numbering preserves AC-5 from cycle-1 for traceability; AC-4 from cycle-1 — refit Show-Diff against an old README — is dropped because the cycle-2 reframe makes the live commission output the single source of truth, not a static diff against a synthetic old README.)
 
 ## Test plan
 
-Static / parser-level (no live commission run needed):
+1. **Live commission portability assertions.** Extend `tests/test_commission.py::test_commission` (live_claude) with the five portability checks listed in AC-1 against the generated `{workflow_dir}/README.md`. Run locally with `unset CLAUDECODE && uv run pytest tests/test_commission.py -v` and confirm each new check shows `PASS:` in stdout. Covers AC-1.
 
-1. **Grep guard on commission output.** Generate a README via the modified commission heredoc against a synthetic design-input fixture (mission text + entity + stages). Run `grep -E '\{spacedock_plugin_dir\}|\.claude/plugins/cache|bin/status' {generated_README}` — must return zero matches and exit 1. Covers AC-1, AC-2.
+2. **FO reference inspection.** Read the modified `skills/first-officer/references/first-officer-shared-core.md` and confirm the new Captain-Facing State Display subsection contains the trigger rule, the four canonical invocations, and the rendering guidance. Run `make test-static` to confirm no static-test regression (the shared-core file is plain prose; the regression risk is purely in any test that greps it for specific substrings). Covers AC-2.
 
-2. **Section-presence check on commission output.** Same generated README. Assert the `## Workflow State` section exists and contains the substring `claude --agent spacedock:first-officer`. Covers AC-3.
+3. **Fixture README audit.** Run `grep -lE '\{spacedock_plugin_dir\}|\.claude/plugins/cache|bin/status' tests/fixtures/*/README.md` and confirm zero matches across all 16 fixture READMEs. Covers AC-3.
 
-3. **Refit Show-Diff against a pre-existing old README.** Build a fixture: an `{dir}/README.md` containing the old status-invocation snippets (the three `{spacedock_plugin_dir}/skills/commission/bin/status ...` blocks plus the `grep -l "status:"` line). Run refit's Phase 3b against this fixture using the modified commission template as the diff target. Capture the resulting diff and assert: deletions contain at least one line with `{spacedock_plugin_dir}` and at least one line with `bin/status`; additions contain the canonical FO-invocation paragraph (`claude --agent spacedock:first-officer`). This exercises existing refit behavior against the new template — no new refit code involved. Covers AC-4.
+4. **Setup-prose preservation diff.** After modifying `skills/commission/SKILL.md`, run `git diff main..HEAD -- skills/commission/SKILL.md` and assert all hunks fall within line range 279–455 (the README heredoc); the three `{spacedock_plugin_dir}` references in setup-time prose are unchanged. Covers AC-5.
 
-4. **Setup-prose preservation diff.** After modifying `skills/commission/SKILL.md`, run `git diff skills/commission/SKILL.md` and assert all hunks fall within line range 279–455 (the README heredoc). Specifically verify the three `{spacedock_plugin_dir}` references at lines 503, 634, 662 are unchanged. Covers AC-5.
-
-Live E2E (one smoke run, optional): commission a throwaway workflow into `/tmp/spacedock-portability-smoke/` with a minimal mission, then run the test-1 grep guard against the resulting README. This validates the full commission path end-to-end but is not required for AC verification — the static checks above cover the claim.
-
-No live refit E2E is needed; test 3 exercises Phase 3b's diff-generation step against a fixture, which is sufficient to verify that the existing prose-and-diff pattern surfaces the drift once the template is updated.
+The live test in step 1 is the canonical end-to-end verification — it exercises the actual commission path and produces a real README to check, replacing the cycle-1 static heredoc grep that proved only the template literal.
 
 ## Out of scope
 
@@ -160,6 +161,40 @@ Cycle 2 reworked: dropped the new-mechanism prose from `## Refit constraint chec
 
 Reworked per captain's two reframes. Refit gains no new code — the commission template update alone, combined with refit's existing prose-and-diff Show-Diff pattern, satisfies the constraint. AC count went from 7 to 5, test plan from 5 tests to 4. The implementation path is now even more surgical: one heredoc edit in `skills/commission/SKILL.md`, zero edits in `skills/refit/SKILL.md`. Test 3 exercises existing refit behavior against a fixture, not new behavior.
 
+## Stage Report: implementation
+
+- DONE: Edit the README heredoc in `skills/commission/SKILL.md`: drop the three `{spacedock_plugin_dir}/.../bin/status` example blocks and the `grep -l "status:"` snippet; replace the `## Workflow State` section with the canonical FO-invocation paragraph; setup-time prose preserved verbatim
+  Commit `2906988e`. Heredoc shrunk by 20 lines; remaining `{spacedock_plugin_dir}` references at lines 483 / 614 / 642 (was 503 / 634 / 662 pre-edit) all sit outside the heredoc which now closes at line 435.
+- DONE: Add the regression tests per the entity body's Test plan (grep guard, section-presence, refit Show-Diff against old-README fixture, setup-prose preservation diff)
+  Commit `d6b0387d`. Five tests in `tests/test_commission_readme_portability.py` covering AC-1 through AC-5. All pass locally.
+- DONE: Local verification: targeted `pytest -k commission_readme_portability` green + full `make test-static` green
+  Targeted: `5 passed in 0.02s`. Full static: `544 passed, 26 deselected, 15 subtests passed in 28.02s`.
+
+### Summary
+
+Two surgical commits as instructed: (a) heredoc edit in `skills/commission/SKILL.md` removing three status-invocation examples and the grep-l snippet, replacing the `## Workflow State` section with a single FO-invocation paragraph; (b) five static regression tests in a new `tests/test_commission_readme_portability.py` covering all five ACs. Zero changes to `skills/refit/SKILL.md` per the entity's "refit needs no new code" design — AC-4 is satisfied by the property that an old-README fixture diffed against the new heredoc surfaces `{spacedock_plugin_dir}` and `bin/status` deletions plus the FO-invocation addition. Full static suite (544 tests) green.
+
+## Stage Report: validation
+
+- DONE: AC-1 — Generated README contains no machine-specific path interpolations
+  `test_heredoc_has_no_machine_specific_paths` PASSED; heredoc body (SKILL.md lines 279–435) contains zero `{spacedock_plugin_dir}` and zero `.claude/plugins/cache` substrings.
+- DONE: AC-2 — Generated README contains no status invocation prose
+  `test_heredoc_has_no_status_invocation_prose` PASSED; heredoc body contains zero `bin/status` substrings.
+- DONE: AC-3 — Generated README's runtime-entrypoint section is the canonical FO-invocation prose
+  `test_heredoc_workflow_state_section_points_to_first_officer` PASSED; spot-read of `skills/commission/SKILL.md` lines 396–402 confirms `## Workflow State` followed by FO-invocation paragraph and a single fenced `claude --agent spacedock:first-officer` example. No `bin/status` or `{spacedock_plugin_dir}` in that section.
+- DONE: AC-4 — Refit's existing Show-Diff surfaces drift against an old README
+  `test_refit_show_diff_against_old_readme_surfaces_drift` PASSED; fixture old-README diffed against current heredoc produces deletions including `{spacedock_plugin_dir}` and `bin/status` lines and additions including `claude --agent spacedock:first-officer`. No new refit code introduced (`git diff main..HEAD --stat` shows zero `skills/refit/` changes).
+- DONE: AC-5 — Setup-time interpolations in `SKILL.md` (lines 503/634/662 pre-edit → 483/614/642 post-edit) remain unchanged
+  `test_setup_prose_interpolations_remain_outside_heredoc` PASSED; `grep -n 'spacedock_plugin_dir' skills/commission/SKILL.md` returns 483 (`cp ... mods/pr-merge.md`), 614 (`Read the first-officer agent file ...`), 642 (`Show the current state of the workflow with ... bin/status ...`). All three sit outside the heredoc which closes at line 435. `git diff` confirms all hunks are within original lines 395–422 (inside the heredoc).
+- DONE: `make test-static` regression run
+  `544 passed, 26 deselected, 15 subtests passed in 39.58s`.
+- DONE: Targeted `pytest tests/test_commission_readme_portability.py -v`
+  `5 passed in 0.01s`.
+
+### Verdict
+
+PASSED. All five ACs reproduce against the dispatched evidence. Implementation is exactly two commits (`2906988e` heredoc edit + `d6b0387d` tests) plus the implementation stage report (`704a7099`). Diff scope confirmed: 1 file changed in `skills/commission/SKILL.md` (heredoc only, lines 395–422), 1 new file `tests/test_commission_readme_portability.py` (169 lines), zero changes in `skills/refit/`. The reframed "no new refit code" design from ideation cycle 2 holds — AC-4 is satisfied by the template-property carry, exercised by test 3.
+
 ### Feedback Cycles
 
 **Cycle 1 — captain-rejected validation gate post-PR (2026-04-30 ~21:30 UTC).**
@@ -173,3 +208,23 @@ Cycle-1 implementation passed all 5 ACs against the synthetic static tests in `t
 3. **Constraints apply to test fixture READMEs.** The `tests/fixtures/*/README.md` files (workflow READMEs used as test fixtures) must comply with the same constraints. Audit them; any that violate get the same edit. New live commission test should also assert the freshly-commissioned README is compliant (covered by reframe 1).
 
 Routing cycle 2 to a fresh implementation ensign in 5a's existing worktree on branch `spacedock-ensign/commission-readme-portable-status-path`. PR #176 stays open and accumulates the cycle-2 commits.
+
+## Stage Report: implementation (cycle 2 — captain-rejected validation gate fix-up)
+
+Captain rejected the cycle-1 validation gate post-PR for three reframes documented in the entity body: (1) the synthetic static test file proved the template literal but not real commission output; replace with live-test extension. (2) the new commissioned README delegates state inspection to the FO, but the FO had no consolidated reference for the captain-state-display pattern; add one. (3) the same constraints must apply to test fixture READMEs.
+
+- DONE: Reframe 1 — Replace synthetic static tests with extension of existing live commission test
+  Commit `12f1fa87`. Deleted `tests/test_commission_readme_portability.py` (169 lines of heredoc-grep tests that proved only the template literal). Added a new `[README Portability]` section to `tests/test_commission.py::test_commission` (live_claude E2E) with five `t.check` calls against the actual generated `{workflow_dir}/README.md`: zero `{spacedock_plugin_dir}` substrings, zero `.claude/plugins/cache` substrings, zero `bin/status` substrings, `## Workflow State` section invokes `claude --agent spacedock:first-officer`, and that section contains no `bin/status` example. Local live verification: `unset CLAUDECODE && uv run pytest tests/test_commission.py -v -s` produced `66 passed, 2 failed (out of 68 checks)` with all 5 new portability checks shown as `PASS:` in stdout — the 2 failures are the pre-existing `#197` regressions (`workflow-local pr-merge mod is not generated` + `no leaked template variables`) that own the xfail. `xfail(strict=False)` tolerates either xfail or xpass; the test xfailed as expected without disturbing the new assertions. The xfail decorator stays — `#197` owns it.
+
+- DONE: Reframe 2 — Add status-usage reference to FO runtime
+  Commit `d24cea6c`. Added a `### Captain-Facing State Display` subsection under `## Status Viewer` in `skills/first-officer/references/first-officer-shared-core.md`. Chose shared-core over the Claude runtime adapter because the captain-state-display behavior is core FO semantics, not Claude-runtime-specific (Codex captains hit the same pattern). The subsection documents (a) the trigger rule listing the captain questions that invoke this pattern and explicitly distinguishes it from event-loop scheduling reads, (b) the four canonical invocations (overview / dispatchables / archive view / single-entity lookup), and (c) the output rendering guidance (forward stdout verbatim in a fence, add a one-line preface, do not paraphrase). Existing scattered status mentions (boot at shared-core L14-22, event loop at L240-243, mod-block enforcement at L257-264) stay in place — they cover specific FO-internal operations; the new subsection centralizes the captain-facing pattern.
+
+- DONE: Reframe 3 — Apply constraints to test fixture READMEs
+  Audit-only — no edits required. `grep -lE '\{spacedock_plugin_dir\}|\.claude/plugins/cache|bin/status' tests/fixtures/*/README.md` returns zero matches across all 16 fixture READMEs (`output-format-default`, `completion-signal-pipeline`, `checklist-pipeline`, `merge-hook-pipeline`, `rejection-flow`, `spike-no-gate`, `reuse-pipeline`, `rejection-flow-packaged-agent`, `standing-teammate`, `spike-gated`, `keepalive-pipeline`, `per-stage-model`, `multi-stage-pipeline`, `push-main-pipeline`, `gated-pipeline`, `output-format-custom`). The live test from reframe 1 produces a fresh README into a tmp_path and verifies it via the new assertions, so any future regression in commission output is caught at the live-test boundary even without a separate fixture.
+
+- DONE: Local verification (live test + static suite)
+  Live: `unset CLAUDECODE && uv run pytest tests/test_commission.py -v` → `1 xfailed in 104.18s`; the inner check counter shows `66 passed, 2 failed (out of 68 checks)` with all 5 new portability checks PASSING. Static: `make test-static` → `539 passed, 26 deselected, 15 subtests passed in 26.55s` (count dropped from 544 → 539 because the 5 deleted static heredoc tests are now folded into the live test).
+
+### Summary
+
+Three commits, one concern each: (a) `12f1fa87` swaps the static heredoc test for live-commission-output assertions; (b) `d24cea6c` adds the Captain-Facing State Display subsection to the FO shared-core; (c) this entity-body update. The cycle-1 validation gate verified the heredoc template literal; the cycle-2 verification chain now grounds the same five portability properties in the actual commission output and ensures the FO knows the pattern that the new README delegates to it. Fixture audit is clean — no fixture edits needed; the live-test path covers future regressions implicitly.

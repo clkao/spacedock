@@ -36,6 +36,26 @@ The `--set` flag updates entity frontmatter fields:
 - `--set {slug} field=` clears a field
 - `--set {slug} started` or `completed` auto-fills a UTC ISO 8601 timestamp (skipped if already set)
 
+### Captain-Facing State Display
+
+The commissioned README directs captains to dispatch the first officer to inspect workflow state — it does not document `status` invocations. When the captain asks the FO for state, the FO is the runtime that knows how. Trigger and canonical invocations live here.
+
+**Trigger rule.** Invoke `status` for captain-facing state display when the captain asks any of:
+- "what's the workflow state?" / "show me the workflow" / "what's going on?"
+- "what's dispatchable?" / "what's ready?" / "what's next?"
+- "what's archived?" / "show me the done entities"
+- any other ad-hoc question that a `status` view answers (a single entity's state, entities in a stage, PR-pending entities, etc.)
+
+This is distinct from event-loop `status` calls (the `--next` / `--where` queries the FO already runs after each completion in `## Event Loop`). Those are FO-internal scheduling reads. The captain-facing pattern is render-state-for-the-captain, triggered by a captain question.
+
+**Canonical invocations.**
+- Overview: `{spacedock_plugin_dir}/skills/commission/bin/status --workflow-dir {workflow_dir}`
+- Dispatchables: `{spacedock_plugin_dir}/skills/commission/bin/status --workflow-dir {workflow_dir} --next`
+- Archive view: `{spacedock_plugin_dir}/skills/commission/bin/status --workflow-dir {workflow_dir} --archived`
+- Single-entity lookup: `{spacedock_plugin_dir}/skills/commission/bin/status --workflow-dir {workflow_dir} --resolve {ref}` then a follow-up `--where slug={resolved-slug}` if a fuller view is wanted
+
+**Output rendering guidance.** Forward the `status` stdout to the captain verbatim inside a fenced code block. The `status` viewer formats columns, ID prefixes, and stage labels deliberately for human reading; do not paraphrase rows or omit columns. Add a one-line preface naming what the captain asked for ("Workflow overview:", "Dispatchable entities:", "Archived entities:") and, when the result is empty, a short literal note ("No dispatchable entities right now.") instead of an empty fence. Do not invent fields, summarize counts the captain can read directly, or editorialize on entities — the captain reads the viewer's output, not your gloss.
+
 ## ID Styles
 
 README frontmatter `id-style` defines how new entities are addressed:

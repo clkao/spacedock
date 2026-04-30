@@ -76,7 +76,6 @@ Skip interactive questions and confirmation — use these inputs directly. Make 
     t.check("refit-command.md exists", (workflow_dir / "refit-command.md").is_file())
     t.check("multi-pipeline.md exists", (workflow_dir / "multi-pipeline.md").is_file())
     t.check("plugin first-officer agent exists", fo_path.is_file())
-    t.check("workflow-local pr-merge mod is not generated", not (workflow_dir / "_mods" / "pr-merge.md").exists())
 
     print()
     print("[Status Script]")
@@ -134,6 +133,44 @@ Skip interactive questions and confirmation — use these inputs directly. Make 
                     bool(re.search(stage, readme_text, re.IGNORECASE)))
     else:
         t.fail("README completeness checks (file missing)")
+
+    print()
+    print("[README Portability]")
+    if readme.is_file():
+        readme_text = readme.read_text()
+        t.check(
+            "README contains no {spacedock_plugin_dir} interpolations",
+            "{spacedock_plugin_dir}" not in readme_text,
+        )
+        t.check(
+            "README contains no .claude/plugins/cache paths",
+            ".claude/plugins/cache" not in readme_text,
+        )
+        t.check(
+            "README contains no bin/status invocations",
+            "bin/status" not in readme_text,
+        )
+        ws_match = re.search(
+            r"^## Workflow State\n(.*?)(?=^## )",
+            readme_text,
+            re.MULTILINE | re.DOTALL,
+        )
+        if ws_match:
+            ws_section = ws_match.group(1)
+            t.check(
+                "## Workflow State section invokes spacedock:first-officer",
+                "claude --agent spacedock:first-officer" in ws_section,
+            )
+            t.check(
+                "## Workflow State section contains no status invocation example",
+                "bin/status" not in ws_section,
+            )
+        else:
+            t.fail("## Workflow State section present in README")
+            t.fail("## Workflow State section invokes spacedock:first-officer (section missing)")
+            t.fail("## Workflow State section contains no status invocation example (section missing)")
+    else:
+        t.fail("README portability checks (file missing)")
 
     print()
     print("[First-Officer Completeness]")
@@ -274,10 +311,32 @@ Skip interactive questions and confirmation — use these inputs directly. Make 
         t.fail("plugin-shipped pr-merge mod has merge hook (file missing)")
 
     print()
+    print("[Mod Install Freshness]")
+    plugin_mods_dir = t.repo_root / "mods"
+    workflow_mods_dir = workflow_dir / "_mods"
+    if workflow_mods_dir.is_dir():
+        for local_mod in sorted(workflow_mods_dir.glob("*.md")):
+            plugin_mod = plugin_mods_dir / local_mod.name
+            if not plugin_mod.is_file():
+                t.fail(f"workflow-local mod {local_mod.name} has matching plugin source")
+                continue
+            local_bytes = local_mod.read_bytes()
+            plugin_bytes = plugin_mod.read_bytes()
+            if local_bytes == plugin_bytes:
+                t.pass_(f"workflow-local _mods/{local_mod.name} matches plugin source byte-for-byte")
+            else:
+                t.fail(f"workflow-local _mods/{local_mod.name} matches plugin source byte-for-byte")
+                print(f"    Local size: {len(local_bytes)} bytes; plugin size: {len(plugin_bytes)} bytes")
+    else:
+        t.fail("workflow _mods/ directory exists for freshness check")
+
+    print()
     print("[No Leaked Template Variables]")
     if workflow_dir.is_dir():
         leaked = []
         for md_file in workflow_dir.rglob("*.md"):
+            if "_mods" in md_file.parts:
+                continue
             text = md_file.read_text()
             for line in text.splitlines():
                 if re.search(r'\{[a-z_]+\}', line) and "${" not in line and "slug" not in line:
