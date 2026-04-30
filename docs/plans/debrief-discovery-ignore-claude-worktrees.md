@@ -123,3 +123,24 @@ Fix shape selected: post-filter the existing discovery `grep` with `grep -v '/\.
 ### Summary
 
 Implementation chose a stronger fix shape than the ideation's grep post-filter: prune `.claude/worktrees/` inside `discover_workflows` at the source, then point debrief Phase 1 Step 1 at `status --discover`. This keeps discovery semantics (prune list, frontmatter rule, symlink dedup) in a single canonical owner. The literal name `worktrees` was deliberately NOT added to `DISCOVER_IGNORE_DIRS` so a sibling `worktrees/` directory at any other location is preserved (AC3 sensitivity class). Three commits stacked above 8x's three: `bc832ccb` (status), `37ca52af` (debrief Phase 1), `455428d8` (tests).
+
+## Stage Report: validation
+
+- DONE: AC1 — `status --discover` returns no `.claude/worktrees/` paths against the fixture
+  `tests/test_status_discover_ignores_claude_worktrees.py::test_discover_drops_claude_worktrees_duplicates` PASSED; asserts primary path present and no result line contains `/.claude/worktrees/`.
+- DONE: AC2 — existing `.worktrees/` and other `DISCOVER_IGNORE_DIRS` continue to work
+  `test_discover_preserves_existing_dot_worktrees_exclusion` PASSED; asserts no `/.worktrees/` segment in any result.
+- DONE: AC3 — sibling `worktrees/` directory NOT excluded (path-anchored prune preserves user dirs)
+  `test_discover_keeps_sibling_worktrees_directory` PASSED; asserts `worktrees/docs` is present in discovery output.
+- DONE: AC4 — `discover_workflows` docstring documents `.claude/worktrees`
+  `skills/commission/bin/status` ~L1864-L1868 contains a "Path-anchored prune" docstring block naming `.claude/worktrees/` and explaining why `worktrees` is not in `DISCOVER_IGNORE_DIRS`.
+- DONE: AC5 — `skills/debrief/SKILL.md` Phase 1 Step 1 contains `status --discover` and lacks the legacy `grep -rl '^commissioned-by: spacedock@'` recipe
+  `skills/debrief/SKILL.md` L18-L22 invokes `{spacedock_plugin_dir}/skills/commission/bin/status --discover`; `grep -n` for the legacy recipe returns no matches.
+- DONE: AC6 — existing test suite continues to pass
+  `make test-static`: `554 passed, 26 deselected, 15 subtests passed in 42.28s` (matches implementation stage report's 554 baseline).
+- DONE: Spot-check prune logic and SKILL.md Phase 1 Step 1 rewrite directly
+  Prune at `skills/commission/bin/status` ~L1892 reads `if os.path.basename(dirpath) == '.claude' and 'worktrees' in dirnames: dirnames.remove('worktrees')`; SKILL.md Phase 1 Step 1 is a clean two-step recipe (run helper, branch on count).
+
+### Summary
+
+Verdict: PASSED. All six dispatch-listed ACs reproduce against the s6 commits (`bc832ccb`, `37ca52af`, `455428d8`) in this shared 8x worktree. Targeted suite reports 3/3 green; full `make test-static` reports 554/554 with no regression versus the implementation stage report's baseline.
