@@ -1,7 +1,7 @@
 ---
 id: 223
 title: "id-style change should be forward-only — accept legacy sequential IDs when README declares sd-b32"
-status: implementation
+status: validation
 source: "GitHub issue #169 (filed by CL, 2026-04-29)"
 started: 2026-04-29T21:21:01Z
 completed:
@@ -9,8 +9,8 @@ verdict:
 score: 0.6
 worktree: .worktrees/spacedock-ensign-forward-only-id-style-mixed-mode
 issue: "#169"
-pr:
-mod-block:
+pr: #170
+mod-block: merge:pr-merge
 ---
 
 ## Problem
@@ -143,3 +143,18 @@ Restructured the sd-b32 validator branch (status:701-720) to mirror the sequenti
 ### Summary
 
 PASSED. Cycle-2 implementation correctly resolves the cycle-1 rejection: the sd-b32 validator branch at status:701-720 now mirrors the sequential branch's group-then-tolerate pattern, archive-only duplicate groups are silently tolerated, and active-vs-active/active-vs-archive collisions still error. All 12 sd_b32 pytest cases pass, the full static suite is green at 538 passed, and the driving-use-case spot-check (the proof point cycle 1 surfaced as missing) confirms `id-style: sd-b32` against `docs/plans/` produces clean `VALID` exit 0 against 50 active + 175 archived entities including the four pre-existing archive-only duplicate pairs. The narrow AC tests and the real-world driving use case agree. Recommend MERGE.
+### Feedback Cycles
+
+**Cycle 1 — validation REJECTED (2026-04-29 ~21:36 UTC), driving-use-case spot-check failed.**
+
+Cycle-1 implementation passed all 6 ACs against synthetic fixtures, but the validator's bonus driving-use-case spot-check (flip `docs/plans/README.md` to `id-style: sd-b32`, run `--boot` against the real workflow) produced `duplicate sd-b32 stored id` errors against pre-existing archive-only duplicate ids (`131` × 2 — claude-team-context-limit-config-lie + codex-first-officer-reused-worker-wait-bookkeeping; `033` × 2 — graceful-degradation-without-teams + initial-prompt-frontmatter; plus other archive duplicates the validator's audit summary cited).
+
+Root cause: the new sd-b32 branch lacks the active-vs-archive scope tolerance the sequential branch has at status:684-690 (which skips duplicate groups when no active entity participates). Synthetic fixtures all created active-vs-active duplicates, never archive-vs-archive — so the gap wasn't exercised.
+
+Captain decision: drop archive-only duplicate-checking entirely (option 2 from FO triage). Both branches skip duplicate groups whose members are all in archive scope. Active-vs-archive collisions remain rejected (cross-references would silently break otherwise). Archive-only collisions are cosmetic data quirks in commit history, not runtime correctness issues.
+
+This conceptual reframe explains the existing sequential-branch tolerance: archive entries are historical record, not workflow state. The sd-b32 branch should match.
+
+Routing cycle 2 to the implementation ensign on standby (context 5.3%, reuse_ok). New AC + new test case for archive-only duplicate tolerance; small code mirror of the existing sequential-branch logic into the sd-b32 branch.
+
+**Cycle 1 resolved (2026-04-29 ~21:54 UTC).** Cycle 2 implementation landed three commits (f88f722c validator restructure, 7b1a81ff archive-only dup tolerance test, 8fcdf8c7 cycle-2 stage report). Cycle-2 validation reproduced all 7 ACs cleanly AND the driving-use-case spot-check: flipping `docs/plans/README.md` to `id-style: sd-b32` against 50 active + 175 archived entities now yields `VALID` exit 0. The four pre-existing archive-only dup pairs are tolerated as designed. Captain approved the gate. Advancing to merge.
