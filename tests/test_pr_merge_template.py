@@ -229,6 +229,52 @@ class TestAuditMetadata(unittest.TestCase):
         self.assertEqual(match.group(1), '123', "link label must be entity id 123")
 
 
+class TestPreApprovalDraftIncludesFullBody(unittest.TestCase):
+    """AC-6: pre-approval draft renders the fully constructed PR body.
+
+    The captain must see the actual prose that will land on GitHub before approving the
+    push, not just metadata. The post-approval step is then a literal `gh pr create`
+    invocation against the already-constructed body — not a separate construction pass.
+    """
+
+    def setUp(self):
+        self.text = read_pr_merge()
+        hook_start = self.text.index('## Hook: merge')
+        # The merge hook prose runs until the `### PR body template` subsection;
+        # the template subsection itself describes the body shape, not the hook flow.
+        hook_end = self.text.index('### PR body template', hook_start)
+        self.hook = self.text[hook_start:hook_end]
+        approval_idx = self.hook.index('**On approval:**')
+        self.pre_approval = self.hook[:approval_idx]
+        self.post_approval = self.hook[approval_idx:]
+
+    def test_pre_approval_constructs_pr_body_from_template(self):
+        self.assertIn('PR body', self.pre_approval)
+        self.assertIn('template', self.pre_approval)
+        self.assertIn('{constructed body}', self.pre_approval)
+
+    def test_pre_approval_names_required_body_sections(self):
+        for section in ('motivation lead', '## What changed', '## Evidence', 'audit link', 'Closes'):
+            self.assertIn(section, self.pre_approval, f"pre-approval prose must name {section!r}")
+
+    def test_post_approval_does_not_reconstruct_body(self):
+        body_construction_phrases = (
+            'Build the PR body using the template',
+            'construct the PR body',
+            'Build the full PR body',
+            'Construct the full PR body',
+        )
+        for phrase in body_construction_phrases:
+            self.assertNotIn(
+                phrase, self.post_approval,
+                f"post-approval block must not reconstruct the body ({phrase!r} found)"
+            )
+
+    def test_post_approval_gh_pr_create_uses_already_constructed_body(self):
+        self.assertIn('gh pr create', self.post_approval)
+        self.assertIn('{constructed body}', self.post_approval)
+
+
 class TestTargetLength(unittest.TestCase):
     """AC7: target length is 60–120 words exactly once."""
 
