@@ -1933,6 +1933,105 @@ class TestExtractStageSubsection:
         # "wor" is a prefix of "work" — must NOT match.
         assert mod.extract_stage_subsection(str(readme), "wor") is None
 
+    def _write_decorated(self, tmp_path, heading_line, body_line="Body."):
+        readme = tmp_path / "README.md"
+        readme.write_text(
+            "# Workflow\n"
+            "\n"
+            "## Stages\n"
+            "\n"
+            f"{heading_line}\n"
+            "\n"
+            f"{body_line}\n"
+        )
+        return readme
+
+    def test_matches_italic_wrapped_parenthetical(self, tmp_path):
+        mod = _load_claude_team_lib()
+        readme = self._write_decorated(
+            tmp_path,
+            "### `brainstorm` *(captain-interactive — no ensign)*",
+        )
+        result = mod.extract_stage_subsection(str(readme), "brainstorm")
+        assert result is not None
+        assert result.startswith("### `brainstorm` *(captain-interactive — no ensign)*")
+
+    def test_matches_underscore_italic_parenthetical(self, tmp_path):
+        mod = _load_claude_team_lib()
+        readme = self._write_decorated(tmp_path, "### work _(initial)_")
+        result = mod.extract_stage_subsection(str(readme), "work")
+        assert result is not None
+        assert result.startswith("### work _(initial)_")
+
+    def test_matches_bold_wrapped_name(self, tmp_path):
+        mod = _load_claude_team_lib()
+        readme = self._write_decorated(tmp_path, "### **work**")
+        result = mod.extract_stage_subsection(str(readme), "work")
+        assert result is not None
+        assert result.startswith("### **work**")
+
+    def test_matches_bold_annotation(self, tmp_path):
+        mod = _load_claude_team_lib()
+        readme = self._write_decorated(tmp_path, "### name **(annotation)**")
+        result = mod.extract_stage_subsection(str(readme), "name")
+        assert result is not None
+        assert result.startswith("### name **(annotation)**")
+
+    def test_matches_mixed_decoration(self, tmp_path):
+        mod = _load_claude_team_lib()
+        readme = self._write_decorated(tmp_path, "### **`name`** *(annotation)*")
+        result = mod.extract_stage_subsection(str(readme), "name")
+        assert result is not None
+        assert result.startswith("### **`name`** *(annotation)*")
+
+    def test_matches_square_bracket_annotation(self, tmp_path):
+        mod = _load_claude_team_lib()
+        readme = self._write_decorated(tmp_path, "### name [terminal]")
+        result = mod.extract_stage_subsection(str(readme), "name")
+        assert result is not None
+        assert result.startswith("### name [terminal]")
+
+    def test_matches_trailing_text_after_name(self, tmp_path):
+        mod = _load_claude_team_lib()
+        readme = self._write_decorated(tmp_path, "### work — does the thing")
+        result = mod.extract_stage_subsection(str(readme), "work")
+        assert result is not None
+        assert result.startswith("### work — does the thing")
+
+    @pytest.mark.parametrize(
+        "heading,stage",
+        [
+            ("### `brainstorm` *(captain-interactive — no ensign)*", "brainstorm"),
+            ("### `capture` *(gate — rejection bounces to `iterate`)*", "capture"),
+            ("### `pr-review` *(fresh)*", "pr-review"),
+            (
+                "### `handoff` *(gate — rejection bounces to `pr-review`, terminal)*",
+                "handoff",
+            ),
+        ],
+    )
+    def test_matches_real_world_178_examples(self, tmp_path, heading, stage):
+        mod = _load_claude_team_lib()
+        readme = self._write_decorated(tmp_path, heading)
+        result = mod.extract_stage_subsection(str(readme), stage)
+        assert result is not None
+        assert result.startswith(heading)
+
+    def test_raises_when_stage_mentioned_but_not_first_token(self, tmp_path):
+        mod = _load_claude_team_lib()
+        readme = self._write_decorated(tmp_path, "### see also: `work`")
+        with pytest.raises(ValueError) as excinfo:
+            mod.extract_stage_subsection(str(readme), "work")
+        msg = str(excinfo.value)
+        assert "line 5" in msg
+        assert "see also: `work`" in msg
+        assert "first content token" in msg
+
+    def test_returns_none_when_stage_truly_absent(self, tmp_path):
+        mod = _load_claude_team_lib()
+        readme = self._write_decorated(tmp_path, "### something-else")
+        assert mod.extract_stage_subsection(str(readme), "work") is None
+
 
 class TestBuildStageHeadingParentheticalE2E:
     """#138/#212 AC-4: end-to-end subprocess repro of the issue body."""
@@ -1997,6 +2096,64 @@ class TestBuildStageHeadingParentheticalE2E:
         assert result.returncode == 0, f"stderr: {result.stderr}"
         out = json.loads(result.stdout)
         assert "Triage complete, entity is done." in out["prompt"]
+
+    def test_build_surfaces_unparseable_heading_diagnostic(self, tmp_path):
+        wf_dir = tmp_path / "workflow"
+        wf_dir.mkdir()
+        readme = wf_dir / "README.md"
+        readme.write_text(
+            "---\n"
+            "commissioned-by: spacedock@test\n"
+            "entity-label: task\n"
+            "stages:\n"
+            "  defaults:\n"
+            "    worktree: false\n"
+            "    concurrency: 2\n"
+            "  states:\n"
+            "    - name: new\n"
+            "      initial: true\n"
+            "    - name: work\n"
+            "      terminal: true\n"
+            "---\n"
+            "\n"
+            "# Workflow\n"
+            "\n"
+            "## Stages\n"
+            "\n"
+            "### `new`\n"
+            "\n"
+            "Seed.\n"
+            "\n"
+            "### see also: `work`\n"
+            "\n"
+            "Malformed heading body.\n"
+        )
+        entity = wf_dir / "sample.md"
+        entity.write_text(
+            "---\n"
+            "id: 001\n"
+            "title: Sample entity\n"
+            "status: work\n"
+            "---\n"
+            "\n"
+            "Body.\n"
+        )
+        inp = {
+            "schema_version": 1,
+            "entity_path": str(entity),
+            "workflow_dir": str(wf_dir),
+            "stage": "work",
+            "checklist": ["x"],
+            "team_name": None,
+            "feedback_context": None,
+            "scope_notes": None,
+            "bare_mode": True,
+            "is_feedback_reflow": False,
+        }
+        result = run_build(wf_dir, inp)
+        assert result.returncode != 0
+        assert "see also: `work`" in result.stderr
+        assert "first content token" in result.stderr
 
 
 if __name__ == "__main__":
