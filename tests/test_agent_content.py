@@ -483,6 +483,53 @@ def test_assembled_claude_first_officer_dispatch_template_has_team_mode_completi
     assert re.search(r'SendMessage\(to=\\?"team-lead\\?"', text)
 
 
+def test_assembled_claude_first_officer_has_team_mode_ux_hints():
+    """Issue #157: FO must surface mode-aware UX hints to the captain.
+
+    - Without team mode (bare mode): suggest enabling team mode via the
+      CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS env var.
+    - With team mode: hint about Shift+Up/Shift+Down to switch to a running
+      ensign and chat with it directly, on the first non-gate dispatch.
+    """
+    t = TestRunner("agent content", keep_test_dir=False)
+    text = assembled_agent_content(t, "first-officer")
+
+    runtime_path = (
+        Path(__file__).resolve().parent.parent
+        / "skills" / "first-officer" / "references"
+        / "claude-first-officer-runtime.md"
+    )
+    runtime_text = runtime_path.read_text()
+
+    team_creation_section = section_text(runtime_text, "## Team Creation", (r"^## ",))
+    assert "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1" in team_creation_section, (
+        "Bare-mode startup report must include a hint suggesting "
+        "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 to enable team mode."
+    )
+    assert re.search(r"restart this session", team_creation_section, re.IGNORECASE), (
+        "Bare-mode hint must instruct the captain to restart the session "
+        "after setting the env var (env-var changes don't take effect mid-session)."
+    )
+
+    captain_section = section_text(runtime_text, "## Captain Interaction", (r"^## ",))
+    assert "Shift+Down" in captain_section and "Shift+Up" in captain_section, (
+        "Captain Interaction must document the Shift+Down/Shift+Up ensign-chat "
+        "hint for team mode."
+    )
+    assert re.search(r"once per session", captain_section, re.IGNORECASE), (
+        "Team-mode ensign-chat hint must be emitted exactly once per session "
+        "to avoid spam."
+    )
+    assert re.search(r"gate.*stage|gate:\s*true", captain_section, re.IGNORECASE), (
+        "Team-mode hint guidance must distinguish gate stages (skip) from "
+        "non-gate stages (emit on first dispatch)."
+    )
+
+    # Sanity-check that the assembled contract carries both hints.
+    assert "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1" in text
+    assert "Shift+Down" in text
+
+
 def test_assembled_claude_ensign_has_captain_communication():
     t = TestRunner("agent content", keep_test_dir=False)
     text = assembled_agent_content(t, "ensign")
