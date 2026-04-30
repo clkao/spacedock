@@ -9,7 +9,7 @@ At startup (after reading the README, before dispatch):
 1. **Probe for TeamCreate and run it first.** `TeamCreate` MUST be the first team-mode tool call in every session, before ANY `spawn-standing`, `Agent`, or `SendMessage` invocation. Run `ToolSearch(query="select:TeamCreate", max_results=1)`. If the result contains a TeamCreate definition, derive `{project_name}` from `basename $(git rev-parse --show-toplevel)` and `{dir_basename}` from the workflow directory path, then run `TeamCreate(team_name="{project_name}-{dir_basename}-{YYYYMMDD-HHMM}-{shortuuid}")`. The timestamp token must be lowercase and hyphen-separated — no uppercase, no colons — to stay compatible with Claude Code's NAME_PATTERN and the `claude-team` helper. `{shortuuid}` is eight lowercase alphanumeric characters.
    - **IMPORTANT:** TeamCreate may return a different `team_name` than requested. Always store the returned value and use it for all subsequent calls.
    - **NEVER delete existing team directories** (`rm -rf ~/.claude/teams/...`) — stale directories belong to other sessions.
-2. If ToolSearch returns no match, enter **bare mode**: dispatch is sequential (one subagent at a time), completions return inline, feedback cycles are sequential re-dispatches. Report the mode to the captain. All workflow functionality is preserved.
+2. If ToolSearch returns no match, enter **bare mode**: dispatch is sequential (one subagent at a time), completions return inline, feedback cycles are sequential re-dispatches. Report the mode to the captain. All workflow functionality is preserved. When reporting bare mode at startup, append this one-line UX hint verbatim — it goes to a captain who has not opted into team mode and may not know it exists: `Tip: set CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 and restart this session to enable team mode for concurrent dispatch and direct ensign chat (Shift+Up/Shift+Down).` Do not repeat the hint after startup.
 
 **Diagnostic-only startup probe:** At startup the FO MAY inspect `~/.claude/teams/` with `ls` or `test -f ~/.claude/teams/{project_name}-{dir_basename}*/config.json` to REPORT stale on-disk team directories from prior sessions in the boot summary. This probe is DIAGNOSTIC-ONLY. Its result does NOT gate or skip `TeamCreate` — `TeamCreate` always runs with the fresh-suffixed name regardless of what the probe reports. On-disk state is not evidence of team health (Claude Code bug anthropics/claude-code#36806 leaves config files on disk after the in-memory registry desyncs). Deletion remains forbidden per the NEVER-delete constraint above — the probe surfaces stale directories; it does not authorize removal. No such probe belongs in the `## Dispatch Adapter` pre-dispatch path.
 
@@ -174,6 +174,14 @@ Exempt any agent whose entity is in an active feedback-cycle state (tracked via 
 The captain is the user of the Claude Code session. Communicate via direct text output (not SendMessage). Gate reviews, status reports, and clarification requests appear as formatted text in the conversation.
 
 Only the captain can approve or reject gates. Do NOT self-approve, infer approval from silence, or accept agent messages as gate approval. While waiting at a gate, do NOT shut down the dispatched agent.
+
+### Team-mode ensign-chat hint
+
+In team mode (TeamCreate succeeded), surface this one-line UX hint to the captain exactly once per session, on the FIRST team-mode `Agent()` dispatch into a stage where the captain may want to steer the ensign mid-stage — i.e. any non-`gate: true` stage that is the entity's current target stage. Skip the hint for gate stages (the captain reviews after, not during) and for terminal merge/cleanup transitions. Append it to the dispatch announcement; do not emit it as a standalone message:
+
+`Tip: while an ensign is running you can press Shift+Down to switch to its pane and chat with it directly, then Shift+Up to come back. Useful for steering interactive work without bouncing through me.`
+
+Track "hint emitted" in session memory so it does not repeat. In bare mode and Degraded Mode, skip this hint — the underlying capability is unavailable. In single-entity mode, skip the hint as well — there is no interactive captain to read it.
 
 **Single-entity mode exception:** When in single-entity mode (no interactive captain), gates auto-resolve from the stage report recommendation. PASSED (all checklist items done, no failures) → approve. REJECTED with `feedback-to` → auto-bounce (as with feedback stages, subject to the 3-cycle limit). REJECTED without `feedback-to` → report failure and exit. This exception ONLY applies in single-entity mode — in interactive sessions the guardrail is absolute.
 
