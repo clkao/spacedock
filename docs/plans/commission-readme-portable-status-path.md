@@ -172,3 +172,24 @@ Reworked per captain's two reframes. Refit gains no new code — the commission 
 ### Summary
 
 Two surgical commits as instructed: (a) heredoc edit in `skills/commission/SKILL.md` removing three status-invocation examples and the grep-l snippet, replacing the `## Workflow State` section with a single FO-invocation paragraph; (b) five static regression tests in a new `tests/test_commission_readme_portability.py` covering all five ACs. Zero changes to `skills/refit/SKILL.md` per the entity's "refit needs no new code" design — AC-4 is satisfied by the property that an old-README fixture diffed against the new heredoc surfaces `{spacedock_plugin_dir}` and `bin/status` deletions plus the FO-invocation addition. Full static suite (544 tests) green.
+
+## Stage Report: validation
+
+- DONE: AC-1 — Generated README contains no machine-specific path interpolations
+  `test_heredoc_has_no_machine_specific_paths` PASSED; heredoc body (SKILL.md lines 279–435) contains zero `{spacedock_plugin_dir}` and zero `.claude/plugins/cache` substrings.
+- DONE: AC-2 — Generated README contains no status invocation prose
+  `test_heredoc_has_no_status_invocation_prose` PASSED; heredoc body contains zero `bin/status` substrings.
+- DONE: AC-3 — Generated README's runtime-entrypoint section is the canonical FO-invocation prose
+  `test_heredoc_workflow_state_section_points_to_first_officer` PASSED; spot-read of `skills/commission/SKILL.md` lines 396–402 confirms `## Workflow State` followed by FO-invocation paragraph and a single fenced `claude --agent spacedock:first-officer` example. No `bin/status` or `{spacedock_plugin_dir}` in that section.
+- DONE: AC-4 — Refit's existing Show-Diff surfaces drift against an old README
+  `test_refit_show_diff_against_old_readme_surfaces_drift` PASSED; fixture old-README diffed against current heredoc produces deletions including `{spacedock_plugin_dir}` and `bin/status` lines and additions including `claude --agent spacedock:first-officer`. No new refit code introduced (`git diff main..HEAD --stat` shows zero `skills/refit/` changes).
+- DONE: AC-5 — Setup-time interpolations in `SKILL.md` (lines 503/634/662 pre-edit → 483/614/642 post-edit) remain unchanged
+  `test_setup_prose_interpolations_remain_outside_heredoc` PASSED; `grep -n 'spacedock_plugin_dir' skills/commission/SKILL.md` returns 483 (`cp ... mods/pr-merge.md`), 614 (`Read the first-officer agent file ...`), 642 (`Show the current state of the workflow with ... bin/status ...`). All three sit outside the heredoc which closes at line 435. `git diff` confirms all hunks are within original lines 395–422 (inside the heredoc).
+- DONE: `make test-static` regression run
+  `544 passed, 26 deselected, 15 subtests passed in 39.58s`.
+- DONE: Targeted `pytest tests/test_commission_readme_portability.py -v`
+  `5 passed in 0.01s`.
+
+### Verdict
+
+PASSED. All five ACs reproduce against the dispatched evidence. Implementation is exactly two commits (`2906988e` heredoc edit + `d6b0387d` tests) plus the implementation stage report (`704a7099`). Diff scope confirmed: 1 file changed in `skills/commission/SKILL.md` (heredoc only, lines 395–422), 1 new file `tests/test_commission_readme_portability.py` (169 lines), zero changes in `skills/refit/`. The reframed "no new refit code" design from ideation cycle 2 holds — AC-4 is satisfied by the template-property carry, exercised by test 3.
