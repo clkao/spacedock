@@ -9,7 +9,7 @@ verdict:
 score: 0.6
 worktree: .worktrees/spacedock-ensign-forward-only-id-style-mixed-mode
 issue: "#169"
-pr:
+pr: #170
 mod-block: merge:pr-merge
 ---
 
