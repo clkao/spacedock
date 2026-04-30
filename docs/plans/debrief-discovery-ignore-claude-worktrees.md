@@ -187,3 +187,24 @@ Cycle-2 response (recorded in the new "Chosen approach" section above): adopted 
 ### Summary
 
 Reframed from "patch debrief's private discovery `grep`" to "delegate debrief Phase 1 to the canonical `status --discover` surface and fix the `.claude/worktrees/` exclusion inside `skills/commission/bin/status`." The fix is path-anchored (drop `worktrees` from dirnames only when the parent is `.claude`), preserving the cycle-1 precision concern (no over-exclusion of user `worktrees/`) while putting the rule at the right altitude. Six ACs cover the canonical fix, debrief delegation, and FO-boot non-regression; one new pytest file with three small functions verifies them. Declined merge with #8x — different code paths, #8x already approved, sequencing is cheap.
+
+## Stage Report: implementation (cycle 2 — gitignore-augmented DISCOVER_IGNORE_DIRS)
+
+- DONE: Reframe 3 step 1 — drop the path-anchored prune at `skills/commission/bin/status`
+  Commit `4f6535cf`. The `if os.path.basename(dirpath) == '.claude' and 'worktrees' in dirnames: dirnames.remove('worktrees')` block (added by cycle-1 commit `bc832ccb`) is removed.
+- DONE: Reframe 3 step 2 — read `{git_root}/.gitignore` once at `discover_workflows` startup, parse directory-pattern entries, augment ignore set
+  Commit `4f6535cf`. New helper `_read_gitignore_dir_basenames(root)` reads `{root}/.gitignore`, picks lines ending with `/`, strips the trailing slash, and yields basenames. `discover_workflows` unions these with the hardcoded `DISCOVER_IGNORE_DIRS` baseline once at the top of the function. The os.walk traversal then prunes against the merged set.
+- DONE: Reframe 3 step 3 — add `.claude/worktrees/` to the repo `.gitignore`
+  Commit `12131a72`. Added directly under the existing `.worktrees/` entry. This is the entry that makes the new mechanism actually exclude agent worktrees.
+- DONE: Reframe 3 step 4 — update `discover_workflows` docstring
+  Commit `4f6535cf`. The cycle-1 "Path-anchored prune" docstring section is replaced with prose describing the gitignore augmentation, including the basename-matching trade-off (a sibling directory anywhere in the tree sharing a basename with a gitignored entry is also pruned).
+- DONE: Reframe 3 step 5 — rework `tests/test_status_discover_ignores_claude_worktrees.py` for the new mechanism
+  Commit `89b36006`. Fixture seeds `.gitignore` with `.claude/worktrees/` alongside the duplicate READMEs. Three sensitivity classes verified: (1) `test_discover_drops_claude_worktrees_duplicates` — gitignore entry suppresses; (2) `test_discover_preserves_existing_dot_worktrees_exclusion` — hardcoded baseline still works; (3) `test_discover_without_gitignore_entry_returns_claude_worktrees` — negative control proves the gitignore mechanism is what prunes (without the entry, duplicates leak through). Cycle-1 sibling-`worktrees/` AC dropped per captain framing.
+- DONE: SKILL.md Phase 1 Step 1 delegation to `status --discover` (cycle-1 commit `37ca52af`) untouched
+  Confirmed by inspecting `skills/debrief/SKILL.md` Phase 1 Step 1 — still calls the helper. That delegation was the right shape and stays.
+- DONE: Local verification — targeted test green, `make test-static` green
+  `pytest tests/test_status_discover_ignores_claude_worktrees.py -v`: `3 passed in 0.11s`. `make test-static`: `542 passed, 26 deselected, 15 subtests passed in 27.17s` (the count drop from 554→542 is the deleted `test_debrief_skill.py` from #8x's cycle-2; this entity contributes no count change).
+
+### Summary
+
+Cycle-2 implementation replaces s6's path-anchored `.claude` basename prune with a gitignore-augmented `DISCOVER_IGNORE_DIRS`. The discovery mechanism no longer reinvents its own exclusion list — it consumes the repo's `.gitignore` directory entries at startup and unions them with the hardcoded baseline. The trade-off is basename matching: a sibling directory anywhere in the tree sharing a basename with a gitignored directory pattern is also pruned (over-excludes any sibling `worktrees/`). This was the cycle-1 Option A trade-off the captain accepts "for now"; AC3 (sibling `worktrees/` not excluded) is dropped. Five commits land on the shared 8x+s6 branch.

@@ -109,3 +109,16 @@ PASSED
 - DONE: Spot-checked Phase 2e prose at `skills/debrief/SKILL.md:150-178`. Three fallback paths are clearly documented and ordered (primary → legacy → degraded). The degraded-mode self-annotation is presented as a blockquote with explicit "prepend ... so the captain knows the data was reconstructed" instruction — instructive, not just a token. The diff preserves downstream consumers (the rendered "What's Next" section bullets at lines 174-177) unchanged; only the extraction mechanism shifted, as the entity body required.
 
 Recommendation: PASSED.
+
+## Stage Report: implementation (cycle 2 — drop fallbacks, drop static tests)
+
+- DONE: Reframe 1 — drop primary/legacy/degraded fallback chain in Phase 2e
+  Commit `21d070a9`. `skills/debrief/SKILL.md` Phase 2e is now a single primary path: invoke `{spacedock_plugin_dir}/skills/commission/bin/status --workflow-dir {dir}` (with `--next` and bare); if unreachable, raise to the captain. No legacy `{dir}/status` fallback. No degraded frontmatter scan. No self-describing annotation prose. Rationale recorded in commit body: silent degradation hides real problems; FO already invoked `status --boot` so an unreachable helper is an environmental signal worth surfacing.
+- DONE: Reframe 2 — delete static prose-guard test file + unreferenced fixture
+  Commit `e7bce8ac`. Removed `tests/test_debrief_skill.py` (12 prose-guard tests added by cycle-1 commit `d463331a`) and `tests/fixtures/debrief-no-local-status/` (4 files: README + 3 entities). Same critique as 5a's static-tests rejection — prose-guards prove text not behavior; AC1 was always pilot-driven per the test plan.
+- DONE: Local verification — `make test-static` green; targeted test count adjusted
+  `make test-static`: `542 passed, 26 deselected, 15 subtests passed in 27.17s` (was 554; -12 corresponds exactly to the deleted `test_debrief_skill.py` suite). No regressions.
+
+### Summary
+
+Cycle-2 implementation collapses the cycle-1 three-tier fallback into a single primary path and drops the prose-guard test surface. Phase 2e now reads as a single helper invocation with an explicit "raise on unreachable" instruction. The static `test_debrief_skill.py` and its fixture are gone. Two commits land on the shared 8x+s6 branch; PR #177 picks them up. AC2/AC3 from the cycle-1 entity are now obsolete (no fallback chain, no degraded annotation); AC1's pilot-driven verification still applies but against the simpler shape.
