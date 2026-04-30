@@ -136,6 +136,44 @@ Skip interactive questions and confirmation — use these inputs directly. Make 
         t.fail("README completeness checks (file missing)")
 
     print()
+    print("[README Portability]")
+    if readme.is_file():
+        readme_text = readme.read_text()
+        t.check(
+            "README contains no {spacedock_plugin_dir} interpolations",
+            "{spacedock_plugin_dir}" not in readme_text,
+        )
+        t.check(
+            "README contains no .claude/plugins/cache paths",
+            ".claude/plugins/cache" not in readme_text,
+        )
+        t.check(
+            "README contains no bin/status invocations",
+            "bin/status" not in readme_text,
+        )
+        ws_match = re.search(
+            r"^## Workflow State\n(.*?)(?=^## )",
+            readme_text,
+            re.MULTILINE | re.DOTALL,
+        )
+        if ws_match:
+            ws_section = ws_match.group(1)
+            t.check(
+                "## Workflow State section invokes spacedock:first-officer",
+                "claude --agent spacedock:first-officer" in ws_section,
+            )
+            t.check(
+                "## Workflow State section contains no status invocation example",
+                "bin/status" not in ws_section,
+            )
+        else:
+            t.fail("## Workflow State section present in README")
+            t.fail("## Workflow State section invokes spacedock:first-officer (section missing)")
+            t.fail("## Workflow State section contains no status invocation example (section missing)")
+    else:
+        t.fail("README portability checks (file missing)")
+
+    print()
     print("[First-Officer Completeness]")
     if fo_path.is_file():
         fo_head20 = "\n".join(fo_path.read_text().splitlines()[:20])
