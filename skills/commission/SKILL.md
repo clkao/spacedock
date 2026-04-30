@@ -395,30 +395,10 @@ Generated IDs make concurrent and offline creation safer because creators do not
 
 ## Workflow State
 
-View the workflow overview:
+Workflow state is read by the first officer at boot. To view current state, dispatch the first officer or run it directly:
 
-```bash
-{spacedock_plugin_dir}/skills/commission/bin/status --workflow-dir {dir}
 ```
-
-Output columns: ID, SLUG, STATUS, TITLE, SCORE, SOURCE.
-
-Include archived {entity_label_plural} with `--archived`:
-
-```bash
-{spacedock_plugin_dir}/skills/commission/bin/status --workflow-dir {dir} --archived
-```
-
-Find dispatchable {entity_label_plural} ready for their next stage:
-
-```bash
-{spacedock_plugin_dir}/skills/commission/bin/status --workflow-dir {dir} --next
-```
-
-Find {entity_label_plural} in a specific stage:
-
-```bash
-grep -l "status: {stage_name}" {dir}/*.md
+claude --agent spacedock:first-officer
 ```
 
 ## {Entity_label} Template
