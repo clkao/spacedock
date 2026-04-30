@@ -149,7 +149,29 @@ Categorize each issue into two buckets:
 
 ### 2e. What's next
 
-Run `{dir}/status --next` to find dispatchable entities. Also run `{dir}/status` to identify:
+Extract the dispatchable list and overall workflow view via the workflow status helper. Try the invocations in this order and use the first one that resolves:
+
+1. **Primary — plugin-shipped status viewer.** Run:
+
+   ```bash
+   {spacedock_plugin_dir}/skills/commission/bin/status --workflow-dir {dir} --next
+   {spacedock_plugin_dir}/skills/commission/bin/status --workflow-dir {dir}
+   ```
+
+   `{spacedock_plugin_dir}` is the plugin directory containing this skill file (the `skills/` parent). This is the canonical path for workflows commissioned by current Spacedock; the script lives with the plugin, not in the workflow directory.
+
+2. **Legacy fallback — local `{dir}/status`.** If the plugin-shipped viewer is unreachable AND a `{dir}/status` executable exists (workflows commissioned by spacedock<=0.10.x ship one), invoke `{dir}/status --next` and `{dir}/status` instead. Treat this as a back-compat path; modern workflows do not carry a local script.
+
+3. **Degraded fallback — frontmatter scan.** If neither status helper is reachable, reconstruct the same three views by reading entity YAML frontmatter directly from `{dir}/*.md`:
+   - **Dispatchable**: entities whose `status` matches a non-terminal stage with no blocking gate (cross-reference `{dir}/README.md` stage metadata).
+   - **Gate-blocked**: entities at a stage marked `gate: true` in README frontmatter, awaiting captain.
+   - **In-progress / orphaned**: entities with a non-empty `worktree` field.
+
+   When this degraded path is taken, prepend a one-line annotation to the rendered "What's Next" section so the captain knows the data was reconstructed without the helper:
+
+   > _(reconstructed from entity frontmatter — no status helper available)_
+
+Use whichever invocation succeeded to populate:
 - Entities blocked at gates (waiting for captain)
 - Entities with non-empty `worktree` field (in-progress or orphaned)
 - Overall workflow state
