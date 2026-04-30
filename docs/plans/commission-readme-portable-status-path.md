@@ -1,13 +1,13 @@
 ---
 id: 5aqx95ck26bvj6dafmsa4rns
 title: "Commissioned README should not reference machine-specific paths or status usage"
-status: ideation
+status: implementation
 source: "GitHub issue #172 (filed by Jared Scott / gcko, 2026-04-30)"
 started: 2026-04-30T19:47:24Z
 completed:
 verdict:
 score: 0.7
-worktree:
+worktree: .worktrees/spacedock-ensign-commission-readme-portable-status-path
 issue: "#172"
 pr:
 mod-block:
