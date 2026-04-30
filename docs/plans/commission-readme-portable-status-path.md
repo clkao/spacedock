@@ -10,7 +10,7 @@ score: 0.7
 worktree: .worktrees/spacedock-ensign-commission-readme-portable-status-path
 issue: "#172"
 pr:
-mod-block:
+mod-block: merge:pr-merge
 ---
 
 ## Problem (as filed by reporter)

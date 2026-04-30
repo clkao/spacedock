@@ -10,7 +10,7 @@ score: 0.55
 worktree: .worktrees/spacedock-ensign-debrief-tolerate-missing-workflow-status
 issue: "#174"
 pr:
-mod-block:
+mod-block: merge:pr-merge
 ---
 
 `skills/debrief/SKILL.md:22` runs the workflow-discovery grep with `--exclude-dir=.worktrees` (among others) but does NOT exclude `.claude/worktrees`. In repos where agent-created git worktrees live under `.claude/worktrees/...`, every worktree carries a copy of the workflow README, so debrief discovery returns the primary workflow + N duplicate copies. The captain has to disambiguate even when there's a single intended workflow in the primary checkout.
