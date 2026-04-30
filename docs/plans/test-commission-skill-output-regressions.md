@@ -46,3 +46,20 @@ This task tracks commission-skill output-quality regressions. #154 was strictly 
 - `test_commission` passes ≥62/63 on `make test-live-claude` across all three claude variants
 - Either commission skill stops emitting the 3 failure classes, OR tests' regexes are refined to distinguish legit `{var}` templates (gh/jq) from leaked slots
 - Root cause documented per failure class
+
+## Stage Report: implementation
+
+- DONE: `tests/test_commission.py` leak-scan excludes `_mods/*.md`. AC2 satisfied — leak scan returns empty against fresh commission output for entity-body files.
+  Commit `6c0c774a` adds `if "_mods" in md_file.parts: continue` to the rglob walk in `[No Leaked Template Variables]`. Live run: `[No Leaked Template Variables] PASS: no leaked template variables`.
+- DONE: `tests/test_commission.py` adds `[Mod Install Freshness]` byte-compare check. AC1 satisfied — workflow-local mods byte-equal plugin source.
+  Commit `6c0c774a` adds a new `[Mod Install Freshness]` section that iterates `workflow_dir/_mods/*.md` and `read_bytes()`-compares each against `repo_root/mods/{name}.md`. Live run: `PASS: workflow-local _mods/pr-merge.md matches plugin source byte-for-byte`.
+- DONE: `tests/test_commission.py:79` `workflow-local pr-merge mod is not generated` check deleted (under B-ii the file IS expected to exist).
+  Commit `6c0c774a` removes the line. Replaced semantically by the `[Mod Install Freshness]` byte-compare.
+- DONE: `skills/commission/SKILL.md` refit-command seed-entity scaffolding adjusted so LLM doesn't write `{var}` syntax in entity body prose. AC3 satisfied via AC2's scan covering refit-command.md.
+  Commit `fe99ba74` rewrites the body example from `{Description/thesis from {captain}'s seed input.}` to a parenthetical instruction telling the LLM to write plain prose and explicitly to rewrite `{var}` phrasing as natural language or backticked words. Live run: `PASS: no leaked template variables` (refit-command.md included in scan).
+- DONE: Local verification — `pytest tests/test_commission.py -v -s` produces XPASS; `make test-static` green.
+  `pytest`: `68 passed, 0 failed (out of 68 checks)` → `1 xpassed in 125.79s`. `make test-static`: `539 passed, 26 deselected, 15 subtests passed in 26.98s`.
+
+### Summary
+
+Two surgical commits land the Option B-ii + A2 fix on top of 5a's branch. Test changes cover three of four checklist items: leak scan now skips `_mods/*.md`, a new `[Mod Install Freshness]` block byte-compares each workflow-local mod against its plugin source, and the obsolete `workflow-local pr-merge mod is not generated` existence check is removed (replaced by the freshness check). The SKILL.md tweak rewrites the seed-entity body example so it no longer models brace-syntax in entity prose, which was the source of the `{current_version}`-style leaks in `refit-command.md`. Live `test_commission` run reports `68 passed, 0 failed` (XPASS, tolerated by `strict=False`); static suite stays at 539 passed.
