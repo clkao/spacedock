@@ -188,6 +188,23 @@ Cycle-2 response (recorded in the new "Chosen approach" section above): adopted 
 
 Reframed from "patch debrief's private discovery `grep`" to "delegate debrief Phase 1 to the canonical `status --discover` surface and fix the `.claude/worktrees/` exclusion inside `skills/commission/bin/status`." The fix is path-anchored (drop `worktrees` from dirnames only when the parent is `.claude`), preserving the cycle-1 precision concern (no over-exclusion of user `worktrees/`) while putting the rule at the right altitude. Six ACs cover the canonical fix, debrief delegation, and FO-boot non-regression; one new pytest file with three small functions verifies them. Declined merge with #8x — different code paths, #8x already approved, sequencing is cheap.
 
+### Feedback Cycles
+
+**Cycle 1 — captain rejected validation gate (2026-04-30 ~22:00 UTC) for three reframes (s6 portion).**
+
+The captain rejected PR #177 (combined 8x+s6) at validation. For s6 specifically: the path-anchored prune in `discover_workflows` is too special-case. Captain's framing: `.claude/worktrees/` should already be in `.gitignore`; the discovery mechanism shouldn't reinvent its own exclusion list.
+
+Captain's chosen direction (after we discussed A/B/C options): **just add the contents of `.gitignore` to `DISCOVER_IGNORE_DIRS` for now.** Pragmatic "ignore set augmented from gitignore." Trade-off accepted: basename matching for paths like `.claude/worktrees/` over-excludes any sibling `worktrees/` dir (same trade-off as cycle-1 Option A which we rejected then). Captain marks this as "for now" — willingness to revisit.
+
+Cycle-2 implementation:
+1. Drop the path-anchored prune at `skills/commission/bin/status:~1892` (`if os.path.basename(dirpath) == '.claude' ...`)
+2. Update `discover_workflows` to read `{git_root}/.gitignore`, parse directory-pattern entries, merge their basenames into `DISCOVER_IGNORE_DIRS` at startup
+3. Add `.claude/worktrees/` to the repo's `.gitignore` so the ignore set picks it up
+4. Update `tests/test_status_discover_ignores_claude_worktrees.py` to seed `.gitignore` in the fixture and verify gitignore-derived exclusions work (the existing 3 sensitivity classes still apply)
+5. Update `discover_workflows` docstring to describe the gitignore augmentation
+
+Bundles with 8x cycle-2 work (drop fallbacks, drop static tests). Same worktree, same PR.
+
 ## Stage Report: implementation (cycle 2 — gitignore-augmented DISCOVER_IGNORE_DIRS)
 
 - DONE: Reframe 3 step 1 — drop the path-anchored prune at `skills/commission/bin/status`

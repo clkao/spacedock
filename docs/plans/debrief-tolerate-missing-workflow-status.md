@@ -110,6 +110,18 @@ PASSED
 
 Recommendation: PASSED.
 
+### Feedback Cycles
+
+**Cycle 1 — captain rejected validation gate (2026-04-30 ~22:00 UTC) for two reframes (8x portion).**
+
+Captain rejected PR #177 (combined 8x+s6) at validation. For 8x specifically: drop the three-tier fallback chain AND drop the 12 static prose-guard tests.
+
+1. **Drop fallbacks.** Phase 2e becomes "use plugin-shipped status; if unreachable, raise." No legacy `{dir}/status`, no degraded frontmatter scan. Rationale: the FO already has plugin-shipped status (it ran `status --boot`); silent degradation hides real problems. Workflows commissioned by spacedock<=0.10.x with a local `status` script can run an upgrade — back-compat is not load-bearing for debrief.
+
+2. **Drop the 12 static prose-guard tests in `tests/test_debrief_skill.py`.** Same critique as 5a's static-tests rejection: prose-guards prove the skill's text but not its behavior. Delete the file. If a live debrief test surface exists/should be created, that's a separate task. The pilot-driven AC1 was already documented as not-automatable.
+
+Bundles with s6 cycle-2 work (gitignore-based discovery). Same worktree, same PR.
+
 ## Stage Report: implementation (cycle 2 — drop fallbacks, drop static tests)
 
 - DONE: Reframe 1 — drop primary/legacy/degraded fallback chain in Phase 2e

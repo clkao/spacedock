@@ -159,3 +159,17 @@ Cycle 2 reworked: dropped the new-mechanism prose from `## Refit constraint chec
 ### Summary
 
 Reworked per captain's two reframes. Refit gains no new code — the commission template update alone, combined with refit's existing prose-and-diff Show-Diff pattern, satisfies the constraint. AC count went from 7 to 5, test plan from 5 tests to 4. The implementation path is now even more surgical: one heredoc edit in `skills/commission/SKILL.md`, zero edits in `skills/refit/SKILL.md`. Test 3 exercises existing refit behavior against a fixture, not new behavior.
+
+### Feedback Cycles
+
+**Cycle 1 — captain-rejected validation gate post-PR (2026-04-30 ~21:30 UTC).**
+
+Cycle-1 implementation passed all 5 ACs against the synthetic static tests in `tests/test_commission_readme_portability.py`, but the captain rejected the gate for three reframes:
+
+1. **No new static check.** The 5-test static file (`tests/test_commission_readme_portability.py`) is the wrong surface — it greps the heredoc inside `skills/commission/SKILL.md`, which proves the template literal but not that commission actually produces a working README of the new shape. Replace with extension of the existing live commission test (`tests/test_commission.py::test_commission`, marked `@pytest.mark.live_claude`). The live test should run commission end-to-end and inspect the generated README for the constraints (no `{spacedock_plugin_dir}` / `.claude/plugins/cache` / `bin/status`; presence of `claude --agent spacedock:first-officer` in the `## Workflow State` section).
+
+2. **FO runtime needs an explicit status reference.** Encapsulating status in the FO only works if the FO knows how. The shared-core has scattered status mentions (boot, event loop, mod-block enforcement) but no consolidated reference for the canonical "captain asks state → invoke status to display" decision rule. Add a section to `skills/first-officer/references/claude-first-officer-runtime.md` (or shared core, whichever is right) that catalogs the status invocations the FO uses to render workflow state on captain request: `status --workflow-dir {dir}` for overview, `status --workflow-dir {dir} --next` for dispatchables, `status --workflow-dir {dir} --archived` for archive view. Plus the trigger rule (when does the FO invoke status to display?).
+
+3. **Constraints apply to test fixture READMEs.** The `tests/fixtures/*/README.md` files (workflow READMEs used as test fixtures) must comply with the same constraints. Audit them; any that violate get the same edit. New live commission test should also assert the freshly-commissioned README is compliant (covered by reframe 1).
+
+Routing cycle 2 to a fresh implementation ensign in 5a's existing worktree on branch `spacedock-ensign/commission-readme-portable-status-path`. PR #176 stays open and accumulates the cycle-2 commits.
