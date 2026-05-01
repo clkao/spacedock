@@ -229,8 +229,8 @@ def test_reuse_dispatch(test_project, model, effort):
             "SendMessage(" in core and "Stage definition:" in core)
     t.check("fresh: true disqualifies reuse",
             bool(re.search(r"NOT have.*fresh: true", core)))
-    t.check("worktree mode match required",
-            bool(re.search(r"same.*worktree.*mode", core, re.IGNORECASE)))
+    t.check("worktree state-routing rule documented",
+            bool(re.search(r"Reuse-routing matches the entity's worktree state", core)))
     t.check("bare mode guard present",
             bool(re.search(r"Not in bare mode", core)))
     t.check("feedback-to keep-alive in fresh dispatch path",

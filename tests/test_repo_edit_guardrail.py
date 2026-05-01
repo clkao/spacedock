@@ -74,6 +74,18 @@ def test_shared_core_stickiness_static_content(test_project):
         "worktree-side when `worktree:` is set, main-side otherwise" in rejection_section,
     )
 
+    # Surface 4: worktree-copy state list names `### Feedback Cycles` entries explicitly
+    t.check(
+        "surface-4 `including `### Feedback Cycles` entries` anchor present",
+        "including `### Feedback Cycles` entries" in fo_text,
+    )
+
+    # Surface 5: FO carve-out clarifies which view its writes apply to
+    t.check(
+        "surface-5 `applies in the appropriate view` anchor present",
+        "applies in the appropriate view" in fo_text,
+    )
+
     t.finish()
 
 
