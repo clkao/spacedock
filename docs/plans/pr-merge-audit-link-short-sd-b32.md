@@ -1,7 +1,7 @@
 ---
 id: yv8kbe048ad4y1mb0dtqe5dj
 title: "pr-merge audit link should render the short SD-B32 prefix, not the full 24-char stored ID"
-status: implementation
+status: validation
 source: "Captain observation 2026-04-30 during PR #179 — `[jaafh7xzz0va63rj6bgdgh3p](...)` is unreadable; operators and transcripts refer to the entity as `ja`. Captain direction: 'edit pr mod to use short handles for id=sd-b32'"
 started: 2026-04-30T23:35:00Z
 completed:
@@ -10,7 +10,7 @@ score: 0.6
 worktree: .worktrees/spacedock-ensign-pr-merge-audit-link-short-sd-b32
 issue:
 pr:
-mod-block:
+mod-block: merge:pr-merge
 ---
 
 ## Problem
@@ -74,6 +74,7 @@ Verified by: full static suite run.
 - Filed alongside `06z0dycs40qr0a9b35waxaxf` (refit-docs-plans-readme) which the captain ordered in the same turn.
 - The existing `[Mod Install Freshness]` byte-compare from #197 (PR #176) is the regression guard for AC-3.
 
+<<<<<<< HEAD
 ## Stage Report: implementation
 
 - DONE: Implement `status --short-id REF` in `skills/commission/bin/status`. For sd-b32 workflows return the shortest-unique-prefix across active+archived. For sequential and slug return the literal stored ID/slug. Reuse the existing prefix computation that powers the ID column.
@@ -103,6 +104,30 @@ Added `status --short-id REF` that returns the shortest-unique-prefix used by th
 ### Summary
 
 All five acceptance criteria verified with cited evidence. `make test-static` is green at 561/561; the targeted suite covering the new short-id helper and the pr-merge template is green at 32/32. Mod byte-parity confirmed by direct `diff` (exit 0) in addition to the `[Mod Install Freshness]` regression guard. Recommendation: PASSED.
+
+### Feedback Cycles
+
+**Cycle 1 — captain expanded scope at push-approval gate (2026-04-30 ~23:55 UTC).**
+
+Cycle-1 implementation + validation passed against AC-1..AC-5 (short-id flag + mod audit-link uses it + byte-parity). When the FO presented the metadata-summary push-approval draft per the existing pr-merge mod prose, the captain asked for the full PR body draft instead of just the metadata. Inspecting the mod, its `## Hook: merge` pre-approval step explicitly specifies metadata only (Title / Branch / Changes / Files); the full templated body is only constructed *after* approval, so the captain never sees the prose that lands on GitHub before push.
+
+This is a structural gap in the same mod `yv` already touches. Captain direction: **fold the fix into yv** rather than file a separate task.
+
+**Added scope (cycle 2 — folded in):**
+
+Update both pr-merge mod copies' `## Hook: merge` pre-approval step so the draft surfaced to the captain includes the **full templated PR body** (motivation lead + `## What changed` + `## Evidence` + audit link + `Closes` line if applicable), not just the metadata bullets. The existing post-approval body-construction step is removed (it was the same construction work, just done after approval) — body construction moves to the pre-approval draft and the post-approval step becomes a literal `gh pr create` with the already-constructed body. One round-trip with the captain instead of two; full visibility before push.
+
+Implementation in cycle 2 keeps everything from cycle 1 (commit `e76527c6`) and adds a small mod-prose edit + two new tests.
+
+**Added AC (folded into the existing AC list):**
+
+**AC-6 — pr-merge mod's `## Hook: merge` pre-approval draft surfaces the fully-constructed PR body (template-rendered), not just metadata.**
+Verified by: a new `tests/test_pr_merge_template.py` test asserts the `## Hook: merge` prose names "constructed PR body" / "templated body" (or equivalent) in the pre-approval step and does NOT name a separate post-approval body-construction step.
+
+**AC-7 — Both pr-merge mod copies remain byte-identical after the cycle-2 edit.**
+Verified by: `[Mod Install Freshness]` continues green after cycle-2; `diff mods/pr-merge.md docs/plans/_mods/pr-merge.md` returns empty.
+
+**Cycle 2 dispatch context:** new implementation ensign in same worktree; cycle-1 commit stays. Append cycle-2 commit on top.
 
 ## Stage Report: implementation (cycle 2)
 
