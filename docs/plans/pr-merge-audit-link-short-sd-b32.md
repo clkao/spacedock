@@ -74,7 +74,6 @@ Verified by: full static suite run.
 - Filed alongside `06z0dycs40qr0a9b35waxaxf` (refit-docs-plans-readme) which the captain ordered in the same turn.
 - The existing `[Mod Install Freshness]` byte-compare from #197 (PR #176) is the regression guard for AC-3.
 
-<<<<<<< HEAD
 ## Stage Report: implementation
 
 - DONE: Implement `status --short-id REF` in `skills/commission/bin/status`. For sd-b32 workflows return the shortest-unique-prefix across active+archived. For sequential and slug return the literal stored ID/slug. Reuse the existing prefix computation that powers the ID column.
