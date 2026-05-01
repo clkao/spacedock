@@ -368,3 +368,16 @@ Eight surfaces from `### Locked contract wording` landed verbatim across `first-
 ### Summary
 
 PASSED. 576/576 static tests green; 61 targeted-suite tests green (1 xpassed pre-existing flake, no regression); AC-5 live opus run green (316s, full rejection cycle observed). All 8 contract anchors verified verbatim at cited lines, all negative-greps clean, AC-6 control reproduces the line-adjacent same-trailing-region conflict shape that PR #176/#177 hit. The implementation matches the locked design from ideation cycle 2 — no stale-target tests, no obsolete prose, no over-specified assertions. Recommendation: PASSED, advance to PR/merge stage.
+
+## Stage Report: implementation (cycle 2 — CI fix-up)
+
+- DONE: Make `scripts/test_lib.py::create_test_project` resilient to missing global git config.
+  `scripts/test_lib.py:694-701` — passed `-c user.name=spacedock-test -c user.email=test@spacedock.local` per-command on the `git commit --allow-empty -m init` invocation; no `--global`, no workflow YAML edits.
+- DONE: Verify locally — targeted test green and `make test-static` green at 576+.
+  `tests/test_repo_edit_guardrail.py::test_shared_core_stickiness_static_content PASSED [100%]`; `make test-static`: `576 passed, 26 deselected, 15 subtests passed in 28.68s`.
+- DONE: Commit on the `21` branch with the prescribed message.
+  Committed on branch `spacedock-ensign/stage-worktree-stickiness` (SHA recorded in git log).
+
+### Summary
+
+CI regression on PR #181 static-offline (`subprocess.CalledProcessError` from `git commit --allow-empty -m init` exiting 128 with no global git user) fixed by inlining `-c user.name=…` and `-c user.email=…` on the commit subprocess in `create_test_project`. One-line scope; no test coverage change, no workflow YAML touched. Local validation: targeted test PASS, full static suite 576/576 PASS.

@@ -692,7 +692,12 @@ def create_test_project(runner: TestRunner, name: str = "test-project") -> Path:
     project_dir = runner.test_dir / name
     subprocess.run(["git", "init", str(project_dir)], capture_output=True, check=True)
     subprocess.run(
-        ["git", "commit", "--allow-empty", "-m", "init"],
+        [
+            "git",
+            "-c", "user.name=spacedock-test",
+            "-c", "user.email=test@spacedock.local",
+            "commit", "--allow-empty", "-m", "init",
+        ],
         capture_output=True, check=True, cwd=project_dir,
     )
     runner.test_project_dir = project_dir
