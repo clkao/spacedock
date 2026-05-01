@@ -9,7 +9,7 @@ verdict:
 score: 0.65
 worktree: .worktrees/spacedock-ensign-stage-worktree-stickiness
 issue: "#104"
-pr:
+pr: #181
 mod-block: merge:pr-merge
 ---
 

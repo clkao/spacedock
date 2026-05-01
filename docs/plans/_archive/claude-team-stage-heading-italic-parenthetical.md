@@ -1,16 +1,17 @@
 ---
 id: jaafh7xzz0va63rj6bgdgh3p
 title: "claude-team build stage-heading regex doesn't tolerate italic-wrapped parentheticals (residual #138 case)"
-status: validation
+status: done
 source: "GitHub issue #178 (filed by FO from captain report, 2026-04-30)"
 started: 2026-04-30T22:49:21Z
-completed:
-verdict:
+completed: 2026-05-01T07:25:18Z
+verdict: PASSED
 score: 0.55
-worktree: .worktrees/spacedock-ensign-claude-team-stage-heading-italic-parenthetical
+worktree: 
 issue: "#178"
 pr: #179
-mod-block: merge:pr-merge
+mod-block: 
+archived: 2026-05-01T07:25:19Z
 ---
 
 The `extract_stage_subsection` regex in `skills/commission/bin/claude-team` was hardened in #138 / PR #145 to tolerate trailing parentheticals like `### \`triaged\` (terminal)`. It does NOT tolerate italic-wrapped parentheticals like `### \`brainstorm\` *(captain-interactive — no ensign)*`.
