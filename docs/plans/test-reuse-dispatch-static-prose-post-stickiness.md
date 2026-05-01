@@ -60,24 +60,60 @@ Sweep all `tests/test_*.py` files marked `@pytest.mark.live_claude` or `@pytest.
 
 For each match found, decide: update to the new anchor, drop the check (if redundant with `make test-static`), or migrate to `make test-static` so future contract changes are caught at the offline tier rather than burning live-CI minutes.
 
+## Audit (2026-04-30)
+
+Ran `grep -nE "same.*worktree.*mode|keeps it on the main branch|If the stage is not marked for a worktree|Next stage has the same" tests/test_*.py`. Three matches:
+
+| Match | Marker | Assertion polarity | Action |
+|---|---|---|---|
+| `tests/test_reuse_dispatch.py:233` `re.search(r"same.*worktree.*mode", core, re.IGNORECASE)` | `@pytest.mark.live_claude` | positive (asserts deleted phrase **is present**) | **Direct fix** — repoint to surface-1 anchor `Reuse-routing matches the entity's worktree state` |
+| `tests/test_codex_runtime_stickiness.py:25` `"If the stage is not marked for a worktree, stay on the main branch" not in text` | none (offline) | negative (asserts deleted phrase **is absent**) | **Keep** — this is the AC-1b negative guard introduced by PR #181 itself |
+| `tests/test_repo_edit_guardrail.py:56` `"Next stage has the same `worktree` mode as the completed stage" not in fo_text` | none (offline; the `live_claude` marker on line 85 is on `test_repo_edit_guardrail`, not on `test_shared_core_stickiness_static_content` at line 37) | negative (asserts deleted phrase **is absent**) | **Keep** — this is PR #181's AC-1 negative guard |
+
+The audit's intent is to catch **positive greps that pin deleted prose**. Negative `not in` assertions on the deleted phrases are part of the change's offline guardrail and should remain. Only `test_reuse_dispatch.py:233` matches the failure pattern.
+
+### 8-surface offline coverage
+
+Mapping each PR-#181 surface to its offline assertion:
+
+| # | Anchor (post-stickiness) | Source | Offline test |
+|---|---|---|---|
+| 1 | `Reuse-routing matches the entity's worktree state` | `first-officer-shared-core.md:144` | `tests/test_repo_edit_guardrail.py:50` ✓ |
+| 2 | `When \`worktree:\` is set` (inside `### Feedback Cycles` FO Write Scope bullet) | `first-officer-shared-core.md:218` | `tests/test_repo_edit_guardrail.py:65` ✓ |
+| 3 | `worktree-side when \`worktree:\` is set, main-side otherwise` | `first-officer-shared-core.md:178` | `tests/test_repo_edit_guardrail.py:74` ✓ |
+| 4 | `including \`### Feedback Cycles\` entries` | `first-officer-shared-core.md:208` | **GAP** |
+| 5 | `applies in the appropriate view` | `first-officer-shared-core.md:228` | **GAP** |
+| 6 | `read from the worktree copy when \`worktree:\` is set` | `claude-first-officer-runtime.md:155` | **GAP** |
+| 7 | `Once set on first dispatch` | 3 commission templates | `tests/test_development_template.py:31` ✓ |
+| 8 | `route the dispatch into that existing worktree` | `codex-first-officer-runtime.md:84` | `tests/test_codex_runtime_stickiness.py:20` ✓ |
+
+Surfaces 4, 5, and 6 are uncovered offline. Recommended additions (literal-substring asserts on the assembled FO content for 4/5; on the claude-runtime file for 6):
+
+- Surface 4: in `tests/test_repo_edit_guardrail.py::test_shared_core_stickiness_static_content`, add `assert "including \`### Feedback Cycles\` entries" in fo_text`.
+- Surface 5: same test, add `assert "applies in the appropriate view" in fo_text`.
+- Surface 6: a new offline test (or extend `test_codex_runtime_stickiness.py` into a generic `test_runtime_stickiness_anchors.py`) asserting `"read from the worktree copy when \`worktree:\` is set" in claude_runtime_text`.
+
 ## Acceptance criteria
 
-**AC-1 — `test_reuse_dispatch.py` greps the post-stickiness anchor for reuse condition #3 and passes on opus tier.**
-Verified by: `unset CLAUDECODE && make test-e2e TEST=tests/test_reuse_dispatch.py RUNTIME=claude` with `--model opus --effort low` exits 0 with the `[Static Template Checks]` section showing `PASS: worktree state-routing rule documented` (or equivalent renamed check).
+**AC-1 — `tests/test_reuse_dispatch.py` greps the post-stickiness anchor for reuse condition #3 and passes on opus tier.**
+End-state: line 232-233 reads (or equivalent labeled check) `t.check("worktree state-routing rule documented", bool(re.search(r"Reuse-routing matches the entity's worktree state", core)))`. Verified by: `unset CLAUDECODE && make test-e2e TEST=tests/test_reuse_dispatch.py RUNTIME=claude` with `--model opus --effort low` exits 0 with the `[Static Template Checks]` section showing `PASS: worktree state-routing rule documented`. (Live verification is implementation-stage work; offline `make test-static` regression check is a precondition.)
 
-**AC-2 — No live test embeds a static prose grep against any of PR #181's 8 deleted/changed phrases.**
-Verified by: a one-shot audit script (or manual `grep -nE` across `tests/test_*.py` filtered by `live_*` markers) demonstrating zero matches against the deleted phrases listed above. Document the audit results in the entity body's stage report so a future change-watcher can re-run the same sweep.
+**AC-2 — No live-marker test in `tests/test_*.py` contains a positive grep for any of PR #181's 8 deleted phrases.**
+End-state: `grep -nE "same.*worktree.*mode|keeps it on the main branch|If the stage is not marked for a worktree|Next stage has the same \`worktree\` mode as the completed stage" tests/test_*.py` returns only matches that are (a) negative `not in` / `not bool(re.search(...))` assertions, or (b) inside offline (no `live_*` marker) tests. The audit table above captures the current state: the only positive-grep live-test match is `test_reuse_dispatch.py:233`, removed by AC-1.
 
-**AC-3 — `make test-static` enforces structural anchors for the 8 surfaces, so future deletions of these phrases are caught offline.**
-Verified by: confirming the existing `tests/test_repo_edit_guardrail.py::test_shared_core_stickiness_static_content` (PR #181, AC-1+AC-7) plus `tests/test_codex_runtime_stickiness.py` (PR #181, AC-1b) plus `tests/test_development_template.py` (PR #181, AC-3) cover the 8 surfaces. If any surface is uncovered, add a literal-substring assertion to the appropriate offline test file.
+**AC-3 — `make test-static` enforces literal-substring anchors for all 8 PR-#181 surfaces, so future deletions of these phrases are caught offline.**
+End-state: each surface in the 8-surface table above has a corresponding `assert <anchor> in <source>` in an offline test (no `live_*` marker). Surfaces 1, 2, 3, 7, 8 are already covered as cited in the table. Surfaces 4, 5, 6 must be added per the recommended assertions above. Verified by: running `make test-static` after the additions exits 0, and the three new asserts can be located via `grep -nE "including \`### Feedback Cycles\` entries|applies in the appropriate view|read from the worktree copy when" tests/test_*.py`.
 
 ## Test plan
 
-1. Direct fix: 1-line change in `tests/test_reuse_dispatch.py:232-233`. Run `make test-static` to confirm no regression. Run targeted opus live test to confirm fix.
-2. Audit: `grep -nE "same.*worktree.*mode|keeps it on the main branch|If the stage is not marked for a worktree" tests/test_*.py` (the highest-impact deleted phrases). Inspect each match.
-3. AC-3 verification: read existing static tests and confirm coverage against the 8-surface list. Add gap-fillers if needed.
+1. **AC-1 direct fix:** 1-line change in `tests/test_reuse_dispatch.py:232-233` repointing the grep to `Reuse-routing matches the entity's worktree state` and renaming the check label. Run `make test-static` to confirm no offline regression. Run `unset CLAUDECODE && make test-e2e TEST=tests/test_reuse_dispatch.py RUNTIME=claude --model opus --effort low` to confirm the fixed live check passes. Cost: ~17 min wall, ~$1.
+2. **AC-2 audit:** rerun `grep -nE "same.*worktree.*mode|keeps it on the main branch|If the stage is not marked for a worktree|Next stage has the same \`worktree\` mode as the completed stage" tests/test_*.py` after the fix. Confirm only negative assertions inside offline tests remain (per audit table). Cost: <1 min.
+3. **AC-3 gap-fill:** add three offline literal-substring asserts:
+   - Extend `tests/test_repo_edit_guardrail.py::test_shared_core_stickiness_static_content` with two new `t.check` lines for surfaces 4 and 5.
+   - Add a new offline test (or extend `tests/test_codex_runtime_stickiness.py` into a runtime-stickiness module) asserting surface 6's anchor in `claude-first-officer-runtime.md`.
+   Verify with `make test-static`. Cost: ~10 min, no live spend.
 
-Cost: low. ~30 min for direct fix + audit + verification. AC-1 needs one opus live run (~17 min wall, ~$1).
+Total estimated cost: ~30 min hands-on + one opus live run (~17 min wall, ~$1).
 
 ## Out of scope
 
@@ -89,3 +125,16 @@ Cost: low. ~30 min for direct fix + audit + verification. AC-1 needs one opus li
 - PR #181 (stage-worktree-stickiness, merged 2026-05-01) — root cause
 - failed CI run: https://github.com/clkao/spacedock/actions/runs/25206509179/job/73908102321
 - #177 opus-4-7-ensign-hallucination-scope — the broader opus-drift class (separate from this task)
+
+## Stage Report: ideation
+
+- DONE: Run the audit `grep -nE "same.*worktree.*mode|keeps it on the main branch|If the stage is not marked for a worktree|Next stage has the same" tests/test_*.py` and document each match with a recommended action.
+  3 matches; documented in the `## Audit (2026-04-30)` table. Only `tests/test_reuse_dispatch.py:233` is a positive live-test grep needing the direct fix; the other two are offline negative guards introduced by PR #181 itself and are kept.
+- DONE: Confirm the AC list as filed at intake is still correct after the audit.
+  AC-1 unchanged; AC-2 now cites the audit table directly with concrete file:line evidence; AC-3 expanded with 8-surface coverage table and named gap-fillers for surfaces 4, 5, 6.
+- DONE: Quick read of `tests/test_repo_edit_guardrail.py::test_shared_core_stickiness_static_content`, `tests/test_codex_runtime_stickiness.py`, and `tests/test_development_template.py` — confirm each surface is covered, name any gap with a recommended assertion.
+  Confirmed coverage for surfaces 1, 2, 3, 7, 8. Surfaces 4 (`including \`### Feedback Cycles\` entries`), 5 (`applies in the appropriate view`), and 6 (`read from the worktree copy when \`worktree:\` is set`) are uncovered offline; recommended literal-substring asserts named in the entity body.
+
+### Summary
+
+The audit confirmed exactly one live-test positive grep (`test_reuse_dispatch.py:233`) against PR #181's deleted phrases — the true positive that triggered this task. The other two grep hits are negative `not in` guards inside offline tests, which are part of PR #181's offline guardrail and must remain. The 8-surface offline coverage check found 3 gaps (surfaces 4, 5, 6) that AC-3 now requires the implementation worker to close with three small literal-substring asserts; no live-CI spend needed for AC-3.
