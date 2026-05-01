@@ -141,7 +141,7 @@ Otherwise dispatch fresh.
 0. Before evaluating reuse conditions, run `claude-team context-budget --name {ensign-name}`. If `reuse_ok` is `false`, skip to fresh dispatch.
 1. Not in bare mode (teams available)
 2. Next stage does NOT have `fresh: true`
-3. Next stage has the same `worktree` mode as the completed stage
+3. Reuse-routing matches the entity's worktree state — if the entity has `worktree:` set, the next stage routes into that same worktree; if `worktree:` is empty and the next stage declares `worktree: true`, dispatch fresh so the new worktree's first agent is born inside it
 4. `lookup_model(worker_name) == next_stage.effective_model` — the reused worker's stamped model must match the next stage's declared model. Skip this comparison when `next_stage.effective_model` is null (null-declared stages accept any reused worker). Members stamped with captain-session fallback values (e.g., `"opus[1m]"`) will never match the declared enum values (`sonnet`, `opus`, `haiku`) and will force a one-time fresh dispatch that re-stamps the canonical enum value.
 
 When this comparator forces fresh dispatch because of a model mismatch, the FO MUST emit a captain-visible diagnostic: `reused worker {name} model {X} does not match next stage effective_model {Y} — fresh-dispatching`. This converts silent degradation into audit. The anchor phrase `does not match next stage effective_model` must appear verbatim.
@@ -175,7 +175,7 @@ When a feedback stage recommends REJECTED:
 6. Re-run the reviewer after fixes.
 7. Re-enter the normal gate flow with the updated result.
 
-The first officer owns the `### Feedback Cycles` section and keeps it on the main branch.
+The first officer owns the `### Feedback Cycles` section. Routing follows FO Write Scope: worktree-side when `worktree:` is set, main-side otherwise.
 
 ## Merge and Cleanup
 
@@ -205,7 +205,7 @@ When an entity reaches its terminal stage:
 
 ## Worktree Ownership
 
-- For worktree-backed entities, active stage/status/report/body state lives in the worktree copy.
+- For worktree-backed entities, active stage/status/report/body state — including `### Feedback Cycles` entries — lives in the worktree copy.
 - `pr:` is mirrored on `main` for startup/discovery.
 - Ordinary active-state writes like `implementation -> validation` do not land on `main`.
 
@@ -215,7 +215,7 @@ The first officer may write these on main — nothing else:
 
 - **Entity frontmatter** — via `status --set` for all field updates
 - **New entity files** — seed task creation (frontmatter + brief description body)
-- **`### Feedback Cycles` section** — in entity bodies, tracking rejection rounds
+- **`### Feedback Cycles` section** — in entity bodies, tracking rejection rounds. **When `worktree:` is set on the entity, the FO writes the cycle entry to the worktree copy of the entity file and commits on the worktree branch (the cycle entry then rides the next stage-report commit into the merge). When `worktree:` is empty, the FO writes to main.** Under stage-worktree stickiness, `worktree:` is empty only before the first worktree-creating dispatch.
 - **Archive moves** — relocating entity files to `{workflow_dir}/_archive/`
 - **State-transition commits** — dispatch, advance, merge boundary commits
 
@@ -225,7 +225,7 @@ Everything else is off-limits for direct FO edits on main:
 - **Test files** (`tests/` directory and any test-related files)
 - **Mod files** (`_mods/`) — creating or modifying mods goes through refit or a dispatched worker. The FO *runs* mod hooks; it does not *write* them.
 - **Scaffolding files** (`skills/`, `agents/`, `references/`, `plugin.json`, workflow `README.md`) — covered by the scaffolding guardrail
-- **Entity body content** beyond `### Feedback Cycles` — stage reports, design content, implementation notes belong to dispatched workers
+- **Entity body content** beyond `### Feedback Cycles` — stage reports, design content, implementation notes belong to dispatched workers. The FO's `### Feedback Cycles` carve-out applies in the appropriate view (worktree copy when `worktree:` is set, main otherwise); other body content remains worker-only in either view.
 
 Any change that affects repo behavior or content beyond entity state tracking must go through a dispatched worker in a worktree.
 

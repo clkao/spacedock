@@ -50,7 +50,7 @@ Every artifact file has YAML frontmatter. Fields are documented below; see **Art
 | `completed` | ISO 8601 | When the artifact reached terminal status |
 | `verdict` | enum | PASSED or REJECTED — set at final stage |
 | `score` | number | Priority score, 0.0–1.0 (optional) |
-| `worktree` | string | Worktree path while a dispatched agent is active, empty otherwise |
+| `worktree` | string | Worktree path while a dispatched agent is active, empty otherwise. Once set on first dispatch into a `worktree: true` stage, it stays set across all non-terminal advancements (stickiness) and clears at terminal merge. |
 | `issue` | string | GitHub issue reference (optional cross-reference) |
 | `pr` | string | GitHub PR reference (set when a PR is created) |
 

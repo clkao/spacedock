@@ -240,6 +240,48 @@ def test_rejection_flow(test_project, model, effort):
     )
 
     print()
+    print("[AC-5 Feedback Cycles routing — worktree-side write, main untouched]")
+    # Under stage-worktree stickiness, the FO must write the `### Feedback Cycles`
+    # entry to the worktree copy of the entity file (and commit on the worktree
+    # branch) when `worktree:` is set, leaving the main copy untouched until
+    # PR/local merge.
+    worktree_path = t.test_project_dir / ".worktrees" / "spacedock-ensign-buggy-add-task"
+    workflow_rel = "rejection-pipeline/buggy-add-task.md"
+    if worktree_path.is_dir():
+        # `git -C {worktree_path} show HEAD:{workflow_rel}` must contain the new
+        # cycle marker.
+        wt_head = subprocess.run(
+            ["git", "-C", str(worktree_path), "show", f"HEAD:{workflow_rel}"],
+            capture_output=True, text=True,
+        )
+        t.check(
+            "AC-5 worktree HEAD entity carries `### Feedback Cycles` after rejection",
+            wt_head.returncode == 0 and "### Feedback Cycles" in wt_head.stdout,
+        )
+
+        # `git show main:{workflow_rel}` from the project root must NOT contain
+        # the cycle marker (until merge).
+        main_head = subprocess.run(
+            ["git", "-C", str(t.test_project_dir), "show", f"main:{workflow_rel}"],
+            capture_output=True, text=True,
+        )
+        if main_head.returncode != 0:
+            # Some test repos use `master`; fall back to HEAD on the default branch.
+            main_head = subprocess.run(
+                ["git", "-C", str(t.test_project_dir), "show", f"HEAD:{workflow_rel}"],
+                capture_output=True, text=True,
+            )
+        t.check(
+            "AC-5 main entity has no `### Feedback Cycles` section before merge",
+            main_head.returncode == 0 and "### Feedback Cycles" not in main_head.stdout,
+        )
+    else:
+        print(
+            f"  SKIP: AC-5 split assertions — worktree {worktree_path} not found "
+            f"(entity may have already merged and cleaned up)"
+        )
+
+    print()
     print("[Entity Advancement]")
     entity_archive = t.test_project_dir / "rejection-pipeline" / "_archive" / "buggy-add-task.md"
     if entity_archive.is_file():

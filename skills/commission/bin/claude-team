@@ -275,18 +275,23 @@ def cmd_build(args):
             file=sys.stderr,
         )
 
-    # Rule 4: Worktree stage has worktree path
+    # Rule 4: Stickiness — route on the entity's stamped `worktree:` field, not
+    # the next stage's declared mode. Once an entity has a worktree, every
+    # non-terminal advancement dispatches into that same worktree regardless of
+    # the stage's declared `worktree: true|false`. The stage `worktree:` field
+    # gates worktree *creation* (FO-side, before the build call), not per-stage
+    # routing. See first-officer-shared-core.md Reuse conditions #3.
     entity_fields = parse_frontmatter(entity_path)
     entity_title = entity_fields.get('title', '')
     entity_worktree = entity_fields.get('worktree', '').strip()
 
-    if stage_meta.get('worktree', False):
-        if not entity_worktree:
-            return _build_error(f"worktree stage '{stage}' but entity has no worktree path")
+    if entity_worktree:
         git_root = find_git_root(workflow_dir)
         worktree_path = os.path.join(git_root, entity_worktree)
         if not os.path.isdir(worktree_path):
             return _build_error(f"worktree path '{worktree_path}' does not exist")
+    elif stage_meta.get('worktree', False):
+        return _build_error(f"worktree stage '{stage}' but entity has no worktree path")
     else:
         worktree_path = None
 

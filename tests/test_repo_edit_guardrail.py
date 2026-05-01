@@ -20,6 +20,63 @@ from test_lib import (  # noqa: E402
 )
 
 
+_REUSE_BLOCK_RE = re.compile(
+    r"\*\*Reuse conditions\*\*.*?(?=\n\n|\Z)",
+    re.DOTALL,
+)
+_FEEDBACK_CYCLES_BULLET_RE = re.compile(
+    r"-\s+\*\*`### Feedback Cycles` section\*\*[^\n]*(?:\n[^\n-][^\n]*)*",
+    re.MULTILINE,
+)
+_FEEDBACK_REJECTION_FLOW_RE = re.compile(
+    r"##\s+Feedback Rejection Flow.*?(?=\n##\s|\Z)",
+    re.DOTALL,
+)
+
+
+def test_shared_core_stickiness_static_content(test_project):
+    """AC-1 + AC-7: assembled FO content carries the stickiness anchors and drops the prior reuse-mode phrase."""
+    t = test_project
+    install_agents(t)
+
+    fo_text = assembled_agent_content(t, "first-officer")
+
+    # AC-1: positive substring inside the **Reuse conditions** block
+    reuse_block_match = _REUSE_BLOCK_RE.search(fo_text)
+    assert reuse_block_match, "**Reuse conditions** block must be present in assembled FO content"
+    reuse_block = reuse_block_match.group(0)
+    t.check(
+        "AC-1 reuse-condition anchor present inside Reuse conditions block",
+        "Reuse-routing matches the entity's worktree state" in reuse_block,
+    )
+
+    # AC-1 negative: the prior phrase must not appear anywhere in assembled content
+    t.check(
+        "AC-1 prior reuse-mode phrase removed from assembled FO content",
+        "Next stage has the same `worktree` mode as the completed stage" not in fo_text,
+    )
+
+    # AC-7: positive substring inside the FO Write Scope `### Feedback Cycles` bullet
+    fc_bullet_match = _FEEDBACK_CYCLES_BULLET_RE.search(fo_text)
+    assert fc_bullet_match, "FO Write Scope `### Feedback Cycles` bullet must be present"
+    fc_bullet = fc_bullet_match.group(0)
+    t.check(
+        "AC-7 `When `worktree:` is set` anchor inside Feedback Cycles bullet",
+        "When `worktree:` is set" in fc_bullet,
+    )
+
+    # AC-7: positive substring inside the Feedback Rejection Flow section
+    rejection_section_match = _FEEDBACK_REJECTION_FLOW_RE.search(fo_text)
+    assert rejection_section_match, "## Feedback Rejection Flow section must be present"
+    rejection_section = rejection_section_match.group(0)
+    t.check(
+        "AC-7 `worktree-side when `worktree:` is set, main-side otherwise` anchor in Rejection Flow",
+        "worktree-side when `worktree:` is set, main-side otherwise" in rejection_section,
+    )
+
+    t.finish()
+
+
 # #154 cycle-2: Phase-1 static content checks pass after the FO Write Scope regex was relaxed to
 # match the current shared-core wording. Phase-4 live check `no mod files were directly created or
 # edited` still fails — FO writes _mods/ files directly instead of dispatching. That is runtime

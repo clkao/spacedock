@@ -81,7 +81,7 @@ Avoid these wasteful actions unless a real blocker forces them:
 For each dispatch:
 1. Resolve the logical id into a safe `worker_key`.
 2. Derive and report the human-readable worker label for the stage assignment.
-3. Create the worktree only when the stage definition says `worktree: true`. If the stage is not marked for a worktree, stay on the main branch.
+3. Create the worktree only when the entity does not yet have one stamped on its frontmatter and the stage definition says `worktree: true`. If the entity's frontmatter already has `worktree:` set, route the dispatch into that existing worktree regardless of the next stage's declared mode (stickiness — the entity remains in the same worktree until terminal merge). If the entity has no stamped worktree and the stage is not marked `worktree: true`, stay on the main branch.
 4. Spawn a generic worker with `spawn_agent(..., fork_context=false)`.
 5. In the worker prompt:
    - first instruct the worker to resolve its role definition from the logical id and read it before doing anything else

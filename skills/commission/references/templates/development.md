@@ -56,7 +56,7 @@ Every task file has YAML frontmatter. Fields are documented below; see **Task Te
 | `completed` | ISO 8601 | When the task reached terminal status |
 | `verdict` | enum | PASSED or REJECTED — set at validation |
 | `score` | number | Priority score, 0.0–1.0 (optional) |
-| `worktree` | string | Worktree path while a dispatched agent is active, empty otherwise |
+| `worktree` | string | Worktree path while a dispatched agent is active, empty otherwise. Once set on first dispatch into a `worktree: true` stage, it stays set across all non-terminal advancements (stickiness) and clears at terminal merge. |
 | `issue` | string | GitHub issue reference (e.g., `#42`) — optional cross-reference |
 | `pr` | string | GitHub PR reference (e.g., `#57`) — set when a PR is opened for this task's branch |
 | `mod-block` | string | Pending mod-declared blocking action, format `{lifecycle_point}:{mod_name}` |

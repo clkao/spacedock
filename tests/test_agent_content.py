@@ -103,7 +103,8 @@ def test_first_officer_shared_core_documents_worktree_ownership_rule():
     text = read_text("skills/first-officer/references/first-officer-shared-core.md")
 
     assert "worktree-backed entities" in text
-    assert "active stage/status/report/body state lives in the worktree copy" in text
+    assert "active stage/status/report/body state" in text
+    assert "lives in the worktree copy" in text
     assert "`pr:` is mirrored on `main`" in text
     assert "Ordinary active-state writes like `implementation -> validation` do not land on `main`" in text
 

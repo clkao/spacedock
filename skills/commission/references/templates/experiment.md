@@ -81,7 +81,7 @@ Every experiment file has YAML frontmatter. Fields are documented below; see **E
 | `completed` | ISO 8601 | When the experiment reached a terminal stage |
 | `verdict` | enum | PASSED (= accepted) or REJECTED — set when entering a terminal stage |
 | `score` | number | Priority score, 0.0–1.0 (optional) |
-| `worktree` | string | Worktree path while a dispatched agent is active, empty otherwise |
+| `worktree` | string | Worktree path while a dispatched agent is active, empty otherwise. Once set on first dispatch into a `worktree: true` stage, it stays set across all non-terminal advancements (stickiness) and clears at terminal merge. |
 | `issue` | string | GitHub issue reference (optional cross-reference) |
 | `pr` | string | GitHub PR reference (set when an experiment has a paired code change) |
 
