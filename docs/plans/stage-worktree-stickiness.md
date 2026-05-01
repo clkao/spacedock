@@ -1,7 +1,7 @@
 ---
 id: "214"
 title: "Stage worktree stickiness — once in a worktree, stay until terminal"
-status: implementation
+status: validation
 source: GitHub issue #104 (filed by CL). Originally surfaced via the spacedock-prompt/experiments workflow (template-simplification variants for FO, variant 015 tighten-hedging). Today's session (2026-04-30) extended scope: PR #176, #177, #180 each hit entity-body merge conflicts because the FO writes `### Feedback Cycles` to main while the worktree branch writes stage reports to the same trailing region — folded entity `k9s` (`feedback-cycles-on-worktree-not-main`, archived) into this task as a sub-scope on captain direction.
 started: 2026-05-01T04:47:21Z
 completed:
@@ -10,7 +10,7 @@ score: 0.65
 worktree: .worktrees/spacedock-ensign-stage-worktree-stickiness
 issue: "#104"
 pr:
-mod-block:
+mod-block: merge:pr-merge
 ---
 
 # Clarify stage worktree semantics: post-worktree stickiness
