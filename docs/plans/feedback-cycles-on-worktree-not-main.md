@@ -1,9 +1,9 @@
 ---
 id: k9s1zdwzfmdzdayjdvjjpj6f
 title: "FO-owned `### Feedback Cycles` section should live on the worktree branch, not main"
-status: backlog
+status: ideation
 source: "Captain observation 2026-04-30 during PR #176 + PR #177 rebase: feedback cycles entries on main collide with worktree-branch stage reports, producing painful merge conflicts in the entity body when the PR lands"
-started:
+started: 2026-05-01T00:48:15Z
 completed:
 verdict:
 score: 0.65
