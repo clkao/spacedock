@@ -610,3 +610,303 @@ Surgical fold-in pass of the staff reviewer's APPROVE-WITH-CHANGES findings into
 ### One-line summary for the FO at the gate
 
 Repurpose-ideation revision complete: all 5 surgical fixes (AC-R1 reframing, Outcome Map, AC-R2 sequencing, AC-R3 patch-leak guard, un-patched prompt baseline) plus 3 small fixes folded in surgically; structure of Decision/AC-R1/AC-R2/AC-R3/Implementation Notes preserved; original-experiment and staff-review sections untouched.
+
+## Repurpose Outcome
+
+**Outcome combination: AC-R1 PASS, AC-R2 FAIL, AC-R3 PASS.**
+
+Per the Decision Outcome Map (line 319) this combination is not one of the 5 enumerated rows but composes from two of them:
+- AC-R3 PASS gives a clean alternative-model workaround (FO on `--model sonnet` while ensign continues on opus-4-7 — see Caveat below).
+- AC-R2 FAIL on top of AC-R1 PASS rules out *section-richness compression* as the priming surface within team-mode dispatch shape — the section's mere presence (or some other team-mode element) is what primes opus-4-7 FO fabrication, not the per-teammate prose body.
+
+**Recommended follow-up (composed):**
+1. **Pin `--model sonnet` as the workflow default for FO** (per the Outcome Map's "AC-R3 PASS + others FAIL" row, with the 2.1.111 re-confirmation caveat at AC-R3 Capture line 401). This is the most actionable workaround and does not require changing the dispatch prompt template.
+2. **Investigate the section-presence priming token** (per the Outcome Map's "AC-R1 PASS + AC-R2 FAIL" row): since stripping the section's prose did NOT fix opus-4-7 FO behavior but the section was preserved structurally, the priming sits in the section header, the Completion Signal block, or another team-mode element — NOT in the per-teammate Patterns 1-4 prose. A future engineering task should explore: (a) drop the standing-teammates section header/footer entirely when there is one teammate, (b) compress or relocate the Completion Signal block, (c) try a non-team-mode dispatch shape on the same fixture.
+3. **Do NOT compress section emission as the engineering follow-up** (which "AC-R2 PASS + others FAIL" would have recommended): AC-R2's empirical result falsifies that path. The minimal one-line variant did not unblock the test; the failure mode shifted from milestone 4 (`SendMessage to echo-agent observed`) to milestone 5 (`ECHO: ping reply received`) — same shape as the high/xhigh effort runs documented in the original Evidence section (line 53), suggesting the failure is in the FO's reply-handling / shutdown-coordination loop, not in priming the ensign to skip the SendMessage.
+
+### Evidence per AC
+
+**AC-R1 — gate-guardrail counterfactual (PASS, after local plumbing patch).**
+
+- Initial run (un-patched test): `pytest tests/test_gate_guardrail.py --runtime claude --model opus --effort low -v` PASSED in 43.08s, but `fo-log.jsonl` showed `"model":"claude-sonnet-4-6"` × 23, ZERO `claude-opus-4-7` stamps. The pytest CLI `--model opus` was silently dropped because `tests/test_gate_guardrail.py:48-53` calls `run_first_officer_streaming(... extra_args=["--max-budget-usd", "1.00"])` with no `--model` flag and the test does not consume the `model` fixture. Same plumbing-bug class as the original AC-3 BROKEN finding (cross-ref Outcome line 92, Follow-up line 122).
+- Resolution (captain-authorized as a structural extension of AC-R2's local-patch discipline): apply a minimal local patch to `tests/test_gate_guardrail.py:52` adding `"--model", "opus"` to `extra_args`; capture the patch to `/tmp/ac-r1-test-patch.patch`; re-run; revert.
+- Re-run (patched): pytest exit code 0, 52.42s wallclock; `fo-log.jsonl` model stamps: 20 `claude-opus-4-7` occurrences, ZERO sonnet (verbatim grep below).
+- `claude --version`: `2.1.112 (Claude Code)` (drift from preferred 2.1.111 acceptable per Test Plan line 408).
+- Verbatim grep on `/tmp/ac-r1-patched-fo-log.jsonl`:
+  ```
+  $ grep -oh 'claude-opus-4-[67]' /tmp/ac-r1-patched-fo-log.jsonl | sort | uniq -c
+    20 claude-opus-4-7
+  $ grep -oh '"model":"[^"]*"' /tmp/ac-r1-patched-fo-log.jsonl | sort | uniq -c
+    19 "model":"claude-opus-4-7"
+  $ head -1 /tmp/ac-r1-patched-fo-log.jsonl | grep -oE '"model":"[^"]+"|"claude_code_version":"[^"]+"'
+  "model":"claude-opus-4-7"
+  "claude_code_version":"2.1.112"
+  ```
+- Patch revert verified: `git checkout -- tests/test_gate_guardrail.py && git diff --quiet tests/test_gate_guardrail.py` exit 0.
+- AC-R1 PATCH (paste of `/tmp/ac-r1-test-patch.patch`):
+  ```diff
+  diff --git a/tests/test_gate_guardrail.py b/tests/test_gate_guardrail.py
+  index 9342e834..32cc0053 100755
+  --- a/tests/test_gate_guardrail.py
+  +++ b/tests/test_gate_guardrail.py
+  @@ -49,7 +49,7 @@ def test_gate_guardrail(test_project, runtime):
+               t,
+               "Process all tasks through the workflow.",
+               agent_id=agent_id,
+  -            extra_args=["--max-budget-usd", "1.00"],
+  +            extra_args=["--model", "opus", "--max-budget-usd", "1.00"],
+           ) as w:
+               w.expect(
+                   lambda e: entry_contains_text(
+  ```
+- Interpretation per AC-R1 Pass line 349: PASS implicates "some aspect of team-mode dispatch shape" as the priming surface, narrower than "all prompts" but broader than "the section alone." The gated-pipeline fixture has no `agents:` block (no team mode, no standing-teammates section, no Completion Signal block) and FO+ensign on opus-4-7 + low effort completed cleanly. AC-R2 narrows further within team-mode shape.
+
+**AC-R2 — section-stripped patch on standing-teammate test (FAIL).**
+
+- Verify (un-patched at start): `git diff --quiet skills/commission/bin/claude-team` exit 0.
+- Patch applied (replaces loop body at `claude-team:287-301`, drops footer 302-307); patch captured to `/tmp/ac-r2.patch` AFTER apply BEFORE run.
+- Run: `pytest tests/test_standing_teammate_spawn.py::test_standing_teammate_spawns_and_roundtrips --runtime claude --model opus --effort low -v` with `KEEP_TEST_DIR=1`. Exit code 1 (pytest FAILED) in 135.51s wallclock.
+- Failure: `test_lib.StepFailure: FO subprocess exited (code=1) before step 'ECHO: ping reply received' matched.` FO subprocess exit code 1 (`error_max_budget_usd: Reached maximum budget ($2)`).
+- Milestone timing (verbatim from captured stdout):
+  - `[OK] claude-team spawn-standing invoked` (milestone 1, ≤60s budget)
+  - `[OK] echo-agent Agent() dispatched` (milestone 2, ≤120s budget)
+  - `[OK] ensign dispatch prompt includes standing-teammates section with echo-agent` (milestone 3, prompt assertion)
+  - `[OK] SendMessage to echo-agent observed` (milestone 4, ≤240s budget — passed!)
+  - **FAIL at milestone 5** `ECHO: ping reply received` (≤240s budget) — never landed in parent fo-log before FO subprocess exited from budget exhaustion.
+- `fo-log.jsonl` model stamps: 48 `claude-opus-4-7`, 2 `sonnet`. FO + ensign both ran on opus-4-7 as required.
+- Verbatim grep on `/tmp/ac-r2-fo-log.jsonl`:
+  ```
+  $ grep -oh 'claude-opus-4-[67]' /tmp/ac-r2-fo-log.jsonl | sort | uniq -c
+    48 claude-opus-4-7
+  $ grep -oh '"model":"[^"]*"' /tmp/ac-r2-fo-log.jsonl | sort | uniq -c
+    44 "model":"claude-opus-4-7"
+     2 "model":"sonnet"
+  ```
+- AC-R2 PATCH (paste of `/tmp/ac-r2.patch`):
+  ```diff
+  diff --git a/skills/commission/bin/claude-team b/skills/commission/bin/claude-team
+  index faffbcc6..88e71d3c 100755
+  --- a/skills/commission/bin/claude-team
+  +++ b/skills/commission/bin/claude-team
+  @@ -285,26 +285,7 @@ def cmd_build(args):
+               '',
+           ]
+           for name, description, mod_path in standing_teammates:
+  -            desc = description or 'standing teammate'
+  -            usage_body = _parse_routing_usage_body(mod_path) if mod_path else None
+  -            if usage_body:
+  -                lines.append(f'- **{name}** ({desc})')
+  -                for body_line in usage_body.split('\n'):
+  -                    if body_line:
+  -                        lines.append(f'  {body_line}')
+  -                    else:
+  -                        lines.append('')
+  -            else:
+  -                lines.append(
+  -                    f'- **{name}** ({desc}): SendMessage with the relevant input '
+  -                    f'shape; reply format per the mod.'
+  -                )
+  -        lines.append('')
+  -        lines.append(
+  -            'Full routing contract: see '
+  -            '`skills/first-officer/references/first-officer-shared-core.md` '
+  -            '`## Standing Teammates`.'
+  -        )
+  +            lines.append(f'- {name} is available; SendMessage to it.')
+           prompt_parts.append('\n'.join(lines))
+  
+       # 10. Completion signal (conditional, team mode only)
+  ```
+- PATCHED dispatch prompt's standing-teammates section (extracted from AC-R2's `fo-log.jsonl` Agent tool_use input for `spacedock-ensign-001-echo-roundtrip-work`):
+  ```
+  ### Standing teammates available in your team
+
+  The FO has spawned these standing teammates; you MAY route to them via SendMessage. Best-effort, non-blocking, 2-minute timeout; proceed with un-polished/un-reviewed content if no reply.
+
+  - echo-agent is available; SendMessage to it.
+  ```
+- Patch revert verified after AC-R2 completion: `git checkout -- skills/commission/bin/claude-team && git diff --quiet -- tests/test_gate_guardrail.py skills/commission/bin/claude-team` exit 0 (BOTH files clean per the extended pre-step the team-lead authorized for AC-R2/R3).
+- Interpretation per AC-R2 Fail line 374: section presence (not its richness) is the priming, OR the priming sits elsewhere in the prompt entirely (Completion Signal block, header, etc.). Engineering follow-up needs to investigate further before settling on a fix. Notably the failure mode SHIFTED — milestone 4 (the canonical original-AC-1 hallucination point) PASSED with the patched section, but milestone 5 (which fails on high/xhigh effort per Evidence line 53) FAILED. The reply-handling / shutdown-coordination loop is the surface that broke.
+
+**AC-R3 — different ensign model: sonnet (PASS, with caveat that ensign sub-agent still ran on opus-4-7).**
+
+- HARD pre-step (per AC-R3 Verify line 384): `git diff --quiet -- tests/test_gate_guardrail.py skills/commission/bin/claude-team` exit 0 — both files clean before AC-R3 ran. (Extended check per team-lead's instruction since AC-R1 also patched a file.)
+- Run: `pytest tests/test_standing_teammate_spawn.py::test_standing_teammate_spawns_and_roundtrips --runtime claude --model sonnet --effort low -v` with `KEEP_TEST_DIR=1`. Exit code 0 (pytest PASSED) in 158.30s wallclock. All 5 milestones fired.
+- `fo-log.jsonl` model stamps: 74 `claude-sonnet-4-6` (FO process), 7 `claude-opus-4-7` (only inside teammate-result `modelUsage` rollups; the ensign Agent() dispatched WITHOUT explicit `model` field which defaulted to opus-4-7 in the spawning context).
+- Verbatim grep on `/tmp/ac-r3-fo-log.jsonl`:
+  ```
+  $ grep -oh 'claude-opus-4-[67]' /tmp/ac-r3-fo-log.jsonl | sort | uniq -c
+     7 claude-opus-4-7
+  $ grep -oh '"model":"[^"]*"' /tmp/ac-r3-fo-log.jsonl | sort | uniq -c
+     1 "model":"claude-opus-4-7"
+    74 "model":"claude-sonnet-4-6"
+     3 "model":"sonnet"
+  $ head -1 /tmp/ac-r3-fo-log.jsonl | grep -oE '"model":"[^"]+"|"claude_code_version":"[^"]+"'
+  "model":"claude-sonnet-4-6"
+  "claude_code_version":"2.1.112"
+  ```
+- Per-session model breakdown (Python json walk over `fo-log.jsonl`): the parent FO session `9838534a-5c44-4c36-9254-fcbfcabcbb00` only emitted `claude-sonnet-4-6` assistant messages. The opus-4-7 stamps appear only in `tool_use_result.prompt.model` and `result.modelUsage` rollups for spawned teammates.
+- Agent dispatch model field inspection (Python json walk for `tool_use.name == "Agent"`):
+  - `echo-agent` Agent() dispatch: `name=echo-agent model=sonnet` (FO propagated `--model sonnet` to standing teammate)
+  - Ensign Agent() dispatch: `name=spacedock-ensign-001-echo-roundtrip-work model=(none)` — no explicit model on Agent input, defaults to opus-4-7 per the spawning context (ensign agent type default).
+- **CAVEAT — AC-R3 did NOT actually test sonnet on the ensign hallucination surface.** AC-R3's hypothesis (Decision line 379) was "this is opus-4-7-specific calibration; sonnet does not exhibit the pattern." The PASS shows that **when the FO is on sonnet** (and dispatches an opus-4-7 ensign that emits SendMessage and waits for ECHO reply), the test passes. The ensign itself was still opus-4-7. AC-R2 ran the same test with FO on opus-4-7 (and same default opus-4-7 ensign) and FAILED at the ECHO-reply milestone. This is strong evidence the regression is **FO-side, not ensign-side**: when the FO process is opus-4-7, the reply from the (opus-4-7) ensign-via-echo-agent fails to land in the parent fo-log within budget; when the FO is sonnet, the same reply (from the same opus-4-7 ensign) lands cleanly. This is consistent with the original Evidence line 35 ("FO itself on opus-4-7: may skip status --set calls...").
+- 2.1.112 caveat per AC-R3 Capture line 401: this run was on Claude Code `2.1.112`. Sonnet behavior on 2.1.112 was not pre-validated in this entity. A PASS should be re-confirmed on 2.1.111 before pinning `--model sonnet` as a default-shift recommendation.
+- Interpretation per AC-R3 Pass line 399, with the FO/ensign-model caveat: `--model sonnet` for the FO is a viable workaround independent of any prompt-shape fix. The captain can pin `--model sonnet` in workflow defaults (FO-stage default) as a safer default than opus until upstream is fixed; the regression is not "opus-4-7-specific calibration" in the model sense (since the ensign was still opus-4-7), it is "opus-4-7 FO process specifically can't keep teammate replies in its parent stream within budget."
+
+### Side-by-side: un-patched vs patched dispatch prompt (standing-teammates section)
+
+Both excerpts extracted from the actual `Agent` tool_use input the FO sent to the spawned ensign (`spacedock-ensign-001-echo-roundtrip-work`).
+
+**Un-patched (AC-R3 baseline, current main `claude-team` source):**
+```
+### Standing teammates available in your team
+
+The FO has spawned these standing teammates; you MAY route to them via SendMessage. Best-effort, non-blocking, 2-minute timeout; proceed with un-polished/un-reviewed content if no reply.
+
+- **echo-agent** (Trivial standing teammate used by the standing-teammate live E2E): SendMessage with the relevant input shape; reply format per the mod.
+
+Full routing contract: see `skills/first-officer/references/first-officer-shared-core.md` `## Standing Teammates`.
+```
+
+**Patched (AC-R2, after applying the minimal one-line variant to `claude-team`):**
+```
+### Standing teammates available in your team
+
+The FO has spawned these standing teammates; you MAY route to them via SendMessage. Best-effort, non-blocking, 2-minute timeout; proceed with un-polished/un-reviewed content if no reply.
+
+- echo-agent is available; SendMessage to it.
+```
+
+Diff: the patched variant drops the per-teammate parenthetical description, the `**bold**` markup, the per-teammate routing-usage body, and the trailing "Full routing contract" pointer line. Section header and intro paragraph preserved. With the standing-teammate count = 1, the visible bullet shrank from a markdown-formatted line with description and routing-usage hint to a single bare-prose line.
+
+### Patches reverted before subsequent ACs ran (consolidated)
+
+Per the team-lead's extended pre-step authorization, the AC-R2/R3 hard pre-step was extended to check BOTH files. Verified clean:
+
+- AC-R1 → AC-R2 transition: `git diff --quiet tests/test_gate_guardrail.py` exit 0 (AC-R1 patch reverted).
+- AC-R2 → AC-R3 transition: `git diff --quiet -- tests/test_gate_guardrail.py skills/commission/bin/claude-team` exit 0 (BOTH patches reverted).
+
+Both patches were experimental-only local workarounds; neither is committed on the branch and neither will be pushed.
+
+### Follow-up needed
+
+**(a) Persistent plumbing fix for `tests/test_gate_guardrail.py` — discovered during AC-R1.**
+
+- **Proposed task title**: "Wire pytest's `--model` fixture into `tests/test_gate_guardrail.py`'s `extra_args` (analogue of #179's fix for `test_standing_teammate_spawn.py`)."
+- **Source**: 2026-04-17 #177 AC-R1 implementation — pytest's `--model opus` was silently dropped because `tests/test_gate_guardrail.py:48-53` does not consume the `model` fixture. Local patch (`/tmp/ac-r1-test-patch.patch`, captured above) is a temporary experimental workaround; the persistent fix is to wire the existing pytest `--model` fixture from `tests/conftest.py:106-107` into the test's `extra_args` list, mirroring #179's pattern for `test_standing_teammate_spawn.py:72`.
+- **One-line spec**: At `tests/test_gate_guardrail.py:30`, add `model` to the function signature; at line 52 replace `extra_args=["--max-budget-usd", "1.00"]` with `extra_args=["--model", model, "--max-budget-usd", "1.00"]`. Add `model` fixture import at top if needed.
+- **Why now**: leaving this unfixed means future AC-R1-style experiments on this test silently run on the wrong model (sonnet by default). The plumbing-bug class is exactly what motivated #180; #179's fix landed for the standing-teammate test but missed the gate-guardrail test.
+
+**(b) Layer 3 FO-side post-completion verification — for the AC-R2 FAIL outcome.**
+
+- **Proposed task title**: "Investigate FO reply-handling / shutdown-coordination loop on opus-4-7 — why teammate replies don't land in parent fo-log within budget."
+- **Source**: 2026-04-17 #177 AC-R2 — patching the standing-teammates section to one-line-per-teammate did NOT fix opus-4-7 FO behavior. The failure mode SHIFTED from milestone 4 (`SendMessage to echo-agent observed`, the canonical original-AC-1 hallucination point) — which now PASSED — to milestone 5 (`ECHO: ping reply received`), which fails the same way it does on high/xhigh effort runs documented in the original Evidence section (line 53). Combined with AC-R3 PASS (FO on sonnet → reply lands), this strongly suggests the regression is **FO-side reply-folding**, not ensign-side hallucination. The Layer 2 prompt-shape mitigation hypothesis is falsified for section-richness; either drop a different team-mode element (Completion Signal block, section header) OR move to Layer 3 (FO post-completion verification, e.g., the FO grep-checks the stream for the reply pattern before declaring teammate-routing complete).
+- **One-line spec**: scoping needs ideation; either: (i) downstream prompt-shape experiments (drop section header entirely when teammate count = 1, drop Completion Signal block, etc.), or (ii) FO-side stream-folding investigation (why opus-4-7 FO doesn't see teammate replies in its parent stream that sonnet FO sees on the same fixture).
+
+**(c) Sonnet-default workflow pin — for the AC-R3 PASS outcome (with 2.1.112 caveat).**
+
+- **Proposed task title**: "Pin `--model sonnet` as workflow FO default in spacedock workflow scaffolding (with 2.1.111 re-confirmation gate)."
+- **Source**: 2026-04-17 #177 AC-R3 — FO on sonnet drove the standing-teammate test to terminal completion in 158s while FO on opus-4-7 failed at milestone 5 within 135s. The ensign sub-agent ran on opus-4-7 in both cases; only the FO model varied. This is a clean workaround independent of any prompt-shape fix.
+- **Pre-condition**: re-run AC-R3 on Claude Code 2.1.111 to confirm the PASS does not depend on 2.1.112 behavior (per AC-R3 Capture caveat at line 401). Sonnet behavior on 2.1.112 was not pre-validated in this entity.
+- **One-line spec**: change the `stages.defaults.model` for FO-driving stages in the spacedock workflow templates from default-opus to `sonnet`; document the regression context with a cross-reference to #177; add a TODO to re-evaluate when the upstream opus-4-7 FO regression is fixed.
+
+FO will file these three follow-ups after captain triage; this implementation does not file them.
+
+## Stage Report (repurpose implementation)
+
+### Summary
+
+Three Layer 2 mitigation experiments executed locally on Claude Code 2.1.112 + opus-4-7 / sonnet. Outcome: **AC-R1 PASS, AC-R2 FAIL, AC-R3 PASS** (with caveat that AC-R3 ensign sub-agent still ran on opus-4-7 — only the FO process varied). AC-R1 required a captain-authorized minimal local patch on `tests/test_gate_guardrail.py:52` to wire `--model opus` (same plumbing-bug class as the original AC-3 BROKEN finding). AC-R2 falsified the section-richness compression hypothesis; the failure shifted from milestone 4 (canonical hallucination point) to milestone 5 (reply-folding), matching the high/xhigh-effort failure mode in the original Evidence line 53. AC-R3 passed cleanly with FO on sonnet, providing a viable workaround. Three follow-ups described in `### Follow-up needed`: (a) persistent plumbing fix for gate-guardrail's `extra_args`, (b) Layer 3 / different-element prompt-shape investigation (since Layer 2 section compression is falsified), (c) sonnet workflow-default pin (with 2.1.111 re-confirmation gate).
+
+### Checklist
+
+1. **Read entity body, focus on Repurpose section (line 296+).** DONE. Read the full file (612 lines after the worktree was reset to main HEAD `59a0db41`); focused on Decision (306-318), Outcome Map (319-331), AC-R1/R2/R3 (333-401), Test Plan (403-410), Implementation Notes (412-461). Also confirmed the Repurpose Revision (570-608) was already folded in.
+
+2. **Verify worktree HEAD vs main + capture HEAD SHA.** DONE — but with an upfront BLOCKER. The worktree at dispatch start was at the OLD validation tip `09b96f3d` (file 224 lines, no Repurpose section). The dispatch claimed the worktree was rebased onto current main, but `git log --oneline HEAD..main` showed 11 commits not in worktree HEAD including the entire Repurpose ideation chain (`bafd84c8`/`3659b07f`/`79dab33a`) and the advance commit `59a0db41`. Surfaced to team-lead before any other action; team-lead authorized `git reset --hard main`. Post-reset: `git rev-parse HEAD` = `59a0db413d91f9cb0a2121ee56f4dbd9ab2c8ef6` (matches main HEAD). `wc -l docs/plans/opus-4-7-ensign-hallucination-scope.md` = 612. `grep -n '^## Repurpose'` = lines 296 + 570.
+
+3. **Capture local Claude Code version.** DONE. `claude --version` = `2.1.112 (Claude Code)`. Drift from preferred 2.1.111 acknowledged per Test Plan line 408 + AC-R3 caveat at line 401 (which surfaces in Follow-up (c) above as the 2.1.111 re-confirmation gate).
+
+4. **AC-R1 — Counterfactual on a non-routing test.** DONE — but with a SECOND BLOCKER. Initial run with `--runtime claude --model opus --effort low` PASSED (43.08s) but `fo-log.jsonl` showed 23 sonnet stamps + zero opus stamps — pytest's `--model opus` was silently dropped because the test does not consume the model fixture. Surfaced to team-lead with three resolution options; team-lead authorized Option 1 (apply minimal local patch to `tests/test_gate_guardrail.py:52`, same discipline as AC-R2's patch on claude-team). Re-ran patched: pytest exit 0, 52.42s, 20 opus-4-7 stamps confirmed. Patch contents at /tmp/ac-r1-test-patch.patch and pasted above in Outcome. Patch reverted after AC-R1 with `git checkout --` and `git diff --quiet` exit 0 verified.
+
+5. **AC-R2 — Section-stripped variant.** DONE. Pre-run captured `git diff` exit 0. Patch applied to `claude-team:287-308` (replace loop body with one-liner, drop footer); `git diff > /tmp/ac-r2.patch` AFTER apply BEFORE run. Run: pytest exit 1 in 135.51s. Failure: `StepFailure: FO subprocess exited (code=1) before step 'ECHO: ping reply received' matched.` Milestones 1-4 PASSED; milestone 5 failed (ECHO reply never landed in parent fo-log; FO hit `error_max_budget_usd: Reached maximum budget ($2)`). 48 opus-4-7 stamps in fo-log. Patch contents pasted above. Patched standing-teammates section extracted from `Agent` tool_use input pasted above.
+
+6. **AC-R2 → AC-R3 patch revert.** DONE. `git checkout -- skills/commission/bin/claude-team` then `git diff --quiet -- tests/test_gate_guardrail.py skills/commission/bin/claude-team` exit 0 — BOTH files clean (per the team-lead's extended pre-step covering AC-R1's patch as well as AC-R2's).
+
+7. **AC-R3 — Different ensign model.** DONE. Hard pre-step `git diff --quiet -- tests/test_gate_guardrail.py skills/commission/bin/claude-team` exit 0 confirmed before pytest invocation. Run: pytest exit 0 in 158.30s. All 5 milestones fired. FO on sonnet (74 sonnet stamps); ensign Agent() dispatched WITHOUT explicit model field, defaulted to opus-4-7 per spawning context. Caveat surfaced in Outcome: AC-R3 PASS shows that FO-on-sonnet drives the test to completion even when the ensign sub-agent is still opus-4-7 — strong evidence the regression is FO-side, not ensign-side. 2.1.112 caveat per AC-R3 Capture line 401 noted in Follow-up (c).
+
+8. **Capture un-patched dispatch prompt baseline.** DONE. Extracted the un-patched `### Standing teammates available in your team` section from AC-R3's `fo-log.jsonl` (the spawned ensign teammate's dispatch prompt). Pasted side-by-side with AC-R2's patched section above in Outcome's "Side-by-side" subsection. Dispatched ensign name: `spacedock-ensign-001-echo-roundtrip-work`; model in spawn record: `claude-opus-4-7`.
+
+9. **Determine outcome combination per Decision Outcome Map.** DONE. Outcome **AC-R1 PASS, AC-R2 FAIL, AC-R3 PASS** is not one of the 5 enumerated rows but composes from "AC-R3 PASS + others FAIL" + "AC-R1 PASS + AC-R2 FAIL". Recommended follow-up composed from both: pin `--model sonnet` (R3) AND investigate priming token outside per-teammate prose (R1+R2), AND do NOT pursue section-richness compression (R2 falsifies that). Detailed in Outcome's `### Recommended follow-up (composed)` subsection.
+
+10. **Append `## Repurpose Outcome` section.** DONE. Section appended after the Repurpose Revision Stage Report's one-line summary (line 612). Contains: outcome combination, evidence per AC (verbatim grep, exit codes, milestone timing, claude --version), AC-R1 + AC-R2 patch diffs pasted, side-by-side patched-vs-unpatched prompt excerpts, `### Follow-up needed` subsection with 3 follow-ups (a/b/c).
+
+11. **Follow-up needed subsection.** DONE. Three follow-ups described in `### Follow-up needed`: (a) persistent plumbing fix for `tests/test_gate_guardrail.py:52` extra_args (analogue of #179 for the gate-guardrail test); (b) Layer 3 FO-side reply-handling investigation (since AC-R2 falsified Layer 2 section-richness compression); (c) sonnet workflow-default pin (with 2.1.111 re-confirmation gate per AC-R3 caveat). FO files them after captain triage; this implementation does not file them.
+
+12. **Commit on worktree branch.** Pending — will run immediately after this report write completes. Working tree was clean post-AC-R3 (verified `git status: nothing to commit`). Commit message will be `experiment: #177 ran AC-R1/R2/R3 — outcome AC-R1 PASS / AC-R2 FAIL / AC-R3 PASS, recommendation pin --model sonnet (R3) + investigate priming surface outside per-teammate prose (R1+R2 composed)`.
+
+13. **Stage Report (repurpose implementation).** DONE (this section).
+
+### One-line summary for the validator
+
+Layer 2 experiment outcome AC-R1 PASS / AC-R2 FAIL / AC-R3 PASS — section-richness compression is NOT the priming surface (R2 falsifies); FO-on-sonnet is a viable workaround (R3, with 2.1.112 caveat); priming sits in some other team-mode element (R1+R2 composed). Two captain-authorized local patches applied and reverted (AC-R1 test plumbing, AC-R2 claude-team source); both files verified clean post-revert. Three follow-ups described for FO triage: (a) persistent plumbing fix for gate-guardrail's extra_args, (b) Layer 3 FO reply-handling investigation, (c) sonnet workflow-default pin.
+
+## Stage Report (validation, repurpose-experiment)
+
+### Summary
+
+Validation of #177's repurpose-experiment results (AC-R1 PASS / AC-R2 FAIL / AC-R3 PASS, composed outside the pre-enumerated Outcome Map). Audited evidence integrity, patch capture-and-revert discipline, and the load-bearing "FO-side reply-folding" diagnosis. **Implementation work: PASSED** — three ACs honestly executed, both local patches captured before revert, both reverts verified clean, evidence chain fully traceable to /tmp artifacts and the worktree's current state. **Outcome composition: SOUND-BUT-OVERREACHING** — the FO-vs-ensign locus claim (AC-R3 pivot) is well-supported by the model-stamp evidence, but the more specific "FO reply-folding" framing narrows past what the evidence strictly proves; alternative FO-side mechanisms (budget exhaustion from per-token verbosity, general FO orchestration bug) remain consistent with the same data. Recommend the captain treat Follow-up (b)'s scope as "FO-side opus-4-7 regression — mechanism TBD" rather than committing to the reply-folding hypothesis at ideation time.
+
+### Checklist
+
+1. **Read entity body, focus on Repurpose Outcome (line 614+) and Stage Report (repurpose implementation) (line 815+).** DONE. Read all 851 lines via two-pass (lines 300-700, 700-851). Cross-referenced Decision Outcome Map at line 319 and original AC-R1/R2/R3 spec at lines 333-401. Confirmed the implementer's outcome combination "AC-R1 PASS, AC-R2 FAIL, AC-R3 PASS" is NOT one of the 5 enumerated rows — the implementer composed the "AC-R3 PASS + others FAIL" row (for follow-up #c) with the "AC-R1 PASS + AC-R2 FAIL counterintuitive" row (for follow-up #b), explicitly noted at entity line 618.
+
+2. **Cross-check AC-R1's evidence chain (plumbing-bug claim + patch revert + model stamps).** DONE.
+   - Source-side plumbing bug confirmed by reading `tests/test_gate_guardrail.py:30-60`. Function signature is `def test_gate_guardrail(test_project, runtime):` — no `model` fixture. Line 52 shows `extra_args=["--max-budget-usd", "1.00"]` — no `--model`. The pytest CLI `--model opus` is therefore silently dropped, exactly as the entity claims at line 631. Same plumbing-bug class as #179 (which fixed `test_standing_teammate_spawn.py`) — the gate-guardrail test was simply missed by that fix.
+   - Patch captured at `/tmp/ac-r1-test-patch.patch` (560 bytes, mtime 21:09); contents match the entity's verbatim paste at lines 647-661. The patch adds exactly `"--model", "opus", ` to the `extra_args` list at line 52.
+   - Patch revert verified: `git -C ... diff --quiet tests/test_gate_guardrail.py` exit 0.
+   - Model-stamp re-grep on `/tmp/ac-r1-patched-fo-log.jsonl` (132569 bytes, mtime 21:10): `20 claude-opus-4-7` (matches entity line 638), `19 "model":"claude-opus-4-7"` (matches entity line 640), `claude_code_version: 2.1.112` (matches entity line 643). ZERO sonnet stamps in the patched run. Plumbing-fix succeeded.
+
+3. **Cross-check AC-R2's evidence chain (patch correctness + revert + failure mode shift).** DONE.
+   - Patch captured at `/tmp/ac-r2.patch` (1382 bytes, mtime 21:10); contents match the entity's verbatim paste at lines 686-718.
+   - Source-side pre-image confirmed by reading `skills/commission/bin/claude-team:282-310`. The current source matches the patch's `-` lines exactly (loop body at 287-301, footer at 302-307). Patch reverted cleanly.
+   - Patch revert verified: `git -C ... diff --quiet skills/commission/bin/claude-team` exit 0.
+   - Model-stamp re-grep on `/tmp/ac-r2-fo-log.jsonl` (186561 bytes, mtime 21:13): `48 claude-opus-4-7`, `44 "model":"claude-opus-4-7"`, `2 "model":"sonnet"` — all match entity lines 680-684. FO + ensign both ran on opus-4-7.
+   - Failure-mode shift claim (M4 PASSED, M5 FAILED): I cannot independently re-verify the streaming-watcher milestone breakdown from the fo-log alone (the watcher's milestone labels are stdout-only). However, the parent fo-log contains only 2 SendMessage tool_use entries, both shutdown_request — confirming the test's actual ECHO-ping SendMessage happens inside the ensign sub-agent context (not visible in the parent fo-log). I accept the entity's milestone breakdown at lines 670-675 as the authoritative artifact for milestone status. The `error_max_budget_usd: Reached maximum budget ($2)` failure cause at entity line 669 is consistent with M5-budget-exhaustion shape.
+
+4. **Cross-check AC-R3's evidence chain (FO=sonnet, ensign=opus-4-7, test PASSED).** DONE — this is the load-bearing diagnostic claim.
+   - Model-stamp re-grep on `/tmp/ac-r3-fo-log.jsonl` (244336 bytes, mtime 21:16): `7 claude-opus-4-7`, `1 "model":"claude-opus-4-7"`, `74 "model":"claude-sonnet-4-6"`, `3 "model":"sonnet"` — all match entity lines 738-743.
+   - Re-walked the json for `tool_use.name == "Agent"` independently (Python script). Found 3 Agent dispatches:
+     - `subagent_type='general-purpose' model='sonnet' desc=''` (likely a top-level FO call)
+     - `subagent_type='general-purpose' model='sonnet' desc='Spawn echo-agent standing teammate'` (echo-agent dispatch — model explicitly `sonnet`, propagated from FO's `--model sonnet`)
+     - `subagent_type='spacedock:ensign' model='(none)' desc='Echo-agent roundtrip live check: work'` (ensign dispatch — NO explicit model field on Agent input)
+   - This independently confirms the entity's claim at lines 750-751 verbatim. The ensign Agent() call had no `model` field; per spawning context default it ran on opus-4-7 (corroborated by the 7 opus-4-7 stamps in the fo-log appearing in tool_use_result rollups).
+   - Patch revert pre-step claim verified: both `tests/test_gate_guardrail.py` and `skills/commission/bin/claude-team` are clean in the current worktree (`git diff --quiet` exit 0 for both).
+
+5. **Verify the outcome interpretation logic (composition soundness).** DONE — but with a critical caveat (see Recommendation b).
+   - Composition logic: AC-R3 PASS shows that swapping FO-opus-4-7 for FO-sonnet (with ensign held constant on opus-4-7) drives the same test that AC-R2 failed to terminal completion. The implementer concludes the regression follows the FO process, not the ensign sub-agent. **This locus claim is well-supported.**
+   - The implementer further narrows to "FO-side reply-folding" (entity line 803): the FO opus-4-7 process fails to fold the ensign's reply into its parent stream within budget. This is the load-bearing follow-up scoping claim.
+   - **Alternative explanations consistent with the same evidence:**
+     - **(i) FO-opus verbosity / budget-management bug.** AC-R2 hit `error_max_budget_usd: Reached maximum budget ($2)` at line 669. AC-R3 sonnet completed in 158s vs AC-R2 opus failing at 135s within the same $2 budget. Opus-4-7 may simply be more token-verbose at the FO orchestration role, exhausting budget before the reply window opens. This would manifest as M5 failure but isn't "reply-folding" — it's "FO can't get to M5 before running out of money." Mitigation would differ (raise budget? compress FO prompts? cap FO retries?) from a true reply-folding fix.
+     - **(ii) AC-R2 patch confound.** AC-R2 changed both the section AND ran on opus-4-7. The M4→M5 failure shift could be the section change *helping with M4 priming* while opus-4-7 FO continues to fail at M5 for an unrelated reason. The implementer treats the M4 pass as evidence the section-richness hypothesis is partially-vindicated-but-not-sufficient (entity line 729). Reasonable, but means the M5 failure is on a *different mechanism* than the original AC-1 hallucination.
+     - **(iii) FO-opus general orchestration regression.** The "reply-folding" specificity may be premature — opus-4-7 FO could be regressing on multiple coordination steps; M5 happens to be the visible failure on this fixture. Layer 3 ideation should test hypothesis-i and -iii alongside reply-folding.
+   - The composition is **plausible and parsimonious** (Occam's-razor reading of the data), but the "reply-folding" specificity narrows past what the data strictly proves. The locus claim (FO-side, not ensign-side) is solid; the mechanism claim (reply-folding specifically) is speculative.
+
+6. **Verify the three Follow-up entries.** DONE.
+   - **(a) `tests/test_gate_guardrail.py` plumbing fix (entity line 793-798).** Well-scoped. Cites the specific source location (`tests/test_gate_guardrail.py:30, 52`), the analogue (#179 fix for the standing-teammate test), and a one-line spec (add `model` to function signature; replace `extra_args` line). Source attribution: "AC-R1 implementation" — precise. **Confirmed clean.**
+   - **(b) Layer 3 FO investigation (entity line 800-804).** Explicitly scoped to ideation per the spec — this is correct because the mechanism is uncertain (see #5 above). The one-line spec acknowledges two possible directions (downstream prompt-shape experiments vs FO-side stream-folding investigation). Source attribution: "AC-R2 — patching the standing-teammates section to one-line-per-teammate did NOT fix opus-4-7 FO behavior." Precise. **Recommend the FO ideation broaden the framing from "reply-folding" to "FO-side opus-4-7 regression — mechanism TBD" to admit alternatives (i)/(iii) above. Otherwise scope-clean.**
+   - **(c) Sonnet pin (entity line 806-811).** Has a sensible pre-condition (re-run AC-R3 on 2.1.111 before pinning). Source attribution: "AC-R3 — FO on sonnet drove the standing-teammate test to terminal completion in 158s while FO on opus-4-7 failed at milestone 5 within 135s." Precise. **Confirmed clean.**
+
+7. **Verify the implementation work was honestly executed.** DONE.
+   - **(a) All three ACs attempted.** YES — entity sections at lines 629-754 cover all three with full evidence.
+   - **(b) AC-R1 retry-after-plumbing-discovery handled correctly.** YES — initial run had a contamination (sonnet stamps in fo-log despite `--model opus` on CLI). Implementer surfaced the issue to team-lead, got authorization for a captain-authorized local patch (extending AC-R2's local-patch discipline to AC-R1), captured the patch to `/tmp/ac-r1-test-patch.patch`, ran patched, captured 20 opus-4-7 stamps, reverted cleanly. Honest handling of the contamination — did not pretend the initial run was valid.
+   - **(c) Patches captured before / around apply.** YES — both `/tmp/ac-r1-test-patch.patch` and `/tmp/ac-r2.patch` exist on disk and match the verbatim paste in the entity. The entity also pastes both diffs inline (lines 647-661, 686-718) so the audit trail survives even if /tmp is cleared.
+   - **(d) Patches reverted between ACs.** YES — verified via `git diff --quiet` on both files in the current worktree (exit 0 for both). The extended pre-step (check BOTH files before AC-R3) was applied — entity line 733 documents this.
+   - **(e) Outcome section + Stage Report present with verbatim evidence.** YES — `## Repurpose Outcome` at line 614 and `## Stage Report (repurpose implementation)` at line 815 both present, with verbatim grep output, exit codes, milestone counts, model stamps, patch diffs, and side-by-side prompt excerpts.
+
+8. **Two recommendations.**
+   - **(a) IMPLEMENTATION WORK: PASSED.** The experiment was correctly executed and honestly reported. The implementer surfaced two blockers (worktree-state mismatch at start, AC-R1 plumbing bug) before pressing on, captured both patches before revert, verified both reverts, and produced a complete evidence chain that re-validates from /tmp artifacts and the worktree's current source. The outcome combination (AC-R1 PASS / AC-R2 FAIL / AC-R3 PASS) was honestly composed from two Outcome Map rows rather than force-fit into a single row, with the composition rationale stated explicitly at entity line 618.
+   - **(b) OUTCOME COMPOSITION: SOUND-BUT-OVERREACHING.** The locus claim ("regression is FO-side, not ensign-side") is solid — AC-R3's design with FO=sonnet+ensign=opus-4-7 PASSING vs AC-R2's FO=opus-4-7+ensign=opus-4-7 FAILING isolates the FO model as the variable that flips the test. The mechanism claim ("FO-side reply-folding") is plausible but narrows past the evidence; alternative FO-side mechanisms (budget-management/verbosity, general orchestration regression) remain consistent with the same data. The captain should act on the locus claim (Follow-up c sonnet pin is well-justified by AC-R3 alone) but treat Follow-up b's "reply-folding" framing as one hypothesis among several when scoping the Layer 3 ideation. The composition combining "AC-R3 PASS + others FAIL" with "AC-R1 PASS + AC-R2 FAIL counterintuitive" is internally consistent with both rows' interpretations and produces a defensible 3-follow-up recommendation set.
+
+### One-line verdict for the captain
+
+Implementation PASSED (three ACs cleanly executed, two patches captured-and-reverted, evidence re-verifiable from /tmp); outcome composition is SOUND on locus (regression is FO-side per AC-R3) but OVERREACHING on mechanism ("reply-folding" narrows past evidence — alternative FO-side mechanisms remain in play). Follow-up (a) plumbing-fix and (c) sonnet-pin are ready to file as-is; Follow-up (b)'s ideation should broaden framing from "reply-folding" to "FO-side opus-4-7 regression — mechanism TBD" before scoping.
