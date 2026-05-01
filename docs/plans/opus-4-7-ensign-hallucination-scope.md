@@ -910,3 +910,194 @@ Validation of #177's repurpose-experiment results (AC-R1 PASS / AC-R2 FAIL / AC-
 ### One-line verdict for the captain
 
 Implementation PASSED (three ACs cleanly executed, two patches captured-and-reverted, evidence re-verifiable from /tmp); outcome composition is SOUND on locus (regression is FO-side per AC-R3) but OVERREACHING on mechanism ("reply-folding" narrows past evidence — alternative FO-side mechanisms remain in play). Follow-up (a) plumbing-fix and (c) sonnet-pin are ready to file as-is; Follow-up (b)'s ideation should broaden framing from "reply-folding" to "FO-side opus-4-7 regression — mechanism TBD" before scoping.
+
+## Cycle-3 sanity-check
+
+**Outcome combination: AC-R1 PASS, AC-R2 PASS, AC-R3 PASS.** R1 and R3 match cycle-2; R2 **DIVERGED** (cycle-2 FAIL → cycle-3 PASS). Three live experiments re-run on Claude Code 2.1.121 + opus-4-7 / sonnet against current main HEAD `465d4ffc`, total ~9 min wallclock + opus tokens.
+
+### Environmental drift since cycle-2
+
+- **Claude Code: 2.1.112 → 2.1.121.** Nine patch versions of drift. Cycle-2's preferred 2.1.111 is now two minor versions behind; sonnet behavior on 2.1.121 was not pre-validated in cycle-2.
+- **Test plumbing: `tests/test_gate_guardrail.py:51` now wires `--model` and `--effort` from pytest fixtures into `extra_args`.** Cycle-2's AC-R1 needed a captain-authorized local patch to add this; main now has it (likely #179's analogue or a sibling fix). The cycle-3 AC-R1 ran without any patch — direct invocation via pytest CLI flags works.
+- **PR #181 (stage-worktree-stickiness) merged on 2026-04-30.** Tonight's opus-tier post-merge failures (`test_dispatch_completion_signal` + `test_feedback_keepalive` failing opus-only on https://github.com/clkao/spacedock/actions/runs/25206509179/job/73908102321) confirm the FO-on-opus failure mode is still active, but on different tests than the cycle-2/cycle-3 standing-teammate fixture.
+- **`enumerate_alive_standing_teammates` → `enumerate_declared_standing_teammates`** (commit `0c60611b` post-cycle-2). Lazy spawn (#107) merged. The patch site for AC-R2 moved from cycle-2's `claude-team:287-301` to current `claude-team:410-430` but the loop body shape is structurally identical; the AC-R2 patch shape applied cleanly with no rework.
+
+### Evidence per AC
+
+**AC-R1 — gate-guardrail counterfactual (PASS, no patch needed).**
+
+- Run: `unset CLAUDECODE && KEEP_TEST_DIR=1 uv run pytest tests/test_gate_guardrail.py --runtime claude --model opus --effort low -v`. Exit code 0, 44.33s wallclock.
+- `claude --version`: `2.1.121 (Claude Code)`.
+- Model stamps from `/tmp/cycle3/ac-r1-fo-log.jsonl`:
+  ```
+  $ grep -oh 'claude-opus-4-[67]' /tmp/cycle3/ac-r1-fo-log.jsonl | sort | uniq -c
+    20 claude-opus-4-7
+  $ grep -oh '"model":"[^"]*"' /tmp/cycle3/ac-r1-fo-log.jsonl | sort | uniq -c
+    19 "model":"claude-opus-4-7"
+  $ head -1 /tmp/cycle3/ac-r1-fo-log.jsonl | grep -oE '"claude_code_version":"[^"]+"'
+  "claude_code_version":"2.1.121"
+  ```
+- Plumbing-patch verification: `tests/test_gate_guardrail.py:51` already reads `extra_args=["--model", model, "--effort", effort, "--max-budget-usd", "1.00"]` on current main. No local patch applied; no patch revert needed. The cycle-2 plumbing follow-up (Follow-up #a) has effectively landed.
+- Comparison to cycle-2: identical PASS verdict (cycle-2: 52.42s, 20 opus stamps; cycle-3: 44.33s, 20 opus stamps). Wallclock 8s faster — within noise.
+- Interpretation: confirms cycle-2's R1 PASS — gate-guardrail (no team mode, no standing-teammates section, no Completion Signal block) runs cleanly on opus-4-7 + low effort even on 2.1.121.
+
+**AC-R2 — section-stripped patch on standing-teammate test (PASS — DIVERGED from cycle-2 FAIL).**
+
+- Pre-step: `git diff --quiet skills/commission/bin/claude-team` exit 0.
+- Patch applied: replace `claude-team:410-430` loop body with `lines.append(f'- {name} is available; SendMessage to it.')` and drop the "Full routing contract" footer. Patch captured to `/tmp/cycle3/ac-r2.patch` (797 bytes).
+- Run: `unset CLAUDECODE && KEEP_TEST_DIR=1 uv run pytest tests/test_standing_teammate_spawn.py::test_standing_teammate_spawns_and_roundtrips --runtime claude --model opus --effort low -v`. **Exit code 0, 318.53s wallclock.**
+- `claude --version`: `2.1.121 (Claude Code)`.
+- Model stamps from `/tmp/cycle3/ac-r2-fo-log.jsonl`:
+  ```
+  $ grep -oh 'claude-opus-4-[67]' /tmp/cycle3/ac-r2-fo-log.jsonl | sort | uniq -c
+    34 claude-opus-4-7
+  $ grep -oh '"model":"[^"]*"' /tmp/cycle3/ac-r2-fo-log.jsonl | sort | uniq -c
+    31 "model":"claude-opus-4-7"
+     2 "model":"sonnet"
+  ```
+- Patched dispatch prompt section (extracted from `Agent` tool_use in fo-log; verifies the patch took effect):
+  ```
+  ### Standing teammates available in your team
+
+  These standing teammates are available in your team; you MAY route to them via SendMessage. Best-effort, non-blocking, 2-minute timeout; proceed with un-polished/un-reviewed content if no reply.
+
+  - echo-agent is available; SendMessage to it.
+  ```
+- AC-R2 PATCH (paste of `/tmp/cycle3/ac-r2.patch`):
+  ```diff
+  diff --git a/skills/commission/bin/claude-team b/skills/commission/bin/claude-team
+  index dd7a0825..7e48a484 100755
+  --- a/skills/commission/bin/claude-team
+  +++ b/skills/commission/bin/claude-team
+  @@ -408,26 +408,7 @@ def cmd_build(args):
+               '',
+           ]
+           for name, description, mod_path in standing_teammates:
+  -            desc = description or 'standing teammate'
+  -            usage_body = _parse_routing_usage_body(mod_path) if mod_path else None
+  -            if usage_body:
+  -                lines.append(f'- **{name}** ({desc})')
+  -                for body_line in usage_body.split('\n'):
+  -                    if body_line:
+  -                        lines.append(f'  {body_line}')
+  -                    else:
+  -                        lines.append('')
+  -            else:
+  -                lines.append(
+  -                    f'- **{name}** ({desc}): SendMessage with the relevant input '
+  -                    f'shape; reply format per the mod.'
+  -                )
+  -        lines.append('')
+  -        lines.append(
+  -            'Full routing contract: see '
+  -            '`skills/first-officer/references/first-officer-shared-core.md` '
+  -            '`## Standing Teammates`.'
+  -        )
+  +            lines.append(f'- {name} is available; SendMessage to it.')
+           prompt_parts.append('\n'.join(lines))
+  ```
+- Patch revert verified: `git checkout -- skills/commission/bin/claude-team && git diff --quiet skills/commission/bin/claude-team` exit 0.
+- Comparison to cycle-2: cycle-2 R2 FAILED at milestone 5 (`ECHO: ping reply received`) in 135.51s with `error_max_budget_usd: Reached maximum budget ($2)`; cycle-3 R2 PASSED in 318.53s. **Same patch, same fixture, same effort tier — only Claude Code drifted (2.1.112 → 2.1.121) and the entire production main moved (PR #181, lazy-spawn, etc.).** The 318s wallclock is 2.4× cycle-2's failed run time; the test now reaches all 5 milestones within budget.
+- Interpretation: cycle-2's claim that "section-richness compression is NOT the priming surface" is **falsified for 2.1.121** — the same patch that failed on 2.1.112 now PASSES. Either (a) the upstream Claude Code regression has been partially fixed in 2.1.113-121 (FO-opus-4-7 reply-folding / orchestration), making section richness load-bearing again, or (b) the section richness was always partially load-bearing but cycle-2's failure mode (M5 budget exhaustion) was a downstream symptom of FO-opus general bloat that is now compressed enough on the same $2 budget. Without re-running cycle-2's UNPATCHED test on 2.1.121 to establish the new baseline, the two hypotheses are observationally equivalent here.
+
+**AC-R3 — sonnet FO on standing-teammate test (PASS — matches cycle-2).**
+
+- Hard pre-step: `git diff --quiet skills/commission/bin/claude-team && git diff --quiet tests/test_gate_guardrail.py` exit 0 — both files clean before pytest.
+- Run: `unset CLAUDECODE && KEEP_TEST_DIR=1 uv run pytest tests/test_standing_teammate_spawn.py::test_standing_teammate_spawns_and_roundtrips --runtime claude --model sonnet --effort low -v`. Exit code 0, 158.41s wallclock.
+- `claude --version`: `2.1.121 (Claude Code)`.
+- Model stamps from `/tmp/cycle3/ac-r3-fo-log.jsonl`:
+  ```
+  $ grep -oh 'claude-opus-4-[67]' /tmp/cycle3/ac-r3-fo-log.jsonl | sort | uniq -c
+     5 claude-opus-4-7
+  $ grep -oh '"model":"[^"]*"' /tmp/cycle3/ac-r3-fo-log.jsonl | sort | uniq -c
+     1 "model":"claude-opus-4-7"
+    53 "model":"claude-sonnet-4-6"
+     3 "model":"sonnet"
+  ```
+- FO ran on sonnet (53 stamps), ensign sub-agent ran on opus-4-7 by default (5 stamps in tool_use_result rollups) — same FO-vs-ensign split as cycle-2's R3.
+- Comparison to cycle-2: identical wallclock to cycle-2 (158.30s vs 158.41s — within 0.1s) and identical model-split shape. The 2.1.111-vs-2.1.112 caveat from cycle-2 (sonnet behavior on 2.1.112 not pre-validated) extends to 2.1.121 — but the cycle-3 PASS on 2.1.121 plus cycle-2's PASS on 2.1.112 plus the natural 2.1.111 expectation is now a 2-of-3 evidence chain that sonnet FO is a stable workaround across the 2.1.111–2.1.121 range.
+
+### Did anything shift the failure shape?
+
+The AC-R2 cycle-2 → cycle-3 flip is the load-bearing finding. Three candidate explanations:
+
+1. **Claude Code 2.1.113-121 partially fixed FO-opus reply-folding / orchestration.** Cycle-2's milestone-5 budget exhaustion (FO failed to fold the ECHO reply into its parent stream within $2) does not occur on 2.1.121 with the same patch and same fixture. Plausible — Anthropic shipped fixes between 2.1.112 and 2.1.121 (model versions remained `claude-opus-4-7` throughout, but Claude Code internals changed). Tonight's PR #181 opus-tier failures show *some* FO-opus behavior is still broken on different tests, so any fix would be partial.
+2. **PR #181 stage-worktree-stickiness OR lazy-spawn (#107) interact with the priming surface in ways that reduce token bloat in the standing-teammate fixture specifically.** Lazy-spawn means the FO does not pre-spawn echo-agent on test setup; it spawns on demand. That changes the timing/budget profile of the FO's orchestration loop in a way that could leave more headroom for the M5 reply-folding step. Plausible but mechanistically vague — would need fo-log diff against a cycle-2 fo-log to confirm.
+3. **The section-richness hypothesis was always correct, and cycle-2's M5 FAIL was a downstream symptom of FO bloat that the section-strip patch alone could not compensate for at 2.1.112 budget headroom.** Cycle-2 was right to falsify "section compression alone unblocks opus-4-7 FO" but wrong to conclude "section richness is not the priming surface." On 2.1.121 with whatever combination of upstream fixes plus repo-internal changes, the section-strip patch is now sufficient — the priming was real, and other downstream costs simply now fit within the same $2 budget.
+
+I cannot distinguish (1)/(2)/(3) without an UNPATCHED 2.1.121 run on the same fixture (would establish the new baseline) plus a 2.1.121 run with section-strip + lower budget (would test whether 318s/$1.x is the new pass margin). Both are out-of-scope for this sanity check. The dispatch authorized re-running the 3 ACs as documented, not adding a fourth.
+
+### Read on cycle-2 recommendations
+
+The cycle-2 composed recommendation set was:
+
+- Follow-up (a): persistent plumbing fix for `tests/test_gate_guardrail.py` extra_args. **OBSOLETE** — already landed on main; AC-R1 ran cleanly without any patch.
+- Follow-up (b): Layer 3 FO-side reply-handling investigation (since AC-R2 falsified Layer 2 section-richness). **PARTIALLY OBSOLETE** — AC-R2 now PASSES with section-strip on 2.1.121. The "reply-folding" framing is no longer the load-bearing hypothesis for THIS fixture; tonight's PR #181 opus-tier failures suggest the broader FO-opus regression sits elsewhere (different tests, different surfaces). Re-scope to "FO-on-opus-4-7 regression — mechanism TBD across multiple test fixtures."
+- Follow-up (c): pin `--model sonnet` as workflow FO default (with 2.1.111 re-confirmation gate). **STILL LOAD-BEARING** — AC-R3 PASS on 2.1.121 strengthens the evidence (now a 2-version pass: 2.1.112 + 2.1.121). Tonight's PR #181 opus-tier failures show the regression is broader than any single-test patch (R2's section-strip) can cover; sonnet FO is still the only known mitigation that flips ALL FO-driven tests green.
+
+The mitigation that stays load-bearing is **(c) pin `--model sonnet` as workflow FO default.** AC-R2's PASS gives an alternative path (compress section emission), but that path: (i) only addresses the standing-teammate routing surface, (ii) does not address tonight's PR #181 failures on `test_dispatch_completion_signal` and `test_feedback_keepalive` (which don't involve the standing-teammates section in the same way), (iii) requires modifying `claude-team` source for what may be a transient priming sensitivity. Sonnet pin covers all surfaces with a single workflow-default change.
+
+## Final recommendation
+
+**Advance #177 to implementation against the model-pin mitigation: change spacedock workflow FO defaults from `opus` to `sonnet` until upstream Claude Code resolves the FO-on-opus-4-7 regression class.**
+
+### Implementation scope
+
+The implementation stage of #177 should:
+
+1. Change `stages.defaults.model` (or equivalent) for FO-driving stages in the spacedock workflow templates from `opus` (current default) to `sonnet`. Targets: `skills/commission/templates/`, any workflow scaffolding that ships the default FO model.
+2. Document the regression context with a cross-reference to #177 in the workflow scaffolding's README or developer doc — explain why FO defaults to sonnet, link to this entity for the evidence chain.
+3. Add a TODO / re-evaluation note to revisit the default once the upstream Claude Code regression on `claude-opus-4-7` FO orchestration is resolved (no specific upstream issue exists yet — note that filing one is a separate task).
+4. Ensure the change is opt-out at the workflow level — captains who explicitly want `--model opus` for their FO should still be able to override.
+
+### Acceptance Criteria
+
+**AC-F1 — Workflow scaffolding default points to sonnet for FO-driving stages.**
+
+- Verify: `grep -rE "model:\s*opus|model:\s*claude-opus" skills/commission/templates/ skills/first-officer/` returns no matches at the FO-default scope; the FO default in scaffolding files is `sonnet`.
+- Pass: a captain commissioning a new spacedock workflow gets sonnet as the FO model by default. Verified by inspecting the generated workflow's stage-defaults block after running the commission flow on a fresh workspace.
+- Verified by: `tests/test_commission_skill_output.py` (or equivalent commission-output regression test) including an assertion that the default FO model stamp is `sonnet`. If no such test exists, add one as part of AC-F1's implementation.
+
+**AC-F2 — Regression context documented with cross-reference to #177.**
+
+- Verify: the workflow scaffolding's README or developer doc (likely `skills/commission/README.md` or `skills/first-officer/README.md`) contains a note explaining the sonnet default and links to `docs/plans/opus-4-7-ensign-hallucination-scope.md`.
+- Pass: `grep -lE "opus-4-7|177|FO-on-opus" skills/commission/README.md skills/first-officer/README.md` returns at least one match referring to this entity.
+- Verified by: documentation lint / static check, OR a one-line static test asserting the cross-reference string is present in the relevant README.
+
+**AC-F3 — Override mechanism preserved.**
+
+- Verify: a captain can set `--model opus` on the FO via existing CLI flags (e.g., `--model opus` on `claude-team build` calls, or workflow-level model override) and the override is honored end-to-end.
+- Pass: an integration test (or existing test like `test_standing_teammate_spawn` with explicit `--model opus`) demonstrates the override path still runs through the same FO assembly logic with the captain's chosen model.
+- Verified by: an existing live test invocation with explicit `--model opus` continues to dispatch FO on opus (model stamps in fo-log.jsonl confirm). The cycle-3 AC-R2 / AC-R1 runs already establish this — no new test needed if the existing live tests cover the override.
+
+**AC-F4 — Live re-confirmation on 2.1.111 before commit (or explicit waiver).**
+
+- Verify: re-run the standing-teammate fixture with `--model sonnet --effort low` on Claude Code 2.1.111 (cycle-2's preferred version); confirm PASS. OR document a captain waiver if 2.1.111 is no longer accessible and the 2.1.121 + 2.1.112 evidence chain is accepted as sufficient.
+- Pass: a fo-log.jsonl on 2.1.111 with sonnet stamps and a green test result, OR an entity-body waiver block citing the 2-of-3 version evidence chain (2.1.112 PASS, 2.1.121 PASS).
+- Verified by: file existence check on the captured fo-log, OR presence of the waiver block in the entity body.
+
+### Test plan
+
+- **Cost**: ~2-3 min for the commission-output regression test (static), ~5 min if AC-F4 runs the live 2.1.111 re-confirmation. AC-F1 / AC-F2 are static doc/code edits with cheap verifications.
+- **Risk**: low. Workflow defaults change is a single point of edit; override path verified by existing tests. The captain waiver path on AC-F4 is acceptable because the 2-version sonnet evidence chain (cycle-2 + cycle-3) is strong.
+- **E2E**: not strictly required — the existing live tests (`test_standing_teammate_spawn`, `test_gate_guardrail`) already cover the FO+ensign roundtrip on sonnet. AC-F4's re-confirmation is the one optional E2E step.
+- **Static**: yes — AC-F1 (default value), AC-F2 (cross-reference present), AC-F3 (override path test exists).
+
+### Out of scope for #177 implementation
+
+- Filing the upstream Anthropic issue about FO-on-opus-4-7 regression. Separate task; #177 implementation only changes our workflow defaults.
+- Section-richness compression in `claude-team`. AC-R2 PASS makes this a viable alternative path, but it's narrower (standing-teammate surface only) than the sonnet pin and adds source-code complexity. If a future captain wants to ship section compression as a complementary mitigation, that's a follow-up entity.
+- Investigating tonight's PR #181 opus-tier failures (`test_dispatch_completion_signal`, `test_feedback_keepalive`). The sonnet pin makes those tests green by default; the underlying mechanism is mechanism-TBD and out-of-scope per cycle-2 Follow-up (b)'s revised framing.
+
+## Stage Report: ideation
+
+- DONE: Re-run cycle-2's three experiments on current main as a sanity check that the AC-R1/R2/R3 outcomes still hold.
+  AC-R1 PASS (44.33s, 20 opus-4-7 stamps, no plumbing patch needed); AC-R2 PASS (318.53s, 34 opus-4-7 stamps, with section-strip patch); AC-R3 PASS (158.41s, FO=sonnet, ensign default opus-4-7). All three /tmp/cycle3/ac-r{1,2,3}-fo-log.jsonl preserved.
+- DONE: Compare current-main outcomes against cycle-2 outcomes.
+  R1 and R3 match cycle-2; R2 DIVERGED (cycle-2 FAIL → cycle-3 PASS). Comparison and three candidate explanations written into `## Cycle-3 sanity-check` § "Did anything shift the failure shape?". Cycle-2 cycle Follow-up (a) plumbing fix has effectively landed on main; Follow-up (b) reply-folding framing is now partially obsolete; Follow-up (c) sonnet pin remains load-bearing.
+- DONE: Update the entity body in place.
+  Appended `## Cycle-3 sanity-check` and `## Final recommendation` sections after the existing `## Stage Report (validation, repurpose-experiment)` (the file's prior tail). All cycle-2 sections preserved verbatim as audit trail.
+
+### Summary
+
+Cycle-3 sanity check on current main (Claude Code 2.1.121, HEAD `465d4ffc`) re-ran cycle-2's three Layer 2 experiments. R1 PASS and R3 PASS match cycle-2; R2 PASS DIVERGED from cycle-2's FAIL — same patch, same fixture, same effort, only Claude Code drifted (2.1.112 → 2.1.121) and main advanced (PR #181 stickiness, lazy-spawn, etc.). Tonight's PR #181 opus-tier failures (`test_dispatch_completion_signal`, `test_feedback_keepalive`) confirm the FO-on-opus-4-7 regression class is still active on different test surfaces. Final recommendation: advance #177 to implementation against cycle-2's Follow-up (c) — pin `--model sonnet` as workflow FO default — because it covers ALL surfaces with a single workflow-default change, while the now-passing AC-R2 section-strip path covers only standing-teammate routing. AC-F1 through AC-F4 enumerated with verification commands and end-state tests.
