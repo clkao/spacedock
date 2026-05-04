@@ -9,6 +9,7 @@ import importlib.util
 import json
 import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -154,6 +155,125 @@ def _build_error(msg, code=1):
     return code
 
 
+def _list_worktrees(git_root):
+    """Return [(worktree_path, branch_or_None), ...] for the repo at ``git_root``.
+
+    Parses ``git worktree list --porcelain``. The porcelain format emits one
+    record per worktree as a sequence of ``key value`` lines (or bare keys for
+    flags), separated by blank lines. We care about the ``worktree`` and
+    ``branch`` lines; ``HEAD`` and ``bare``/``detached`` are ignored.
+
+    Returns an empty list on any subprocess failure (git missing, not a repo,
+    permission denied, etc.). The caller treats an empty list as "no fallback
+    targets to try" and surfaces a clear error message — silent fallback into
+    a different code path would be worse than a loud miss.
+    """
+    try:
+        result = subprocess.run(
+            ['git', '-C', git_root, 'worktree', 'list', '--porcelain'],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        return []
+
+    worktrees = []
+    current_path = None
+    current_branch = None
+    for line in result.stdout.splitlines():
+        if not line.strip():
+            if current_path is not None:
+                worktrees.append((current_path, current_branch))
+            current_path = None
+            current_branch = None
+            continue
+        if line.startswith('worktree '):
+            current_path = line[len('worktree '):]
+        elif line.startswith('branch '):
+            # Format: "branch refs/heads/<name>"
+            ref = line[len('branch '):]
+            if ref.startswith('refs/heads/'):
+                current_branch = ref[len('refs/heads/'):]
+            else:
+                current_branch = ref
+    if current_path is not None:
+        worktrees.append((current_path, current_branch))
+    return worktrees
+
+
+def _resolve_entity_read_path(entity_path, workflow_dir):
+    """Resolve ``entity_path`` to a readable filesystem path.
+
+    Two-step resolution:
+
+    1. If the project-root path itself is a file, return it (flat layout or
+       worktree-mirrored folder layout where the entity has been merged to
+       main — the original happy path, zero behavior change).
+
+    2. Otherwise, enumerate the repo's worktrees via
+       ``git worktree list --porcelain`` and probe each for a copy of the
+       file at the same repo-relative location. This handles folder-mode
+       entities (``<id>-<slug>/index.md``) that are git-tracked on a
+       worktree branch but not yet merged into main — a legitimate dispatch
+       target that the original ``os.path.isfile(entity_path)`` gate
+       rejected outright.
+
+    Returns ``(resolved_path, tried_paths)``. ``resolved_path`` is the path
+    the caller should read; ``None`` means no readable copy exists in any
+    worktree. ``tried_paths`` is a list of every candidate filesystem path
+    we probed (including ``entity_path`` itself), surfaced in error
+    messages so the captain can see exactly where the helper looked.
+    """
+    tried = [entity_path]
+    if os.path.isfile(entity_path):
+        return entity_path, tried
+
+    git_root = find_git_root(workflow_dir)
+    if git_root is None:
+        return None, tried
+
+    try:
+        entity_rel = os.path.relpath(entity_path, git_root)
+    except ValueError:
+        # Different drives on Windows — relpath is undefined. Fallback can't help.
+        return None, tried
+    # If entity_path is OUTSIDE git_root (relpath starts with ..), the worktree
+    # mirror logic doesn't apply — the path simply doesn't belong to this repo.
+    if entity_rel.startswith('..'):
+        return None, tried
+
+    for worktree_path, _branch in _list_worktrees(git_root):
+        # Skip the main worktree (git_root) — we already probed entity_path above.
+        if os.path.realpath(worktree_path) == os.path.realpath(git_root):
+            continue
+        candidate = os.path.join(worktree_path, entity_rel)
+        tried.append(candidate)
+        if os.path.isfile(candidate):
+            return candidate, tried
+
+    return None, tried
+
+
+def _derive_entity_slug(entity_path):
+    """Derive the entity's slug from its path.
+
+    Folder-mode entities (``<id>-<slug>/index.md``) use the parent directory
+    name as the slug, not the literal string ``index``. Without this fix,
+    the derived agent name (``{worker_key}-index-{stage}``) collides across
+    every folder-mode entity, breaking team-mode dispatch.
+
+    Flat-layout entities (``<slug>.md``) keep the original behavior: the
+    filename stem.
+    """
+    basename = os.path.basename(entity_path)
+    if basename == 'index.md':
+        parent = os.path.basename(os.path.dirname(entity_path))
+        if parent:
+            return parent
+    return os.path.splitext(basename)[0]
+
+
 def cmd_build(args):
     """Assemble a structured dispatch JSON from entity, workflow, and FO-supplied fragments."""
     workflow_dir = args.workflow_dir
@@ -217,9 +337,22 @@ def cmd_build(args):
     if not isinstance(checklist, list) or len(checklist) == 0:
         return _build_error('checklist must not be empty')
 
-    # Rule 10: Entity file readable
-    if not os.path.isfile(entity_path):
-        return _build_error(f"entity file not readable at '{entity_path}'")
+    # Rule 10: Entity file readable.
+    #
+    # Folder-mode entities (``<id>-<slug>/index.md``) live ONLY on a worktree
+    # branch until merge — they are git-tracked there but absent from the main
+    # filesystem. Probing only ``entity_path`` would force every folder-mode
+    # dispatch onto the captain's break-glass path. Resolve via worktree
+    # fallback when the project-root path is missing.
+    entity_read_path, tried_paths = _resolve_entity_read_path(entity_path, workflow_dir)
+    if entity_read_path is None:
+        attempted = ', '.join(repr(p) for p in tried_paths)
+        return _build_error(
+            f"entity file not readable at '{entity_path}'. "
+            f"Folder-mode worktree fallback also failed: no checked-out worktree "
+            f"contains a copy at the same repo-relative location. "
+            f"Tried: [{attempted}]."
+        )
 
     # Rule 11: Workflow README readable
     readme_path = os.path.join(workflow_dir, 'README.md')
@@ -281,7 +414,10 @@ def cmd_build(args):
     # the stage's declared `worktree: true|false`. The stage `worktree:` field
     # gates worktree *creation* (FO-side, before the build call), not per-stage
     # routing. See first-officer-shared-core.md Reuse conditions #3.
-    entity_fields = parse_frontmatter(entity_path)
+    #
+    # Read frontmatter from the resolved path (worktree-side for folder-mode
+    # entities not yet on main; project-root path otherwise).
+    entity_fields = parse_frontmatter(entity_read_path)
     entity_title = entity_fields.get('title', '')
     entity_worktree = entity_fields.get('worktree', '').strip()
 
@@ -306,9 +442,12 @@ def cmd_build(args):
     # Rule 6: Derive subagent_type from stage agent field
     subagent_type = stage_meta.get('agent', 'spacedock:ensign')
 
-    # Derive worker_key and name
+    # Derive worker_key and name.
+    # Slug derivation is layout-aware: folder-mode (``<slug>/index.md``)
+    # uses the parent directory name; flat-layout uses the filename stem.
+    # Without this, every folder-mode entity collides on the literal "index".
     worker_key = subagent_type.replace(':', '-')
-    slug = os.path.splitext(os.path.basename(entity_path))[0]
+    slug = _derive_entity_slug(entity_path)
     derived_name = f'{worker_key}-{slug}-{stage}'
 
     # Rule 7: Name length and safety
