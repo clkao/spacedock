@@ -93,13 +93,46 @@ import sys
 from datetime import datetime, timezone
 
 
+def _has_opening_fence(filepath):
+    """Return True iff the file's first non-empty, non-BOM line is exactly `---`.
+
+    Leading truly-empty lines (`\\n` only) are skipped before the check; a
+    whitespace-only line (e.g. `"   \\n"`) counts as content and disqualifies
+    the file. A leading UTF-8 BOM on the first line is ignored. Anything other
+    than an opening `---` fence at that position means the file has no
+    frontmatter — see issue #186 for the corruption this guards against.
+    """
+    try:
+        with open(filepath, 'r') as f:
+            first = True
+            for raw in f:
+                line = raw.rstrip('\n')
+                if first:
+                    if line.startswith('﻿'):
+                        line = line[1:]
+                    first = False
+                if line == '':
+                    continue
+                return line == '---'
+    except OSError:
+        return False
+    return False
+
+
 def parse_frontmatter(filepath):
     """Extract YAML frontmatter fields from a markdown file."""
     fields = {}
+    if not _has_opening_fence(filepath):
+        return fields
     in_fm = False
+    first = True
     with open(filepath, 'r') as f:
         for line in f:
             line = line.rstrip('\n')
+            if first:
+                if line.startswith('﻿'):
+                    line = line[1:]
+                first = False
             if line == '---':
                 if in_fm:
                     break
@@ -397,6 +430,8 @@ def discover_entity_files(directory):
                 continue
             if name.startswith('.'):
                 continue
+            if not _has_opening_fence(full):
+                continue
             slug = name[:-3]
             flat_paths[slug] = full
         elif os.path.isdir(full):
@@ -405,7 +440,7 @@ def discover_entity_files(directory):
             if name.startswith('.'):
                 continue
             index_path = os.path.join(full, 'index.md')
-            if os.path.isfile(index_path):
+            if os.path.isfile(index_path) and _has_opening_fence(index_path):
                 folder_paths[name] = index_path
 
     slugs = sorted(set(flat_paths) | set(folder_paths))
@@ -1437,6 +1472,9 @@ def parse_set_args(args):
 
 def update_frontmatter(filepath, updates):
     """Rewrite frontmatter fields in a file. Returns dict of updated fields."""
+    if not _has_opening_fence(filepath):
+        raise ValueError(f'No frontmatter found in {filepath}')
+
     with open(filepath, 'r') as f:
         content = f.read()
 
