@@ -149,3 +149,23 @@ Selected F1 (strict opening fence in `parse_frontmatter`) + F2 (defensive write 
 ### Summary
 
 Implemented F1+F2+F3 as one logical change pivoting on the shared `_has_opening_fence` predicate; total diff is +39 lines in `status` plus a 230-line test file. The only deviation from the spec was the assertion text in T-E2E-186 — the actual error path in `resolve_mutation_entity` produces `entity not found: <ref>` rather than `unknown reference: <ref>`; both prove the AC property (file untouched, non-zero exit, clear stderr), and the SHA256 byte-identity check is the load-bearing assertion. Full static suite green; commit c9c5f0d5 on branch `spacedock-ensign/status-set-injects-frontmatter-when-first-fence-is-body-separator`.
+
+## Stage Report: validation
+
+- DONE: Every AC (AC-1..AC-6) has its named tests rerun in the validator's session; results captured per-suite with `N/N passed` counts and AC-by-AC evidence.
+  Targeted file `tests/test_status_strict_opening_fence.py`: **11/11 passed** in 0.21s. Per-AC breakdown:
+  - **AC-1 (parser strict fence):** T-PARSE-1 `test_prose_before_first_fence_returns_empty` PASSED, T-PARSE-2 `test_leading_blank_lines_then_fence_parses` PASSED, T-PARSE-3 `test_leading_bom_then_fence_parses` PASSED, T-PARSE-4 `test_whitespace_only_first_line_is_content` PASSED.
+  - **AC-2 (write guard):** T-WRITE-1 `test_body_separator_only_raises_and_preserves_bytes` PASSED, T-WRITE-2 `test_pure_prose_no_fence_raises_and_preserves_bytes` PASSED.
+  - **AC-3 (active-scope discovery skip):** T-DISCOVER-1 `test_active_scope_skips_body_rule_file` PASSED, T-DISCOVER-2 `test_folder_form_index_without_fence_skipped` PASSED.
+  - **AC-4 (archived-scope discovery skip):** T-DISCOVER-3 `test_archived_scope_skips_body_rule_file` PASSED.
+  - **AC-5 (end-to-end issue #186):** T-E2E-186 `test_set_against_body_rule_file_fails_safely` PASSED.
+  - **AC-6 (regression):** T-E2E-VALID `test_set_against_valid_entity_still_works` PASSED.
+  Full repo offline suite via `make test-static`: **587 passed, 26 deselected, 15 subtests passed in 27.77s** — no pre-existing tests regressed.
+- DONE: The implementation's spec/reality drift on T-E2E-186 (asserted `entity not found: notes` instead of the spec's `unknown reference: notes`) is independently confirmed against the live `status` binary; if the AC's intent (non-zero exit, byte-identical file, slug-not-resolved diagnostic) is fully met the validator records that and treats the assertion text as a spec correction, not a defect.
+  Independent reproduction in `/tmp/drift-check`: invoked `python3 skills/commission/bin/status --set notes id=001` against a workflow with body-rule `notes.md`; live binary emitted `Error: entity not found: notes` on stderr and exit 1; `sha256sum` of `notes.md` was `b71cb89e26a99f6efd31f14e3d58fbcedd6b831c8ce9943420622880942462e3` both before and after the invocation (byte-identical). AC-5's three required properties — non-zero exit, slug-not-resolved diagnostic on stderr, byte-identical file via SHA256 — are all met. Recording as a spec correction: the actual error path in `resolve_mutation_entity` emits `entity not found: <ref>` rather than `unknown reference: <ref>`; the test assertion matches reality and the AC intent is fully verified.
+- DONE: PASSED or REJECTED recommendation with one-line rationale; if REJECTED, the rationale names the specific AC that failed.
+  **PASSED** — all six ACs verified by named tests (11/11 targeted tests green, full static suite 587/587 green, AC-5 spec-vs-reality drift independently confirmed against the live binary as a benign spec correction with full intent preserved).
+
+### Summary
+
+Validation reproduced every AC's named test, ran the full offline suite without regression, and independently verified the T-E2E-186 spec/reality drift against the live `status` binary — confirming `Error: entity not found: notes`, exit 1, and byte-identical SHA256 (`b71cb89e…`). Recommendation: **PASSED**. The deviation from the spec's `unknown reference:` wording is a spec correction (the actual `resolve_mutation_entity` "unknown" branch emits `entity not found: <ref>`), and all three load-bearing AC-5 properties are satisfied.
