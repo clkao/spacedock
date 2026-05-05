@@ -136,3 +136,16 @@ Reviewer also confirmed:
 ### Summary
 
 Selected F1 (strict opening fence in `parse_frontmatter`) + F2 (defensive write check in `update_frontmatter`) + F3 (discovery skip in `discover_entity_files`); the four issue suggestions reduce to three implementation surfaces because slug pre-resolution already routes through discovery. Test plan combines four parser fixtures, two write-guard fixtures, three discovery-harness tests (active + folder-form + archived), and two end-to-end `--set` runs — all via the existing `tests/test_status_*.py` subprocess harness; no live LLM or worktree needed because the bug is fully reproducible at the `status` script boundary. Independent reviewer pass folded in three deltas (archive scope, AC-3 sharpening, whitespace-only first line) before gate.
+
+## Stage Report: implementation
+
+- DONE: F1, F2, and F3 share a single `_has_opening_fence(path)` predicate (defined once, called from `parse_frontmatter`, `update_frontmatter`, and `discover_entity_files`); the strictness contract is not duplicated three ways.
+  Predicate added at top of `skills/commission/bin/status` (above `parse_frontmatter`); called as a guard from all three surfaces (commit c9c5f0d5).
+- DONE: All 11 tests from the test plan (T-PARSE-1..4, T-WRITE-1/2, T-DISCOVER-1/2/3, T-E2E-186, T-E2E-VALID) added under `tests/test_status_*.py` and passing locally.
+  `tests/test_status_strict_opening_fence.py`: 11/11 passed. Note: T-E2E-186 asserts the actual error string `entity not found: notes` produced by `resolve_mutation_entity`'s `unknown` branch — the spec's `unknown reference: notes` was inaccurate about which error path fires; the AC's intent (non-zero exit + slug-not-resolved diagnostic + byte-identical file) is fully verified, including SHA256 before/after.
+- DONE: `make test-static` exits 0 — no pre-existing tests regressed by F1/F2/F3.
+  `587 passed, 26 deselected, 15 subtests passed in 27.71s`.
+
+### Summary
+
+Implemented F1+F2+F3 as one logical change pivoting on the shared `_has_opening_fence` predicate; total diff is +39 lines in `status` plus a 230-line test file. The only deviation from the spec was the assertion text in T-E2E-186 — the actual error path in `resolve_mutation_entity` produces `entity not found: <ref>` rather than `unknown reference: <ref>`; both prove the AC property (file untouched, non-zero exit, clear stderr), and the SHA256 byte-identity check is the load-bearing assertion. Full static suite green; commit c9c5f0d5 on branch `spacedock-ensign/status-set-injects-frontmatter-when-first-fence-is-body-separator`.
