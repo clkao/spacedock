@@ -148,3 +148,15 @@ Picked shape 1 (verdict-keyed bypass), narrowed to the literal value `rejected` 
 
 ### Summary
 Implemented the verdict-rejected bypass as a two-line addition: a `current_verdict` resolve plus a `post_update_verdict` mirror, threaded into the existing merge-hook guard predicate. Five parser-level tests cover AC1-AC4 plus the symmetric AC3-already-PASSED case; full `make test-static` is green (582 passed). AC5 (E2E) is intentionally deferred per the dispatch.
+
+## Stage Report: validation
+
+- DONE: AC1-AC4 each rerun via the named tests in `tests/test_status_script.py::TestMergeHookTerminalGuard`; results captured per-AC with N/N passed; cross-check that each test's assertions actually prove the AC's stated end-state property.
+  19/19 PASSED in `TestMergeHookTerminalGuard` (0.68s). AC1 → `test_set_terminal_allowed_when_verdict_already_rejected` asserts exit 0 + `status=done` in fm. AC2 → `test_set_terminal_allowed_when_verdict_rejected_in_same_call` asserts exit 0 + status/verdict/completed all written. AC3 → `test_set_terminal_refused_when_verdict_passed` (1/1) asserts non-zero exit + 'merge hook' in stderr + status unchanged; reinforced by `test_set_status_done_refused_when_merge_hook_and_no_pr` (blank-verdict) and `test_set_terminal_refused_when_verdict_already_passed` (already-PASSED). AC4 → `test_set_verdict_rejected_alone_allowed_with_merge_hook` asserts exit 0 + verdict written on a non-terminal-status entity. Each test's assertions match the AC's end-state property (file-state + exit-code + stderr where named).
+- DONE: AC5 confirmed as deliberately deferred (skipped per implementation dispatch); AC6 (existing `tests/test_merge_hook_guardrail.py`) confirmed still passing in this run.
+  AC5 — implementation Stage Report records `SKIPPED: AC5 (E2E rejection-flow merge-hook fixture)` per dispatch instructions; no fixture staged. AC6 — `tests/test_merge_hook_guardrail.py::test_merge_hook_guardrail` 1/1 PASSED (325.03s). Full `make test-static` rerun: 582 passed, 26 deselected, 15 subtests passed (29.33s) — no regressions.
+- DONE: PASSED or REJECTED recommendation with one-line rationale; if REJECTED, name the specific AC that failed.
+  PASSED — all in-scope ACs (AC1-AC4, AC6) verified by named tests; AC5 deferred-by-design.
+
+### Summary
+All in-scope acceptance criteria verified against the named tests on commit 235770ce: `TestMergeHookTerminalGuard` 19/19 green, `test_merge_hook_guardrail.py` 1/1 green, full `make test-static` 582/0. AC5 is the live-E2E path the implementation explicitly deferred and is recorded as such, not a failure. Recommendation: PASSED.
