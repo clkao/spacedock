@@ -134,3 +134,17 @@ Per dispatch instructions, the staff-review trigger fires (touches `skills/commi
 ### Summary
 
 Picked shape 1 (verdict-keyed bypass), narrowed to the literal value `rejected` to avoid loosening the guard against blank-verdict misfires. The fix is a localized `post_update_verdict` resolution plus one condition in the existing merge-hook guard, with primary coverage at the parser level via five fixture tests and one E2E run on a new merge-hook-enabled rejection-flow fixture. Shapes 2 and 3 rejected on vocabulary-bloat and audit-clarity grounds respectively.
+
+## Stage Report: implementation
+
+- DONE: Implement the localized verdict-rejected bypass exactly as specified in the entity body's Implementation outline (resolve `post_update_verdict` mirroring `post_update_pr`; add the `post_update_verdict == 'rejected'` condition to the merge-hook guard at status:2347; mod-block guard untouched).
+  Commit 11e4f27c — `skills/commission/bin/status` resolves `current_verdict` from frontmatter, computes `post_update_verdict` mirroring the `post_update_pr` resolution, and adds `post_update_verdict != 'rejected'` to the merge-hook guard condition; mod-block guard at lines 2321-2340 is unchanged.
+- DONE: Add the five parser-level fixture tests on `TestMergeHookTerminalGuard` in `tests/test_status_script.py` per the test plan (T-1..T-5 covering AC1-AC4 plus the symmetric AC3-PASSED variant); all five pass locally.
+  Commit 11e4f27c — added `_write_entity_with_verdict` helper plus `test_set_terminal_allowed_when_verdict_already_rejected` (AC1), `test_set_terminal_allowed_when_verdict_rejected_in_same_call` (AC2), `test_set_terminal_refused_when_verdict_passed` (AC3), `test_set_verdict_rejected_alone_allowed_with_merge_hook` (AC4), `test_set_terminal_refused_when_verdict_already_passed` (AC3 symmetric); 19/19 in `TestMergeHookTerminalGuard` pass.
+- DONE: `make test-static` exits 0 — no pre-existing tests regressed; the existing `test_set_status_done_refused_when_merge_hook_and_no_pr` and `tests/test_merge_hook_guardrail.py` continue to pass.
+  582 passed, 26 deselected, 15 subtests passed; both named tests included in the green run.
+- SKIPPED: AC5 (E2E rejection-flow merge-hook fixture).
+  Per dispatch instructions, AC5 requires the live-claude harness and a new fixture; left for a separate task. No fixture staged — adding scaffolding without exercising it would clutter the worktree without independent verification.
+
+### Summary
+Implemented the verdict-rejected bypass as a two-line addition: a `current_verdict` resolve plus a `post_update_verdict` mirror, threaded into the existing merge-hook guard predicate. Five parser-level tests cover AC1-AC4 plus the symmetric AC3-already-PASSED case; full `make test-static` is green (582 passed). AC5 (E2E) is intentionally deferred per the dispatch.
