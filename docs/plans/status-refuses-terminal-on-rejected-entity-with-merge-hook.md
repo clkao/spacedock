@@ -10,7 +10,7 @@ score: 0.55
 worktree: .worktrees/spacedock-ensign-status-refuses-terminal-on-rejected-entity-with-merge-hook
 issue: "#188"
 pr:
-mod-block:
+mod-block: merge:pr-merge
 ---
 
 `status --set status={terminal} verdict=rejected completed` is refused when the workflow has any registered `## Hook: merge` mod AND `pr` is empty AND `mod-block` is empty. The captain MUST pass `--force` to bypass.
