@@ -148,14 +148,19 @@ Categorize each issue into two buckets:
 
 ### 2e. What's next
 
-Extract the dispatchable list and overall workflow view via the plugin-shipped status helper:
+Extract the dispatchable list and overall workflow view via a local-first status resolver. Do not require a workflow-local status helper: if `{dir}/status` exists and is executable, use it; otherwise fall back to the plugin-shipped commission status helper with `--workflow-dir {dir}`.
 
 ```bash
-{spacedock_plugin_dir}/skills/commission/bin/status --workflow-dir {dir} --next
-{spacedock_plugin_dir}/skills/commission/bin/status --workflow-dir {dir}
+if [ -x "{dir}/status" ]; then
+  {dir}/status --next
+  {dir}/status
+else
+  {spacedock_plugin_dir}/skills/commission/bin/status --workflow-dir {dir} --next
+  {spacedock_plugin_dir}/skills/commission/bin/status --workflow-dir {dir}
+fi
 ```
 
-`{spacedock_plugin_dir}` is the plugin directory containing this skill file (the `skills/` parent). If the plugin-shipped status helper is unreachable, raise the error to the captain rather than working around it — the first officer already invoked `status --boot` to start the session, so an unreachable helper here indicates a real environmental problem worth surfacing.
+`{spacedock_plugin_dir}` is the plugin directory containing this skill file (the `skills/` parent). If `{dir}/status` is absent and the plugin-shipped status helper is unreachable, raise the error to the captain rather than working around it — the first officer already invoked `status --boot` to start the session, so an unreachable helper here indicates a real environmental problem worth surfacing.
 
 Use the helper output to populate:
 - Entities blocked at gates (waiting for captain)
@@ -291,6 +296,7 @@ Write the debrief to `{dir}/_debriefs/{date}-{sequence:02d}.md`:
 
 ```markdown
 ---
+schema_version: 1
 session-date: {YYYY-MM-DD}
 sequence: {N}
 first-commit: {hash}
