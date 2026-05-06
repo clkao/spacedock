@@ -1,7 +1,7 @@
 ---
 id: 842ja5phzj5xspyternpww31
 title: "status binary refuses terminal advancement on rejected/abandoned entities when merge hook is registered, even when no PR is intended"
-status: implementation
+status: validation
 source: GitHub issue #188 (clkao/spacedock)
 started: 2026-05-06T08:39:39Z
 completed:
