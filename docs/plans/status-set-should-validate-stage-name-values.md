@@ -10,7 +10,7 @@ score: 0.55
 worktree: .worktrees/spacedock-ensign-status-set-should-validate-stage-name-values
 issue: "#189"
 pr:
-mod-block:
+mod-block: merge:pr-merge
 ---
 
 `status --set {slug} status={value}` accepts arbitrary string values without checking against the workflow README's `stages.states[].name` list. Workers (especially LLM-driven ensigns) can silently write semantically-invalid values like `status: review` when the workflow defines `verify → ship → done`. The result is a quietly broken state machine: subsequent dispatches based on `status --next` skip the entity, downstream gates never fire, and recovery depends on human review.
