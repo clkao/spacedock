@@ -1,7 +1,7 @@
 ---
 id: amrd1r63jfkjq14tvwnkfges
 title: "status --set should validate stage-name values against the workflow's stages.states[].name list"
-status: implementation
+status: validation
 source: GitHub issue #189 (clkao/spacedock)
 started: 2026-05-06T08:39:40Z
 completed:
