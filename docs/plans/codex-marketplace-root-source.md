@@ -1,13 +1,13 @@
 ---
 id: h6e4z6p3jksb4s609n2q3t3k
 title: "Codex marketplace should point directly at Spacedock plugin root"
-status: ideation
+status: implementation
 source: "2026-05-06 captain request: replace plugins/spacedock self-symlink with direct root marketplace source and verify through isolated Codex"
-started:
+started: 2026-05-06T08:45:06Z
 completed:
 verdict:
 score: 0.8
-worktree:
+worktree: .worktrees/spacedock-ensign-codex-marketplace-root-source
 ---
 
 Spacedock's repo-local Codex marketplace currently points at `./plugins/spacedock`, a checked-in symlink back to `..`. That keeps the repo root as the plugin package root while satisfying the common `./plugins/<name>` marketplace convention, but it creates a self-reference that copy/staging code has to special-case.
