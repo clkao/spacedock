@@ -3308,6 +3308,100 @@ class TestMergeHookTerminalGuard(unittest.TestCase):
                                 script_path=self.script_path)
             self.assertEqual(result.returncode, 0, result.stderr)
 
+    def _write_entity_with_verdict(self, path, status, verdict):
+        with open(path, 'w') as f:
+            f.write(textwrap.dedent(f"""\
+                ---
+                id: 001
+                title: Task A
+                status: {status}
+                source:
+                started:
+                completed:
+                verdict: {verdict}
+                score: 0.80
+                worktree:
+                pr:
+                ---
+
+                Description.
+                """))
+
+    def test_set_terminal_allowed_when_verdict_already_rejected(self):
+        """AC1: verdict=rejected in frontmatter bypasses merge-hook guard on terminal --set."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            make_pipeline(tmpdir, README_WITH_STAGES, {
+                'task-a.md': entity('001', 'Task A', 'validation', '0.80'),
+            })
+            entity_path = os.path.join(tmpdir, 'task-a.md')
+            self._write_entity_with_verdict(entity_path, 'validation', 'rejected')
+            _add_merge_hook(tmpdir)
+            result = run_status(tmpdir, '--set', 'task-a', 'status=done', 'completed',
+                                script_path=self.script_path)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            fields = self._read_frontmatter(entity_path)
+            self.assertEqual(fields['status'], 'done')
+
+    def test_set_terminal_allowed_when_verdict_rejected_in_same_call(self):
+        """AC2: verdict=rejected set in same --set call bypasses merge-hook guard."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            make_pipeline(tmpdir, README_WITH_STAGES, {
+                'task-a.md': entity('001', 'Task A', 'validation', '0.80'),
+            })
+            _add_merge_hook(tmpdir)
+            result = run_status(tmpdir, '--set', 'task-a',
+                                'status=done', 'verdict=rejected', 'completed',
+                                script_path=self.script_path)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            fields = self._read_frontmatter(os.path.join(tmpdir, 'task-a.md'))
+            self.assertEqual(fields['status'], 'done')
+            self.assertEqual(fields['verdict'], 'rejected')
+            self.assertNotEqual(fields['completed'], '')
+
+    def test_set_terminal_refused_when_verdict_passed(self):
+        """AC3: verdict=PASSED set in same --set call still triggers merge-hook refusal."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            make_pipeline(tmpdir, README_WITH_STAGES, {
+                'task-a.md': entity('001', 'Task A', 'validation', '0.80'),
+            })
+            _add_merge_hook(tmpdir)
+            result = run_status(tmpdir, '--set', 'task-a',
+                                'status=done', 'verdict=PASSED',
+                                script_path=self.script_path)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('merge hook', result.stderr)
+            fields = self._read_frontmatter(os.path.join(tmpdir, 'task-a.md'))
+            self.assertEqual(fields['status'], 'validation')
+
+    def test_set_verdict_rejected_alone_allowed_with_merge_hook(self):
+        """AC4: verdict=rejected alone on a non-terminal-status entity bypasses guard."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            make_pipeline(tmpdir, README_WITH_STAGES, {
+                'task-a.md': entity('001', 'Task A', 'validation', '0.80'),
+            })
+            _add_merge_hook(tmpdir)
+            result = run_status(tmpdir, '--set', 'task-a', 'verdict=rejected',
+                                script_path=self.script_path)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            fields = self._read_frontmatter(os.path.join(tmpdir, 'task-a.md'))
+            self.assertEqual(fields['verdict'], 'rejected')
+
+    def test_set_terminal_refused_when_verdict_already_passed(self):
+        """AC3 symmetric: verdict=PASSED already in frontmatter still refuses on terminal --set."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            make_pipeline(tmpdir, README_WITH_STAGES, {
+                'task-a.md': entity('001', 'Task A', 'validation', '0.80'),
+            })
+            entity_path = os.path.join(tmpdir, 'task-a.md')
+            self._write_entity_with_verdict(entity_path, 'validation', 'PASSED')
+            _add_merge_hook(tmpdir)
+            result = run_status(tmpdir, '--set', 'task-a', 'status=done', 'completed',
+                                script_path=self.script_path)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('merge hook', result.stderr)
+            fields = self._read_frontmatter(entity_path)
+            self.assertEqual(fields['status'], 'validation')
+
     def test_set_terminal_allowed_without_merge_hook(self):
         """Workflow without merge hooks — terminal transition permitted freely."""
         with tempfile.TemporaryDirectory() as tmpdir:
