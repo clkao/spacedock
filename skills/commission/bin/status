@@ -2338,6 +2338,32 @@ def main():
         stages = parse_stages_block(readme_path) if os.path.exists(readme_path) else None
         terminal_names = {s['name'] for s in (stages or []) if s.get('terminal')}
 
+        # Stage-name validation: when --set writes the status field on a workflow
+        # whose README declares a stages block, reject values not present in
+        # stages.states[].name. --force bypasses with a stderr warning. No
+        # schema (no stages block, missing README, malformed) means no check.
+        if stages:
+            known_stage_names = [s['name'] for s in stages]
+            known_set = set(known_stage_names)
+            for field, value in updates:
+                if field != 'status' or value == '' or value in known_set:
+                    continue
+                if force:
+                    print(
+                        f"Warning: --force overriding unknown stage '{value}' "
+                        f"on entity {slug}",
+                        file=sys.stderr,
+                    )
+                    continue
+                stage_list = ', '.join(known_stage_names)
+                print(
+                    f"Error: '{value}' is not a defined stage in workflow "
+                    f"{pipeline_dir} — known stages: [{stage_list}]. "
+                    f"Use --force to override.",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+
         def is_terminal_update():
             """True when this --set applies any terminal field."""
             for field, value in updates:
