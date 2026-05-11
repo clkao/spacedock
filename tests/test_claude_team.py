@@ -2156,5 +2156,231 @@ class TestBuildStageHeadingParentheticalE2E:
         assert "first content token" in result.stderr
 
 
+def _init_git_repo(repo_root: Path) -> None:
+    """Initialise a real git repo at ``repo_root`` so ``git worktree`` works.
+
+    Tests for the folder-mode fallback need actual ``git worktree add`` calls
+    because the helper invokes ``git worktree list --porcelain``. A bare
+    ``.git`` marker directory is not enough.
+    """
+    subprocess.run(
+        ["git", "init", "-q", "-b", "main", str(repo_root)],
+        check=True, capture_output=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(repo_root), "config", "user.email", "test@example.com"],
+        check=True, capture_output=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(repo_root), "config", "user.name", "Test"],
+        check=True, capture_output=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(repo_root), "config", "commit.gpgsign", "false"],
+        check=True, capture_output=True,
+    )
+
+
+class TestBuildFolderModeWorktreeOnly:
+    """#NEW: folder-mode entities that live ONLY on a worktree branch dispatch.
+
+    Failure mode (pre-fix): ``cmd_build`` rejected entity paths whose
+    filesystem copy did not exist on main, even when a checked-out
+    worktree branch had the file at the same repo-relative location.
+    Folder-mode entities (``<id>-<slug>/index.md``) are git-tracked on a
+    worktree branch until merge, so this gate forced break-glass dispatch.
+    """
+
+    def _make_workflow_readme(self, wf_dir: Path) -> None:
+        wf_dir.mkdir(parents=True, exist_ok=True)
+        (wf_dir / "README.md").write_text(
+            "---\n"
+            "commissioned-by: spacedock@test\n"
+            "entity-label: feature\n"
+            "stages:\n"
+            "  defaults:\n"
+            "    worktree: true\n"
+            "  states:\n"
+            "    - name: ship\n"
+            "      initial: true\n"
+            "    - name: done\n"
+            "      terminal: true\n"
+            "---\n"
+            "\n"
+            "## Stages\n\n"
+            "### `ship`\n\nShip the deliverable.\n\n"
+            "### `done`\n\nTerminal.\n"
+        )
+
+    def _make_folder_entity(
+        self, wf_dir: Path, slug: str, worktree_rel: str
+    ) -> Path:
+        """Create a folder-mode entity inside ``wf_dir`` returning the index.md path."""
+        entity_dir = wf_dir / slug
+        entity_dir.mkdir()
+        entity_md = entity_dir / "index.md"
+        entity_md.write_text(
+            "---\n"
+            "id: 057\n"
+            f"title: Folder mode entity for {slug}\n"
+            "status: ship\n"
+            f"worktree: {worktree_rel}\n"
+            "---\n"
+            "\n"
+            "Folder-mode body.\n"
+        )
+        return entity_md
+
+    def test_folder_mode_worktree_only_entity_dispatches(self, tmp_path):
+        """Folder entity that exists ONLY on a worktree branch resolves via fallback.
+
+        Setup:
+          - git repo at tmp_path with workflow at docs/ship-flow/
+          - workflow README committed to main; folder entity NOT on main
+          - separate worktree branch contains the folder entity
+        Expected: build returns exit 0, prompt references the worktree-side
+        index.md path, derived agent name uses the parent-dir slug (not "index").
+        """
+        _init_git_repo(tmp_path)
+        wf_dir = tmp_path / "docs" / "ship-flow"
+        self._make_workflow_readme(wf_dir)
+        # Commit README to main so worktree add can branch off cleanly
+        subprocess.run(
+            ["git", "-C", str(tmp_path), "add", "docs/ship-flow/README.md"],
+            check=True, capture_output=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(tmp_path), "commit", "-q", "-m", "init workflow"],
+            check=True, capture_output=True,
+        )
+
+        slug = "057-sc-844-tagpicker"
+        wt_rel = ".worktrees/ship-flow-sc-844"
+        wt_abs = tmp_path / wt_rel
+        # Create worktree on a new branch
+        subprocess.run(
+            [
+                "git", "-C", str(tmp_path),
+                "worktree", "add", "-b", "ship-flow/sc-844", str(wt_abs),
+            ],
+            check=True, capture_output=True,
+        )
+        # Add the folder entity ONLY in the worktree (not on main)
+        wt_wf_dir = wt_abs / "docs" / "ship-flow"
+        wt_entity = self._make_folder_entity(wt_wf_dir, slug, wt_rel)
+        subprocess.run(
+            ["git", "-C", str(wt_abs), "add", "."],
+            check=True, capture_output=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(wt_abs), "commit", "-q", "-m", "add folder entity"],
+            check=True, capture_output=True,
+        )
+
+        # Sanity: project-root copy must NOT exist (this is the failing scenario)
+        project_root_entity = wf_dir / slug / "index.md"
+        assert not project_root_entity.exists()
+        # Worktree copy DOES exist
+        assert wt_entity.exists()
+
+        inp = {
+            "schema_version": 1,
+            "entity_path": str(project_root_entity),
+            "workflow_dir": str(wf_dir),
+            "stage": "ship",
+            "checklist": ["1. Verify folder-mode dispatch"],
+            "team_name": "test-team",
+            "feedback_context": None,
+            "scope_notes": None,
+            "bare_mode": False,
+            "is_feedback_reflow": False,
+        }
+        result = run_build(wf_dir, inp, cwd=tmp_path)
+        assert result.returncode == 0, (
+            f"build failed unexpectedly. stderr={result.stderr}"
+        )
+        out = json.loads(result.stdout)
+        # Worker name uses the FOLDER name (slug), not the literal "index"
+        assert out["name"] == f"spacedock-ensign-{slug}-ship", (
+            f"slug derivation regressed: derived name={out['name']!r}"
+        )
+        # Read instruction points at the worktree-side path
+        expected_read = str(wt_abs / "docs" / "ship-flow" / slug / "index.md")
+        assert f"Read the entity file at {expected_read}" in out["prompt"]
+        # Working-directory instruction points at the worktree
+        assert f"Your working directory is {wt_abs}" in out["prompt"]
+
+    def test_folder_mode_fallback_failure_lists_tried_paths(self, tmp_path):
+        """When no worktree contains the entity, error lists every probed path."""
+        _init_git_repo(tmp_path)
+        wf_dir = tmp_path / "docs" / "ship-flow"
+        self._make_workflow_readme(wf_dir)
+        subprocess.run(
+            ["git", "-C", str(tmp_path), "add", "docs/ship-flow/README.md"],
+            check=True, capture_output=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(tmp_path), "commit", "-q", "-m", "init"],
+            check=True, capture_output=True,
+        )
+        # Create a worktree but do NOT put the entity in it
+        wt_abs = tmp_path / ".worktrees" / "unrelated"
+        subprocess.run(
+            [
+                "git", "-C", str(tmp_path),
+                "worktree", "add", "-b", "unrelated", str(wt_abs),
+            ],
+            check=True, capture_output=True,
+        )
+
+        missing_entity = wf_dir / "057-missing" / "index.md"
+        inp = {
+            "schema_version": 1,
+            "entity_path": str(missing_entity),
+            "workflow_dir": str(wf_dir),
+            "stage": "ship",
+            "checklist": ["1. Should fail"],
+            "team_name": "t",
+            "feedback_context": None,
+            "scope_notes": None,
+            "bare_mode": False,
+            "is_feedback_reflow": False,
+        }
+        result = run_build(wf_dir, inp, cwd=tmp_path)
+        assert result.returncode != 0
+        assert "Folder-mode worktree fallback also failed" in result.stderr
+        # Both the project-root path AND the unrelated worktree's candidate path
+        # should appear in the "Tried" list so the captain can debug.
+        assert str(missing_entity) in result.stderr
+        assert str(wt_abs / "docs" / "ship-flow" / "057-missing" / "index.md") in result.stderr
+
+    def test_flat_layout_regression_unchanged_when_file_present(self, tmp_path):
+        """Flat-layout entity with main-side file resolves WITHOUT touching git.
+
+        This guards against accidental subprocess invocation overhead and
+        confirms the original happy path is byte-equivalent.
+        """
+        wf_dir, entity = _make_workflow_fixture(tmp_path)
+        # Note: tmp_path is NOT a git repo here. If the helper fell through
+        # to _list_worktrees, the subprocess would still succeed (returning
+        # empty), but the assertion below confirms entity_path was returned
+        # via the fast `os.path.isfile()` short-circuit.
+        inp = {
+            "schema_version": 1,
+            "entity_path": str(entity),
+            "workflow_dir": str(wf_dir),
+            "stage": "ideation",
+            "checklist": ["1. Flat-layout regression"],
+            "team_name": "regression-team",
+            "bare_mode": False,
+        }
+        result = run_build(wf_dir, inp)
+        assert result.returncode == 0, f"stderr: {result.stderr}"
+        out = json.loads(result.stdout)
+        # Slug derived from stem (NOT folder name): file is "my-task.md"
+        assert out["name"] == "spacedock-ensign-my-task-ideation"
+        assert f"Read the entity file at {entity}" in out["prompt"]
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__]))
