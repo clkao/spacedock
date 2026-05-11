@@ -2156,5 +2156,83 @@ class TestBuildStageHeadingParentheticalE2E:
         assert "first content token" in result.stderr
 
 
+class TestBuildUnderscoreStageError:
+    """AC-2: dispatch-time error names the offending stage and points at status --validate."""
+
+    def test_build_underscore_stage_error_message(self, tmp_path):
+        wf_dir = tmp_path / "workflow"
+        wf_dir.mkdir()
+        readme = wf_dir / "README.md"
+        readme.write_text(
+            "---\n"
+            "commissioned-by: spacedock@test\n"
+            "entity-label: task\n"
+            "stages:\n"
+            "  defaults:\n"
+            "    worktree: false\n"
+            "    concurrency: 2\n"
+            "  states:\n"
+            "    - name: backlog\n"
+            "      initial: true\n"
+            "    - name: in_progress\n"
+            "    - name: done\n"
+            "      terminal: true\n"
+            "---\n"
+            "\n"
+            "# Workflow\n"
+            "\n"
+            "## Stages\n"
+            "\n"
+            "### `backlog`\n"
+            "\n"
+            "Seed.\n"
+            "\n"
+            "### `in_progress`\n"
+            "\n"
+            "Doing.\n"
+            "\n"
+            "### `done`\n"
+            "\n"
+            "Terminal.\n"
+        )
+        entity = wf_dir / "sample.md"
+        entity.write_text(
+            "---\n"
+            "id: 001\n"
+            "title: Sample entity\n"
+            "status: in_progress\n"
+            "---\n"
+            "\n"
+            "Body.\n"
+        )
+        inp = {
+            "schema_version": 1,
+            "entity_path": str(entity),
+            "workflow_dir": str(wf_dir),
+            "stage": "in_progress",
+            "checklist": ["1. Do the thing"],
+            "team_name": "test-team",
+            "bare_mode": False,
+        }
+        result = run_build(wf_dir, inp)
+        assert result.returncode != 0, (
+            f'expected build to fail for underscore stage; stdout={result.stdout!r} '
+            f'stderr={result.stderr!r}'
+        )
+        derived_name = "spacedock-ensign-sample-in_progress"
+        stderr = result.stderr
+        assert derived_name in stderr, (
+            f'error must include the offending derived name {derived_name!r}; '
+            f'stderr={stderr!r}'
+        )
+        assert 'stage name' in stderr.lower(), (
+            f"error must include the substring 'stage name'; stderr={stderr!r}"
+        )
+        assert 'validate' in stderr.lower(), (
+            f"error must point at the upstream validator (substring 'validate'); "
+            f"stderr={stderr!r}"
+        )
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__]))
