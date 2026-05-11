@@ -128,3 +128,20 @@ Fleshed the task body around direction 2 (reject underscored stage names at `sta
 ### Summary
 
 Folded all five fixup notes plus the optional AC-format polish. The biggest correction was the dishonest "one-liner" framing in item 1 — `validate_workflow()` doesn't currently open the README at all, so the change is a small but genuinely new code path with its own failure modes (covered in the test plan). Scope is now the full character class, not just underscores, with seven parametrized test cases. AC-2 wording is loosened to stable substrings. Primary-home reasoning for `--validate` is explicit.
+
+## Stage Report: implementation
+
+- DONE: Mechanism-check-first: write the AC-1 parametrized failing test in tests/test_status_validate.py, run it against current code to confirm it fails (no error today for invalid stage names), commit the test BEFORE the validate_workflow change lands.
+  Commit 06f71036 — 8/11 tests failed against current code (the 7 invalid-name parametrize cases plus the underscore-suggestion case); the 3 silent-skip / kebab-accept tests passed.
+- DONE: validate_workflow's new stage-name check enforces the full dispatch-name character class (^[a-z0-9][a-z0-9-]*[a-z0-9]$), and all seven AC-1 parametrized cases (underscore, uppercase, space, dot, leading-hyphen, trailing-hyphen, single-char) plus the two failure-mode cases (README-missing, no-stages-block) pass.
+  Commit 98e4e68e — adds STAGE_NAME_RE, validate_workflow_stage_names() (resolves README path, calls parse_stages_block, regex-checks each name, returns []  silently on README-missing/no-stages), and a kebab suggestion helper. 11/11 tests in tests/test_status_validate.py pass.
+- DONE: claude-team build's error string at line 317-318 is refined to satisfy AC-2's stable-substring contract: stderr contains the offending derived name, the substring 'stage name', and 'validate' (case-insensitive). The AC-2 test passes against the refined string.
+  Commit 9edec125 — claude-team:317-324 emits derived name + stage name + pointer at `status --validate`; new TestBuildUnderscoreStageError::test_build_underscore_stage_error_message in tests/test_claude_team.py asserts the three substrings.
+- DONE: AC-4 SKILL.md convention note (covered by completion checklist via the grep verifier).
+  Commit 9edec125 — added one-line comment in skills/commission/SKILL.md:287 above `defaults:`. Grep `grep -nE "kebab|stage name.*\^\[a-z0-9\]|stage.*lowercase.*hyphen" skills/commission/SKILL.md` returns the new line.
+- DONE: Run `make test-static` from the worktree root as part of validation.
+  600 passed, 26 deselected, 15 subtests passed in 27.49s. No regressions.
+
+### Summary
+
+Implemented direction 2 (reject at `status --validate`) per the ideation spec. Added STAGE_NAME_RE and a new validate_workflow_stage_names() helper that reads the README, parses the stages block, and emits one error per stage name violating the dispatch-name regex; README-missing and no-stages-block cases skip silently. Refined the claude-team dispatch-time error to name the offending stage and point at `status --validate`. Surfaced the convention as a one-line comment in the SKILL.md workflow template. Three commits, eleven new tests pass, full test-static green at 600/600.
