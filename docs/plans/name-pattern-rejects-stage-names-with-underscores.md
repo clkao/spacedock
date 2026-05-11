@@ -9,6 +9,7 @@ verdict:
 score:
 worktree: .worktrees/spacedock-ensign-name-pattern-rejects-stage-names-with-underscores
 mod-block: merge:pr-merge
+pr: #206
 ---
 
 `claude-team build` derives `Agent()` names as `{worker_key}-{slug}-{stage}` and validates them against `NAME_PATTERN = ^[a-z0-9][a-z0-9-]*[a-z0-9]$` (`skills/commission/bin/claude-team:37`, used at line 317). Workflows whose `stages.states[].name` contains underscores cannot be dispatched — the derived name carries the underscore through and fails the regex with `derived name '...' contains invalid characters`.
