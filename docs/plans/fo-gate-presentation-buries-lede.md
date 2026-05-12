@@ -1,13 +1,13 @@
 ---
 id: 0f1smz7rrgm3rdrw5ssqtrhr
 title: FO gate presentation buries the lede and flattens reviewer priority
-status: ideation
+status: implementation
 source: captain (CL) — self-critique during ideation gate on `bw / name-pattern-rejects-stage-names-with-underscores`
 started: 2026-05-12T03:38:42Z
 completed:
 verdict:
 score:
-worktree:
+worktree: .worktrees/spacedock-ensign-fo-gate-presentation-buries-lede
 ---
 
 The FO's gate-review message — the one assembled per `skills/first-officer/references/claude-first-officer-runtime.md` `## Gate Presentation` and the shared-core gate flow — is captain-hostile in its current form. A fresh-eye captain reading the gate message I produced for `bw` ideation could not, without scrolling, answer "what direction was chosen" or "what's the one thing I actually need to decide". Concrete defects, in roughly the order they cost the captain attention:
