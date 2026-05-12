@@ -9,6 +9,7 @@ verdict:
 score:
 worktree: .worktrees/spacedock-ensign-fo-gate-presentation-buries-lede
 mod-block: merge:pr-merge
+pr: #208
 ---
 
 The FO's gate-review message — the one assembled per `skills/first-officer/references/claude-first-officer-runtime.md` `## Gate Presentation` and the shared-core gate flow — is captain-hostile in its current form. A fresh-eye captain reading the gate message I produced for `bw` ideation could not, without scrolling, answer "what direction was chosen" or "what's the one thing I actually need to decide". Concrete defects, in roughly the order they cost the captain attention:
