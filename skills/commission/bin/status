@@ -2367,6 +2367,7 @@ def main():
         current_fields = parse_frontmatter(entity_path)
         mod_block = current_fields.get('mod-block', '').strip()
         current_pr = current_fields.get('pr', '').strip()
+        current_verdict = current_fields.get('verdict', '').strip()
         clearing_mod_block = any(
             field == 'mod-block' and value == '' for field, value in updates
         )
@@ -2392,6 +2393,14 @@ def main():
         for field, value in updates:
             if field == 'pr':
                 post_update_pr = value.strip()
+
+        # Resolve the post-update verdict the same way; the merge-hook guard
+        # below treats the literal value 'rejected' as a captain-authoritative
+        # "this is not a ship" record and bypasses the hook requirement.
+        post_update_verdict = current_verdict
+        for field, value in updates:
+            if field == 'verdict':
+                post_update_verdict = value.strip()
 
         if (mod_block or clearing_mod_block) and not force:
             if is_terminal_update():
@@ -2419,7 +2428,8 @@ def main():
         # hook completion by requiring a non-empty pr, a set mod-block (hook
         # in flight), or --force. If none of those hold, the FO is trying to
         # skip the hook entirely — refuse so the hook cannot be bypassed.
-        if not force and is_terminal_update() and not mod_block and not post_update_pr:
+        if (not force and is_terminal_update() and not mod_block
+                and not post_update_pr and post_update_verdict != 'rejected'):
             merge_hooks = scan_mods(pipeline_dir).get('merge', [])
             if merge_hooks:
                 hook_list = ', '.join(merge_hooks)
