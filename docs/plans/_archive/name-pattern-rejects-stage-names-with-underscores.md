@@ -1,13 +1,13 @@
 ---
 id: bwck187yrng4rgxeyar1kfzz
 title: NAME_PATTERN rejects stage names with underscores
-status: validation
+status: done
 source: captain (CL)
 started: 2026-05-11T06:39:07Z
-completed:
-verdict:
+completed: 2026-05-12T03:38:21Z
+verdict: PASSED
 score:
-worktree: .worktrees/spacedock-ensign-name-pattern-rejects-stage-names-with-underscores
+worktree: 
 mod-block: 
 pr: #206
 ---
