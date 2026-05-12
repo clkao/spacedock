@@ -8,7 +8,7 @@ completed:
 verdict:
 score:
 worktree: .worktrees/spacedock-ensign-fo-gate-presentation-buries-lede
-mod-block: merge:pr-merge
+mod-block: 
 pr: #208
 ---
 
