@@ -256,3 +256,7 @@ Replaced the `## Gate Presentation` section of `skills/first-officer/references/
 ### Summary
 
 PASSED. AC-1 through AC-6 verified with concrete grep / git-diff / fixture-reading evidence against the post-edit runtime adapter at commit 5bc85a2c. Scope is clean (only the two expected files changed). The post-edit `## Gate Presentation` section is internally coherent: the nine assembly rules align with the template they accompany, and the cycle-2 reconciliation (dropping `validation` from the template's `n/a` enumeration so rule #2 owns the chosen-direction claim end-to-end) is correctly applied. The worked-example fixture's first three lines match AC-5's structural form verbatim.
+
+### Feedback Cycles
+
+- **Cycle 1 (captain-rejected validation, routed to implementation):** Live application of rule #3 (verbatim Stage Report paste, fenced ` ```markdown `) exposed two defects: (a) nested-fence collision when the Stage Report itself contains triple-backtick literals (e.g., a bullet citing `grep -n '` ```markdown ` '`), forcing escape massaging that violates "verbatim"; (b) captain-decision-weight problem — the ~20-line paste pushes the Decision line below evidence detail the captain only audits, recreating defect #1 (lede buried) through the Stage Report instead of through FO prose. Captain iterated four variants (pure cite, verbatim, truncated, gist) and selected the verb-noun gist form. Routing back to implementation with the new rule text and matching template/AC-3 updates.
