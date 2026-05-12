@@ -185,41 +185,6 @@ Track "hint emitted" in session memory so it does not repeat. In bare mode and D
 
 **Single-entity mode exception:** When in single-entity mode (no interactive captain), gates auto-resolve from the stage report recommendation. PASSED (all checklist items done, no failures) → approve. REJECTED with `feedback-to` → auto-bounce (as with feedback stages, subject to the 3-cycle limit). REJECTED without `feedback-to` → report failure and exit. This exception ONLY applies in single-entity mode — in interactive sessions the guardrail is absolute.
 
-## Gate Presentation
-
-Present gate reviews in this format:
-
-```
-Gate review: {entity title} — {stage}
-Chosen direction: {one-line summary of the ensign's chosen approach, or `n/a` for stages without a chosen-direction concept (e.g., simple work stages, merge)}
-Recommend {approve | reject: {one-line reason}}.
-
-Checklist (from ## Stage Report in {entity_file_path} lines {start}-{end}):
-- DONE: {≤10-word gist of item}
-- SKIPPED: {gist} — {one-line reason}
-- FAILED: {gist} — {one-line reason}
-
-{If reviewer findings exist, render them under a `Reviewer findings` heading in two tiers — `Material:` (fact-corrections, contract violations, missing AC evidence, broken claims) and `Polish:` (wording, format drift, non-blocking suggestions). Drop the tier entirely if it has no items. If no reviewer ran, omit this whole block.}
-
-Assessment: {N} done, {N} skipped, {N} failed.
-
-Decision: {one-line decision prompt naming what approval/rejection does in concrete terms — e.g., "approve to enter implementation in worktree `.worktrees/...`" or "reject to bounce back to {feedback-to target} with the material findings above"}.
-```
-
-### Captain-facing assembly rules
-
-The template above is the floor, not the ceiling — but the FO MUST hold to the following discipline when filling it:
-
-1. **Lede first, decision last, nothing between them buried.** The first three lines (title, chosen direction, recommend) and the final line (decision prompt) are the message's spine. Everything else is supporting evidence that the captain may scroll for. If the captain stops reading after the first three lines, they can still vote.
-2. **Chosen direction is required as FO prose.** When the stage involved selecting among options (ideation picks an approach, validation picks PASS/REJECTED, etc.), the FO names the chosen direction in its own one-line summary on the `Chosen direction:` line. Do not make the captain infer it from the Checklist gist or open the entity file. For stages without a chosen-direction concept (e.g., simple work stages), use `n/a`.
-3. **Cite the Stage Report; render a one-line gist roll-up.** Do not paste the verbatim Stage Report into the gate message. Under a `Checklist:` heading, render one bullet per item from the ensign's DONE/SKIPPED/FAILED accounting using a verb-noun gist of the item (≤10 words, FO paraphrase that preserves the original item's semantics and introduces no new facts). For SKIPPED or FAILED items, append `— {one-line reason}` after the gist. Then cite the full report by file path and line range so the captain can audit if they want. If a reviewer Material finding directly questions a specific checklist item's evidence, inline that item's evidence paragraph from the report under the relevant reviewer-finding bullet — so the captain can decide without opening the file. Otherwise no Stage Report content appears in the gate message.
-4. **Reviewer findings render in priority tiers.** When a staff-reviewer subagent ran, group its findings into `Material:` (fact-corrections, contract violations, missing AC evidence, claims contradicted by the codebase) and `Polish:` (wording, format drift, non-blocking suggestions). Drop the tier entirely if it has no items. Do not flat-bullet material findings next to polish findings.
-5. **Recommendation appears exactly once.** The `Recommend {approve | reject: {reason}}` line is the only place the FO states its verdict. Do not duplicate it in a separate "I recommend #2" paragraph and then re-explain it in an enumerated list. Pick the one-line form.
-6. **Bounce-back recommendations quote the concrete asks.** If recommending reject, the reason line names the specific concerns by content, not by reference. Bad: "address the reviewer's five concrete notes." Good: "tighten AC-2 substring assertion; correct the file X claim; cut the format-pedantry aside."
-7. **No format-pedantry asides.** Format drift (`1./2./3./4.` instead of `**AC-N**`, missing trailing period, etc.) is not load-bearing for a gate decision. If it doesn't block the gate, do not surface it. If it does, it is a Material finding under reviewer findings — not a separate paragraph.
-8. **One sentence of worktree heads-up when approval changes worktree state.** If approving this gate will open or close a worktree (entering a `worktree: true` stage, or merging out of one), the Decision line names it: "approve to enter implementation in worktree `.worktrees/{worker_key}-{slug}`". One sentence, not a section.
-9. **Target length: 15-25 lines of FO-authored prose.** The full gate message — title, lede, recommendation, Checklist gist roll-up, reviewer findings, assessment, decision — should fit in 15-25 lines. The Checklist is per-item one-liners (≤10-word gists), not the verbatim Stage Report; per rule #3 the report is cited, not pasted. If the message exceeds 25 lines, the FO is over-narrating; cut.
-
 ## Feedback Rejection Flow (bare mode)
 
 In bare mode, the feedback rejection flow is sequential: dispatch fix agent (wait for completion), then dispatch reviewer (wait for completion), then present at gate.
