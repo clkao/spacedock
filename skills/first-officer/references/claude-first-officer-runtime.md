@@ -191,11 +191,31 @@ Present gate reviews in this format:
 
 ```
 Gate review: {entity title} — {stage}
+Chosen direction: {one-line summary of the ensign's chosen approach, or `n/a` for stages without a chosen-direction concept (e.g., simple work stages, merge)}
+Recommend {approve | reject: {one-line reason}}.
 
-{paste the ## Stage Report section from the entity file verbatim}
+{paste the ## Stage Report section from the entity file verbatim, fenced in a ```markdown code block so authorship is unambiguous}
 
-Assessment: {N} done, {N} skipped, {N} failed. [Recommend approve / Recommend reject: {reason}]
+{If reviewer findings exist, render them under a `Reviewer findings` heading in two tiers — `Material:` (fact-corrections, contract violations, missing AC evidence, broken claims) and `Polish:` (wording, format drift, non-blocking suggestions). Drop the tier entirely if it has no items. If no reviewer ran, omit this whole block.}
+
+Assessment: {N} done, {N} skipped, {N} failed.
+
+Decision: {one-line decision prompt naming what approval/rejection does in concrete terms — e.g., "approve to enter implementation in worktree `.worktrees/...`" or "reject to bounce back to {feedback-to target} with the material findings above"}.
 ```
+
+### Captain-facing assembly rules
+
+The template above is the floor, not the ceiling — but the FO MUST hold to the following discipline when filling it:
+
+1. **Lede first, decision last, nothing between them buried.** The first three lines (title, chosen direction, recommend) and the final line (decision prompt) are the message's spine. Everything else is supporting evidence that the captain may scroll for. If the captain stops reading after the first three lines, they can still vote.
+2. **Chosen direction is required as FO prose.** When the stage involved selecting among options (ideation picks an approach, validation picks PASS/REJECTED, etc.), the FO names the chosen direction in its own one-line summary on the `Chosen direction:` line. Do not make the captain infer it from the Stage Report paste or the entity file. For stages without a chosen-direction concept (e.g., simple work stages), use `n/a`.
+3. **Stage Report goes in a fenced `markdown` block.** The verbatim ensign-authored Stage Report is rendered inside a fenced code block (` ```markdown ` open / ` ``` ` close) so authorship is visually unambiguous — these are the ensign's words, not the FO's.
+4. **Reviewer findings render in priority tiers.** When a staff-reviewer subagent ran, group its findings into `Material:` (fact-corrections, contract violations, missing AC evidence, claims contradicted by the codebase) and `Polish:` (wording, format drift, non-blocking suggestions). Drop the tier entirely if it has no items. Do not flat-bullet material findings next to polish findings.
+5. **Recommendation appears exactly once.** The `Recommend {approve | reject: {reason}}` line is the only place the FO states its verdict. Do not duplicate it in a separate "I recommend #2" paragraph and then re-explain it in an enumerated list. Pick the one-line form.
+6. **Bounce-back recommendations quote the concrete asks.** If recommending reject, the reason line names the specific concerns by content, not by reference. Bad: "address the reviewer's five concrete notes." Good: "tighten AC-2 substring assertion; correct the file X claim; cut the format-pedantry aside."
+7. **No format-pedantry asides.** Format drift (`1./2./3./4.` instead of `**AC-N**`, missing trailing period, etc.) is not load-bearing for a gate decision. If it doesn't block the gate, do not surface it. If it does, it is a Material finding under reviewer findings — not a separate paragraph.
+8. **One sentence of worktree heads-up when approval changes worktree state.** If approving this gate will open or close a worktree (entering a `worktree: true` stage, or merging out of one), the Decision line names it: "approve to enter implementation in worktree `.worktrees/{worker_key}-{slug}`". One sentence, not a section.
+9. **Target length: 15-25 lines of FO-authored prose, plus the pasted Stage Report.** The Stage Report is whatever length the ensign wrote (typically 30-50 lines per the ensign protocol). The FO's surrounding prose — title, lede, recommendation, reviewer findings, assessment, decision — should fit in 15-25 lines. If it doesn't, the FO is over-narrating; cut.
 
 ## Feedback Rejection Flow (bare mode)
 
