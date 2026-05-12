@@ -393,6 +393,7 @@ SD_B32_ALPHABET = '0123456789abcdefghjkmnpqrstvwxyz'
 SD_B32_ID_LENGTH = 24
 SD_B32_MIN_PREFIX = 2
 SD_B32_ID_RE = re.compile(r'^[%s]{%d}$' % (SD_B32_ALPHABET, SD_B32_ID_LENGTH))
+STAGE_NAME_RE = re.compile(r'^[a-z0-9][a-z0-9-]*[a-z0-9]$')
 
 
 def discover_entity_files(directory):
@@ -696,11 +697,47 @@ def apply_effective_ids(entities, id_style, all_entities=None):
     return entities
 
 
+def _kebab_suggestion(name):
+    """Best-effort kebab-case suggestion for an invalid stage name."""
+    lowered = name.lower()
+    replaced = re.sub(r'[^a-z0-9]+', '-', lowered)
+    return replaced.strip('-')
+
+
+def validate_workflow_stage_names(workflow_dir):
+    """Return errors for any README stage name violating the dispatch-name regex.
+
+    Reads the README via parse_stages_block. Returns [] silently when the README is
+    missing or contains no stages block — those shapes are enforced elsewhere.
+    """
+    readme_path = os.path.join(workflow_dir, 'README.md')
+    if not os.path.exists(readme_path):
+        return []
+    try:
+        states = parse_stages_block(readme_path)
+    except Exception:
+        return []
+    if not states:
+        return []
+    errors = []
+    for state in states:
+        name = state.get('name', '')
+        if not name or STAGE_NAME_RE.match(name):
+            continue
+        suggestion = _kebab_suggestion(name) or 'a-kebab-name'
+        errors.append(
+            f"workflow {workflow_dir!r}: stage name {name!r} must match "
+            f"^[a-z0-9][a-z0-9-]*[a-z0-9]$; rename to {suggestion!r} or similar"
+        )
+    return errors
+
+
 def validate_workflow(workflow_dir, git_root, id_style):
     """Return a list of validation error lines for active + archived entities."""
     errors = []
     errors.extend(find_entity_form_conflicts(workflow_dir, 'active'))
     errors.extend(find_entity_form_conflicts(os.path.join(workflow_dir, '_archive'), 'archived'))
+    errors.extend(validate_workflow_stage_names(workflow_dir))
 
     entities = active_and_archived_entities(workflow_dir, git_root)
     sd_b32_display = compute_sd_b32_display_ids(entities) if id_style == 'sd-b32' else {}

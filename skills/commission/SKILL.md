@@ -284,6 +284,7 @@ entity-label: {entity_label}
 entity-label-plural: {entity_label_plural}
 id-style: {id_style}
 stages:
+  # Stage names must match ^[a-z0-9][a-z0-9-]*[a-z0-9]$ (kebab-case lowercase, no underscores or spaces); `status --validate` rejects others.
   defaults:
     worktree: false
     concurrency: 2

@@ -315,7 +315,13 @@ def cmd_build(args):
     if len(derived_name) > NAME_MAX_LEN:
         return _build_error(f"derived name '{derived_name}' exceeds {NAME_MAX_LEN} characters")
     if not NAME_PATTERN.match(derived_name):
-        return _build_error(f"derived name '{derived_name}' contains invalid characters")
+        return _build_error(
+            f"derived name '{derived_name}' contains invalid characters: "
+            f"stage name '{stage}' must match {NAME_PATTERN.pattern} (kebab-case "
+            f"lowercase letters, digits, and hyphens only). "
+            f"Run `status --validate` against the workflow to surface the same "
+            f"stage-name error upstream of dispatch."
+        )
 
     # Extract stage subsection from README
     try:

@@ -128,3 +128,41 @@ Fleshed the task body around direction 2 (reject underscored stage names at `sta
 ### Summary
 
 Folded all five fixup notes plus the optional AC-format polish. The biggest correction was the dishonest "one-liner" framing in item 1 — `validate_workflow()` doesn't currently open the README at all, so the change is a small but genuinely new code path with its own failure modes (covered in the test plan). Scope is now the full character class, not just underscores, with seven parametrized test cases. AC-2 wording is loosened to stable substrings. Primary-home reasoning for `--validate` is explicit.
+
+## Stage Report: implementation
+
+- DONE: Mechanism-check-first: write the AC-1 parametrized failing test in tests/test_status_validate.py, run it against current code to confirm it fails (no error today for invalid stage names), commit the test BEFORE the validate_workflow change lands.
+  Commit 06f71036 — 8/11 tests failed against current code (the 7 invalid-name parametrize cases plus the underscore-suggestion case); the 3 silent-skip / kebab-accept tests passed.
+- DONE: validate_workflow's new stage-name check enforces the full dispatch-name character class (^[a-z0-9][a-z0-9-]*[a-z0-9]$), and all seven AC-1 parametrized cases (underscore, uppercase, space, dot, leading-hyphen, trailing-hyphen, single-char) plus the two failure-mode cases (README-missing, no-stages-block) pass.
+  Commit 98e4e68e — adds STAGE_NAME_RE, validate_workflow_stage_names() (resolves README path, calls parse_stages_block, regex-checks each name, returns []  silently on README-missing/no-stages), and a kebab suggestion helper. 11/11 tests in tests/test_status_validate.py pass.
+- DONE: claude-team build's error string at line 317-318 is refined to satisfy AC-2's stable-substring contract: stderr contains the offending derived name, the substring 'stage name', and 'validate' (case-insensitive). The AC-2 test passes against the refined string.
+  Commit 9edec125 — claude-team:317-324 emits derived name + stage name + pointer at `status --validate`; new TestBuildUnderscoreStageError::test_build_underscore_stage_error_message in tests/test_claude_team.py asserts the three substrings.
+- DONE: AC-4 SKILL.md convention note (covered by completion checklist via the grep verifier).
+  Commit 9edec125 — added one-line comment in skills/commission/SKILL.md:287 above `defaults:`. Grep `grep -nE "kebab|stage name.*\^\[a-z0-9\]|stage.*lowercase.*hyphen" skills/commission/SKILL.md` returns the new line.
+- DONE: Run `make test-static` from the worktree root as part of validation.
+  600 passed, 26 deselected, 15 subtests passed in 27.49s. No regressions.
+
+### Summary
+
+Implemented direction 2 (reject at `status --validate`) per the ideation spec. Added STAGE_NAME_RE and a new validate_workflow_stage_names() helper that reads the README, parses the stages block, and emits one error per stage name violating the dispatch-name regex; README-missing and no-stages-block cases skip silently. Refined the claude-team dispatch-time error to name the offending stage and point at `status --validate`. Surfaced the convention as a one-line comment in the SKILL.md workflow template. Three commits, eleven new tests pass, full test-static green at 600/600.
+
+## Stage Report: validation
+
+- DONE: Each **AC-N** in the entity body has its 'Verified by' clause located and reproduced — run the named test, perform the named grep, and cite the concrete result. Report any AC whose evidence cannot be reproduced as FAILED, not as DONE.
+  - **AC-1** (`tests/test_status_validate.py::test_validate_rejects_invalid_stage_names` + `test_validate_underscore_suggests_kebab`): reproduced — all 7 parametrize cases (`in_progress`, `InProgress`, `in progress`, `in.progress`, `-leading-hyphen`, `trailing-hyphen-`, `x`) PASS; the kebab-suggestion check for `in_progress` PASS. Stderr names the offending stage and includes the substring `stage name`.
+  - **AC-2** (`tests/test_claude_team.py::TestBuildUnderscoreStageError::test_build_underscore_stage_error_message`): reproduced — 1 PASS. Independently confirmed by reading `skills/commission/bin/claude-team:317-324`: the error string interpolates the offending `derived_name`, the literal `stage name`, and `Run \`status --validate\`` (case-insensitive substring `validate` present). All three stable substrings verified.
+  - **AC-3** (`tests/test_status_validate.py::test_validate_accepts_kebab_stage_names`): reproduced — PASS, exit 0, stdout contains `VALID` against the standard hyphenated `README_WITH_STAGES` fixture.
+  - **AC-4** (grep verifier): reproduced — `grep -nE "kebab|stage name.*\^\[a-z0-9\]|stage.*lowercase.*hyphen" skills/commission/SKILL.md` returns `287:  # Stage names must match ^[a-z0-9][a-z0-9-]*[a-z0-9]$ ...`. Line 287 sits inside the workflow `stages:` template block (lines 286-302), satisfying the AC's "within the stages-template section" requirement.
+- DONE: `make test-static` runs clean from the worktree (full count cited), AND the AC-specific tests (tests/test_status_validate.py and the AC-2 test in tests/test_claude_team.py) are run individually with explicit pass/fail counts in the report. A whole-suite pass with one AC-specific failure is still a REJECT.
+  - `tests/test_status_validate.py` run individually: **11 passed, 0 failed** (0.30s).
+  - `tests/test_claude_team.py::TestBuildUnderscoreStageError` run individually: **1 passed, 0 failed** (0.04s).
+  - `make test-static`: **600 passed, 26 deselected, 15 subtests passed** in 27.33s. No failures, no regressions.
+- DONE: PASSED/REJECTED recommendation with reasoning — explicitly check for scope drift (was NAME_PATTERN at claude-team:37 touched? Was anything outside the (status, claude-team, SKILL.md) surface changed?) and for tests passing but proving obsolete or wrong-abstraction behavior (per the workflow README's 'Bad' guidance for validation).
+  - **PASSED.**
+  - Scope-drift check: `git diff 25cfd2b3..HEAD --name-only` lists only `docs/plans/name-pattern-rejects-stage-names-with-underscores.md`, `skills/commission/SKILL.md`, `skills/commission/bin/claude-team`, `skills/commission/bin/status`, `tests/test_claude_team.py`, `tests/test_status_validate.py`. No other files touched. `grep -n "NAME_PATTERN" skills/commission/bin/claude-team` shows `NAME_PATTERN = re.compile(r'^[a-z0-9][a-z0-9-]*[a-z0-9]$')` at line 37 — unchanged from baseline. The dispatch regex stays load-bearing; only its error string at 317-324 was refined.
+  - Abstraction-level check: the ideation explicitly rules out E2E ("static validation of workflow README config, not runtime dispatch behavior"). Unit tests at `validate_workflow()` and at `cmd_build`'s error path are the proof-at-the-same-abstraction-level the AC list demands. No test is rubber-stamping mocked behavior — `test_status_validate.py` shells out to a real built `status` script, and the AC-2 test invokes `cmd_build` against a real on-disk fixture.
+  - Obsolete-behavior check: each AC's verified-by clause matches the current code path it targets (validator entry, dispatch-time check, SKILL template). No drift between AC prose and the tested target.
+
+### Summary
+
+Validated all four ACs against fresh reproduction of their named evidence. `make test-static`: 600 passed, 26 deselected, 15 subtests passed. AC-specific runs: 11/11 on `test_status_validate.py` and 1/1 on `TestBuildUnderscoreStageError`. Scope is tight (status, claude-team, SKILL.md, tests, entity file only); NAME_PATTERN at claude-team:37 is untouched. Recommendation: **PASSED**.
