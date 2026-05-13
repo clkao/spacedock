@@ -331,7 +331,7 @@ def cmd_build(args):
     if stage_subsection is None:
         return _build_error(f"stage '{stage}' heading not found in {readme_path}")
 
-    # --- Prompt Assembly (9 components) ---
+    # --- Prompt Assembly (10 components) ---
     prompt_parts = []
 
     # 0. Operating-contract first-action directive
@@ -351,6 +351,14 @@ def cmd_build(args):
 
     # 1. Header
     prompt_parts.append(f'You are working on: {entity_title}\n\nStage: {stage}\n')
+
+    # 1.5. Skill loading instruction (conditional)
+    stage_skill = stage_meta.get('skill')
+    if stage_skill:
+        prompt_parts.append(
+            f'**Before starting work**, invoke `Skill("{stage_skill}")` to load '
+            f'the stage skill. Follow its instructions for this stage.\n'
+        )
 
     # 2. Stage definition
     prompt_parts.append(f'### Stage definition:\n\n{stage_subsection}\n')
