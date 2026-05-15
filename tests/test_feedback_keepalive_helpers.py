@@ -15,7 +15,42 @@ import pytest
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE.parent / "scripts"))
 
-from test_lib import _agent_targets_stage
+from test_lib import DispatchRecord, _agent_targets_stage
+
+
+def _impl_count(records: list[DispatchRecord]) -> int:
+    return sum(1 for r in records if "implementation" in r.ensign_name.lower())
+
+
+_FIXTURE_LEGIT = [
+    DispatchRecord("Implementation: greeting.txt", 30.2),
+    DispatchRecord("Validation", 22.6),
+]
+
+_FIXTURE_ORIGINAL_BUG = [
+    DispatchRecord("Implementation: greeting.txt", 30.2),
+    DispatchRecord("Validation", 22.6),
+    DispatchRecord("Implementation cycle 2: greeting.txt", 12.0),
+    DispatchRecord("Validation cycle 2", 0.0),
+]
+
+
+class TestDispatchCountAssertions:
+    """Exercise the impl-count expression used by `test_feedback_keepalive`.
+
+    The post-edit assertion is: exactly 1 record with `"implementation"` in
+    `ensign_name` (case-insensitive). These cases prove the assertion passes
+    against the legitimate contract and catches the original bug (a fresh
+    second implementation Agent() dispatch instead of SendMessage routing).
+    """
+
+    def test_passes_against_current_contract(self):
+        """Legitimate flow: impl==1."""
+        assert _impl_count(_FIXTURE_LEGIT) == 1
+
+    def test_catches_original_bug_on_impl_count(self):
+        """Original bug: the impl==1 check fails (counts 2)."""
+        assert _impl_count(_FIXTURE_ORIGINAL_BUG) != 1
 
 
 class TestAgentTargetsStage:

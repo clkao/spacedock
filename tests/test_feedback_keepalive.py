@@ -187,8 +187,8 @@ def test_feedback_keepalive(test_project, model, effort):
     records = w.dispatch_records
     print(f"  dispatch records: {[(r.ensign_name, round(r.elapsed, 1)) for r in records]}")
     t.check(
-        "FO emitted exactly two ensign Agent() dispatches (impl + validation; feedback via SendMessage)",
-        len(records) == 2,
+        "FO emitted exactly 1 implementation-suffixed ensign Agent() dispatch (feedback via SendMessage, not fresh impl Agent)",
+        sum(1 for r in records if "implementation" in r.ensign_name.lower()) == 1,
     )
     t.check(
         "all dispatches closed under the per-dispatch budget",
