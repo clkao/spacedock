@@ -32,7 +32,7 @@ def test_codex_plugin_manifest_matches_approved_contract():
     manifest = read_json(".codex-plugin/plugin.json")
 
     assert manifest["name"] == "spacedock"
-    assert manifest["version"] == "0.11.1"
+    assert manifest["version"] == "0.11.2"
     assert (
         manifest["description"]
         == "Turn directories of markdown files into structured workflows operated by AI agents"
