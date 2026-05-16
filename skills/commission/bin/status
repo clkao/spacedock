@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # commissioned-by: spacedock@{spacedock_version}
 # ABOUTME: Workflow status viewer — shows entity overview from YAML frontmatter.
-# ABOUTME: Supports default table, --archived, --next, --next-id, --boot, --validate, --resolve, --short-id, and --discover.
+# ABOUTME: Supports default table, --archived, --next, --next-id, --reserve-id, --boot, --validate, --resolve, --short-id, and --discover.
 #
 # goal: Show one-line-per-{entity_label} workflow overview from YAML frontmatter.
 #
@@ -12,6 +12,8 @@
 #   Default: scan entities at $DIR. With --archived, also scan $DIR/_archive/.
 #   With --next, read stage metadata from README frontmatter and output dispatchable entities.
 #   With --next-id, print only the next strategy-dependent ID candidate.
+#   With --reserve-id --slug <slug>, atomically write and commit a `status: reserved`
+#   inline stub before printing the chosen sequential ID.
 #   README frontmatter `id-style` controls identity:
 #     sequential: required numeric id, allocated across active + archived entities.
 #     sd-b32: required 24-char lowercase SD-B32 (Spacedock Base32) stored ID
@@ -88,8 +90,10 @@ import glob
 import hashlib
 import os
 import re
+import shutil
 import subprocess
 import sys
+import time
 from datetime import datetime, timezone
 
 
@@ -1049,6 +1053,294 @@ def compute_next_id(entities, workflow_dir, git_root, id_style, id_seed='', id_a
 def print_next_id(entities, workflow_dir, git_root, id_style, id_seed='', id_actor=''):
     """Print only the next strategy-dependent ID."""
     print(compute_next_id(entities, workflow_dir, git_root, id_style, id_seed=id_seed, id_actor=id_actor))
+
+
+def now_utc_seconds():
+    test_now = os.environ.get('SPACEDOCK_TEST_NOW', '').strip()
+    if test_now:
+        return parse_utc_timestamp(test_now)
+    return datetime.now(timezone.utc)
+
+
+def now_utc_string():
+    return now_utc_seconds().strftime('%Y-%m-%dT%H:%M:%SZ')
+
+
+def parse_utc_timestamp(value):
+    value = (value or '').strip()
+    if not value:
+        raise ValueError('empty timestamp')
+    if value.endswith('Z'):
+        value = value[:-1] + '+00:00'
+    dt = datetime.fromisoformat(value)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def validate_reservation_slug(slug):
+    slug = (slug or '').strip()
+    if not slug:
+        raise ValueError('--slug requires a non-empty slug')
+    if '/' in slug or slug in ('.', '..') or slug.startswith('.'):
+        raise ValueError(f'invalid reservation slug: {slug}')
+    if not re.match(r'^[A-Za-z0-9][A-Za-z0-9._-]*$', slug):
+        raise ValueError(f'invalid reservation slug: {slug}')
+    return slug
+
+
+def acquire_reservation_lock(workflow_dir, timeout_seconds=10):
+    lock_path = os.path.join(workflow_dir, '.spacedock-reserve-id.lock')
+    deadline = time.time() + timeout_seconds
+    while True:
+        try:
+            fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.write(fd, str(os.getpid()).encode('utf-8'))
+            os.close(fd)
+            return lock_path
+        except FileExistsError:
+            if time.time() >= deadline:
+                raise TimeoutError(f'timed out waiting for reservation lock: {lock_path}')
+            time.sleep(0.05)
+
+
+def release_reservation_lock(lock_path):
+    try:
+        os.unlink(lock_path)
+    except FileNotFoundError:
+        pass
+
+
+def git_commit_path(git_root, rel_path, message):
+    subprocess.run(['git', 'add', '--', rel_path], cwd=git_root, check=True,
+                   capture_output=True, text=True)
+    result = subprocess.run(
+        ['git', 'commit', '-q', '-m', message, '--', rel_path],
+        cwd=git_root, capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError((result.stderr or result.stdout or 'git commit failed').strip())
+
+
+def write_reserved_stub(path, reserved_id, slug, title, actor):
+    title = title or slug.replace('-', ' ').replace('_', ' ').title()
+    actor = actor or os.environ.get('SPACEDOCK_ID_ACTOR', '').strip() or os.environ.get('USER', '').strip()
+    content = f"""---
+id: {reserved_id}
+title: {title}
+status: reserved
+source:
+started:
+completed:
+verdict:
+score:
+worktree:
+pr:
+reserved-at: {now_utc_string()}
+reserved-by: {actor}
+---
+
+Reserved by `status --reserve-id`. Promote this stub into a real entity or release it with `status --release-id`.
+"""
+    with open(path, 'w') as f:
+        f.write(content)
+
+
+def parse_reserve_args(args):
+    if '--reserve-id' not in args:
+        return None
+    values = {'slug': '', 'title': '', 'actor': ''}
+    i = 0
+    while i < len(args):
+        if args[i] == '--slug':
+            if i + 1 >= len(args) or args[i + 1].startswith('--'):
+                raise ValueError('--slug requires an argument')
+            values['slug'] = args[i + 1]
+            i += 2
+            continue
+        if args[i] == '--title':
+            if i + 1 >= len(args) or args[i + 1].startswith('--'):
+                raise ValueError('--title requires an argument')
+            values['title'] = args[i + 1]
+            i += 2
+            continue
+        if args[i] == '--id-actor':
+            if i + 1 >= len(args) or args[i + 1].startswith('--'):
+                raise ValueError('--id-actor requires an argument')
+            values['actor'] = args[i + 1]
+            i += 2
+            continue
+        i += 1
+    if not values['slug']:
+        raise ValueError('--reserve-id requires --slug <slug>')
+    values['slug'] = validate_reservation_slug(values['slug'])
+    return values
+
+
+def parse_single_ref_arg(args, flag):
+    i = 0
+    while i < len(args):
+        if args[i] == flag:
+            if i + 1 >= len(args) or args[i + 1].startswith('--'):
+                raise ValueError(f'{flag} requires a reference argument')
+            return args[i + 1]
+        i += 1
+    return None
+
+
+def parse_stale_reservations_args(args):
+    if '--stale-reservations' not in args:
+        return None
+    hours = 24
+    i = 0
+    while i < len(args):
+        if args[i] == '--stale-hours':
+            if i + 1 >= len(args) or args[i + 1].startswith('--'):
+                raise ValueError('--stale-hours requires an argument')
+            try:
+                hours = float(args[i + 1])
+            except ValueError:
+                raise ValueError('--stale-hours must be numeric')
+            i += 2
+            continue
+        i += 1
+    return {'hours': hours}
+
+
+def parse_promote_updates(args):
+    ref = parse_single_ref_arg(args, '--promote-id')
+    if ref is None:
+        return None
+    updates = []
+    seen_ref = False
+    i = 0
+    while i < len(args):
+        if args[i] == '--promote-id':
+            seen_ref = True
+            i += 2
+            continue
+        if seen_ref and not args[i].startswith('--'):
+            if '=' not in args[i]:
+                raise ValueError('--promote-id updates must use field=value')
+            field, _, value = args[i].partition('=')
+            updates.append((field, value))
+        i += 1
+    return ref, updates
+
+
+def run_reserve_id(workflow_dir, git_root, slug, title='', actor=''):
+    id_style = workflow_id_style(workflow_dir)
+    if id_style != 'sequential':
+        print('Error: --reserve-id is currently only supported for id-style: sequential', file=sys.stderr)
+        sys.exit(1)
+
+    lock_path = None
+    try:
+        lock_path = acquire_reservation_lock(workflow_dir)
+        fail_on_validation_errors(workflow_dir, git_root, id_style)
+        for _attempt in range(20):
+            entities = scan_entities(workflow_dir)
+            reserved_id = compute_next_id(entities, workflow_dir, git_root, id_style)
+            entity_slug = f'{reserved_id}-{slug}'
+            stub_path = os.path.join(workflow_dir, entity_slug + '.md')
+            if os.path.exists(stub_path):
+                continue
+            write_reserved_stub(stub_path, reserved_id, slug, title, actor)
+            rel_path = os.path.relpath(stub_path, git_root)
+            try:
+                git_commit_path(git_root, rel_path, f'reserve: {reserved_id} for {slug}')
+            except Exception:
+                if os.path.exists(stub_path):
+                    os.unlink(stub_path)
+                raise
+            print(reserved_id)
+            return
+        print('Error: reservation retry exhausted', file=sys.stderr)
+        sys.exit(1)
+    except TimeoutError as e:
+        print('Error: ' + str(e), file=sys.stderr)
+        sys.exit(1)
+    except RuntimeError as e:
+        print('Error: ' + str(e), file=sys.stderr)
+        sys.exit(1)
+    finally:
+        if lock_path:
+            release_reservation_lock(lock_path)
+
+
+def ensure_reserved(entity, ref):
+    if entity.get('status') != 'reserved':
+        print(f"Error: entity is not reserved: {ref}", file=sys.stderr)
+        sys.exit(1)
+
+
+def run_release_id(workflow_dir, git_root, ref):
+    entity = resolve_mutation_entity(workflow_dir, ref)
+    ensure_reserved(entity, ref)
+    path = entity.get('_path', '')
+    slug = entity.get('slug', '')
+    if path.endswith(os.path.join(slug, 'index.md')):
+        remove_path = os.path.dirname(path)
+    else:
+        remove_path = path
+    rel_path = os.path.relpath(remove_path, git_root)
+    if os.path.isdir(remove_path):
+        shutil.rmtree(remove_path)
+    else:
+        os.unlink(remove_path)
+    try:
+        git_commit_path(git_root, rel_path, f'release: {slug}')
+    except RuntimeError as e:
+        print('Error: ' + str(e), file=sys.stderr)
+        sys.exit(1)
+    print(f'released: {slug}')
+
+
+def run_promote_id(workflow_dir, git_root, ref, updates):
+    entity = resolve_mutation_entity(workflow_dir, ref)
+    ensure_reserved(entity, ref)
+    path = entity.get('_path', '')
+    if not any(field == 'status' for field, _value in updates):
+        readme_path = os.path.join(workflow_dir, 'README.md')
+        stages = parse_stages_block(readme_path) if os.path.exists(readme_path) else None
+        initial = ''
+        for stage in stages or []:
+            if stage.get('initial'):
+                initial = stage.get('name', '')
+                break
+        updates = [('status', initial or 'backlog')] + updates
+    updates = list(updates) + [('reserved-at', ''), ('reserved-by', '')]
+    try:
+        update_frontmatter(path, updates)
+        rel_path = os.path.relpath(path, git_root)
+        git_commit_path(git_root, rel_path, f"promote: {entity.get('slug', ref)}")
+    except (ValueError, RuntimeError) as e:
+        print('Error: ' + str(e), file=sys.stderr)
+        sys.exit(1)
+    print(f"promoted: {entity.get('slug', ref)}")
+
+
+def print_stale_reservations(workflow_dir, git_root, hours):
+    threshold_seconds = hours * 3600
+    now = now_utc_seconds()
+    entities = active_and_archived_entities(workflow_dir, git_root)
+    stale = []
+    for entity in entities:
+        if entity.get('status') != 'reserved':
+            continue
+        reserved_at = entity.get('reserved-at', '')
+        try:
+            age_seconds = (now - parse_utc_timestamp(reserved_at)).total_seconds()
+        except (ValueError, TypeError):
+            age_seconds = threshold_seconds + 1
+        if age_seconds > threshold_seconds:
+            stale.append((entity, age_seconds / 3600))
+    for entity, age_hours in stale:
+        print(
+            f"stale reservation: id={entity.get('_stored_id', entity.get('id', ''))} "
+            f"slug={entity.get('slug', '')} age_hours={age_hours:.1f} "
+            f"path={entity.get('_path', '')}"
+        )
 
 
 def scan_orphans(entities, git_root):
@@ -2072,6 +2364,7 @@ def main():
                 '--boot', '--next', '--next-id', '--archived', '--where',
                 '--set', '--archive', '--fields', '--all-fields', '--workflow-dir',
                 '--validate', '--resolve', '--short-id', '--id-seed', '--id-actor',
+                '--reserve-id', '--release-id', '--promote-id', '--stale-reservations',
             )
         ]
         if incompatible:
@@ -2164,15 +2457,28 @@ def main():
         print('Error: ' + str(e), file=sys.stderr)
         sys.exit(1)
 
+    try:
+        reserve_args = parse_reserve_args(args)
+        release_ref = parse_single_ref_arg(args, '--release-id')
+        promote_result = parse_promote_updates(args)
+        stale_args = parse_stale_reservations_args(args)
+    except ValueError as e:
+        print('Error: ' + str(e), file=sys.stderr)
+        sys.exit(1)
+
     include_archive = '--archived' in args
     show_next = '--next' in args
     show_next_id = '--next-id' in args
+    show_reserve_id = reserve_args is not None
+    show_release_id = release_ref is not None
+    show_promote_id = promote_result is not None
+    show_stale_reservations = stale_args is not None
     show_boot = '--boot' in args
     show_validate = '--validate' in args
     has_fields_flag = explicit_fields is not None or all_fields_flag
 
-    if id_material_flags and not show_next_id:
-        print('Error: --id-seed and --id-actor can only be used with --next-id', file=sys.stderr)
+    if id_material_flags and not (show_next_id or show_reserve_id):
+        print('Error: --id-seed and --id-actor can only be used with --next-id or --reserve-id', file=sys.stderr)
         sys.exit(1)
 
     # --boot is incompatible with --next, --next-id, --archived, --where, --fields, --all-fields
@@ -2182,6 +2488,9 @@ def main():
             sys.exit(1)
         if show_next_id:
             print('Error: --boot is incompatible with --next-id', file=sys.stderr)
+            sys.exit(1)
+        if show_reserve_id or show_release_id or show_promote_id or show_stale_reservations:
+            print('Error: --boot is incompatible with reservation commands', file=sys.stderr)
             sys.exit(1)
         if include_archive:
             print('Error: --boot is incompatible with --archived', file=sys.stderr)
@@ -2204,6 +2513,14 @@ def main():
         incompatible = []
         if show_next:
             incompatible.append('--next')
+        if show_reserve_id:
+            incompatible.append('--reserve-id')
+        if show_release_id:
+            incompatible.append('--release-id')
+        if show_promote_id:
+            incompatible.append('--promote-id')
+        if show_stale_reservations:
+            incompatible.append('--stale-reservations')
         if include_archive:
             incompatible.append('--archived')
         if show_boot:
@@ -2234,6 +2551,147 @@ def main():
             sys.exit(1)
         fail_on_validation_errors(pipeline_dir, git_root, id_style)
         print_next_id(entities, pipeline_dir, git_root, id_style, id_seed=id_seed, id_actor=id_actor)
+        sys.exit(0)
+
+    if show_reserve_id:
+        incompatible = []
+        if show_next:
+            incompatible.append('--next')
+        if include_archive:
+            incompatible.append('--archived')
+        if show_boot:
+            incompatible.append('--boot')
+        if where_filters:
+            incompatible.append('--where')
+        if has_fields_flag:
+            incompatible.append('--fields/--all-fields')
+        if archive_slug is not None:
+            incompatible.append('--archive')
+        if set_result is not None:
+            incompatible.append('--set')
+        if resolve_ref is not None:
+            incompatible.append('--resolve')
+        if short_id_ref is not None:
+            incompatible.append('--short-id')
+        if show_validate:
+            incompatible.append('--validate')
+        if show_release_id:
+            incompatible.append('--release-id')
+        if show_promote_id:
+            incompatible.append('--promote-id')
+        if show_stale_reservations:
+            incompatible.append('--stale-reservations')
+        if incompatible:
+            print(f'Error: --reserve-id cannot be combined with {", ".join(incompatible)}',
+                  file=sys.stderr)
+            sys.exit(1)
+        run_reserve_id(
+            pipeline_dir,
+            find_git_root(pipeline_dir),
+            reserve_args['slug'],
+            title=reserve_args.get('title', ''),
+            actor=reserve_args.get('actor', id_actor),
+        )
+        sys.exit(0)
+
+    if show_release_id:
+        incompatible = []
+        if show_next:
+            incompatible.append('--next')
+        if include_archive:
+            incompatible.append('--archived')
+        if show_boot:
+            incompatible.append('--boot')
+        if show_next_id:
+            incompatible.append('--next-id')
+        if where_filters:
+            incompatible.append('--where')
+        if has_fields_flag:
+            incompatible.append('--fields/--all-fields')
+        if archive_slug is not None:
+            incompatible.append('--archive')
+        if set_result is not None:
+            incompatible.append('--set')
+        if resolve_ref is not None:
+            incompatible.append('--resolve')
+        if short_id_ref is not None:
+            incompatible.append('--short-id')
+        if show_validate:
+            incompatible.append('--validate')
+        if show_promote_id:
+            incompatible.append('--promote-id')
+        if show_stale_reservations:
+            incompatible.append('--stale-reservations')
+        if incompatible:
+            print(f'Error: --release-id cannot be combined with {", ".join(incompatible)}',
+                  file=sys.stderr)
+            sys.exit(1)
+        run_release_id(pipeline_dir, find_git_root(pipeline_dir), release_ref)
+        sys.exit(0)
+
+    if show_promote_id:
+        incompatible = []
+        if show_next:
+            incompatible.append('--next')
+        if include_archive:
+            incompatible.append('--archived')
+        if show_boot:
+            incompatible.append('--boot')
+        if show_next_id:
+            incompatible.append('--next-id')
+        if where_filters:
+            incompatible.append('--where')
+        if has_fields_flag:
+            incompatible.append('--fields/--all-fields')
+        if archive_slug is not None:
+            incompatible.append('--archive')
+        if set_result is not None:
+            incompatible.append('--set')
+        if resolve_ref is not None:
+            incompatible.append('--resolve')
+        if short_id_ref is not None:
+            incompatible.append('--short-id')
+        if show_validate:
+            incompatible.append('--validate')
+        if show_stale_reservations:
+            incompatible.append('--stale-reservations')
+        if incompatible:
+            print(f'Error: --promote-id cannot be combined with {", ".join(incompatible)}',
+                  file=sys.stderr)
+            sys.exit(1)
+        promote_ref, promote_updates = promote_result
+        run_promote_id(pipeline_dir, find_git_root(pipeline_dir), promote_ref, promote_updates)
+        sys.exit(0)
+
+    if show_stale_reservations:
+        incompatible = []
+        if show_next:
+            incompatible.append('--next')
+        if include_archive:
+            incompatible.append('--archived')
+        if show_boot:
+            incompatible.append('--boot')
+        if show_next_id:
+            incompatible.append('--next-id')
+        if where_filters:
+            incompatible.append('--where')
+        if has_fields_flag:
+            incompatible.append('--fields/--all-fields')
+        if archive_slug is not None:
+            incompatible.append('--archive')
+        if set_result is not None:
+            incompatible.append('--set')
+        if resolve_ref is not None:
+            incompatible.append('--resolve')
+        if short_id_ref is not None:
+            incompatible.append('--short-id')
+        if show_validate:
+            incompatible.append('--validate')
+        if incompatible:
+            print(f'Error: --stale-reservations cannot be combined with {", ".join(incompatible)}',
+                  file=sys.stderr)
+            sys.exit(1)
+        print_stale_reservations(pipeline_dir, find_git_root(pipeline_dir), stale_args['hours'])
         sys.exit(0)
 
     if resolve_ref is not None:

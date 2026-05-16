@@ -25,7 +25,7 @@ At startup (after reading the README, before dispatch):
 
 In single-entity mode, skip team creation. Use bare-mode dispatch for all agent spawning — the Agent tool without `team_name` blocks until the subagent completes, which prevents premature session termination in `-p` mode.
 
-When filing a new task, read `ID_STYLE` from `status --boot`, then use `status --next-id` only when the style is `sequential` or `sd-b32` to fetch the strategy-dependent ID candidate. For `sd-b32`, call `status --next-id --id-seed "{slug-or-title}"` and optionally pass `--id-actor` so the SHA-derived candidate includes creation context. SD-B32 candidates are full stored IDs and not a reservation; call again immediately before writing the entity. For `slug`, derive the slug from the title and leave `id` blank.
+When filing a new task, read `ID_STYLE` from `status --boot`. For `sequential`, call `status --reserve-id --slug "{slug}"` and treat the committed `status: reserved` stub as the ID claim; use `status --release-id REF` if the draft is abandoned and `status --promote-id REF status={initial-stage}` when turning it into a real entity. For `sd-b32`, `status --next-id --id-seed "{slug-or-title}"` fetches the strategy-dependent ID candidate; optionally pass `--id-actor` so the SHA-derived candidate includes creation context. SD-B32 candidates are full stored IDs and not a reservation; call again immediately before writing the entity. For `slug`, derive the slug from the title and leave `id` blank.
 
 ### Standing teammate discovery pass
 

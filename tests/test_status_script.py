@@ -491,6 +491,248 @@ class TestNextIdOption(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(result.stdout, '010\n')
 
+    def test_next_id_read_only_compat_does_not_mutate_git(self):
+        """--next-id remains a read-only compatibility path."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            make_pipeline(tmpdir, README_WITH_STAGES, {
+                'active.md': entity('001', 'Active', 'backlog', '0.50'),
+            })
+            subprocess.run(['git', 'init', '-q'], cwd=tmpdir, check=True)
+            subprocess.run(['git', 'config', 'user.email', 'test@example.com'], cwd=tmpdir, check=True)
+            subprocess.run(['git', 'config', 'user.name', 'Test'], cwd=tmpdir, check=True)
+            subprocess.run(['git', 'add', '.'], cwd=tmpdir, check=True)
+            subprocess.run(['git', 'commit', '-q', '-m', 'initial'], cwd=tmpdir, check=True)
+
+            result = run_status(tmpdir, '--next-id', script_path=self.script_path)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout, '002\n')
+
+            porcelain = subprocess.run(
+                ['git', 'status', '--porcelain'], cwd=tmpdir,
+                capture_output=True, text=True, check=True,
+            )
+            self.assertEqual(porcelain.stdout, '')
+
+
+class TestReserveIdOption(unittest.TestCase):
+    """Test atomic inline reservation stubs."""
+
+    def setUp(self):
+        self._script_dir = tempfile.mkdtemp()
+        self.script_path = build_status_script(self._script_dir)
+
+    def tearDown(self):
+        os.unlink(self.script_path)
+        os.rmdir(self._script_dir)
+
+    def _init_git(self, tmpdir):
+        subprocess.run(['git', 'init', '-q'], cwd=tmpdir, check=True)
+        subprocess.run(['git', 'config', 'user.email', 'test@example.com'], cwd=tmpdir, check=True)
+        subprocess.run(['git', 'config', 'user.name', 'Test'], cwd=tmpdir, check=True)
+        subprocess.run(['git', 'add', '.'], cwd=tmpdir, check=True)
+        subprocess.run(['git', 'commit', '-q', '-m', 'initial'], cwd=tmpdir, check=True)
+
+    def _frontmatter(self, path):
+        fields = {}
+        in_fm = False
+        with open(path) as f:
+            for line in f:
+                line = line.rstrip('\n')
+                if line == '---':
+                    if in_fm:
+                        break
+                    in_fm = True
+                    continue
+                if in_fm and ':' in line and not line[0].isspace():
+                    key, _, value = line.partition(':')
+                    fields[key.strip()] = value.strip().strip('"').strip("'")
+        return fields
+
+    def test_reserve_id_writes_committed_stub(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            make_pipeline(tmpdir, README_WITH_STAGES, {
+                'active.md': entity('001', 'Active', 'backlog', '0.50'),
+            })
+            self._init_git(tmpdir)
+
+            result = run_status(
+                tmpdir,
+                '--reserve-id',
+                '--slug',
+                'alpha',
+                '--title',
+                'Alpha Task',
+                '--id-actor',
+                'ensign',
+                script_path=self.script_path,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout, '002\n')
+
+            stub = os.path.join(tmpdir, '002-alpha.md')
+            self.assertTrue(os.path.exists(stub))
+            fields = self._frontmatter(stub)
+            self.assertEqual(fields['id'], '002')
+            self.assertEqual(fields['title'], 'Alpha Task')
+            self.assertEqual(fields['status'], 'reserved')
+            self.assertEqual(fields['reserved-by'], 'ensign')
+            self.assertRegex(fields['reserved-at'], r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$')
+
+            porcelain = subprocess.run(
+                ['git', 'status', '--porcelain'], cwd=tmpdir,
+                capture_output=True, text=True, check=True,
+            )
+            self.assertEqual(porcelain.stdout, '')
+
+            log = subprocess.run(
+                ['git', 'log', '-1', '--oneline', '--', '002-alpha.md'],
+                cwd=tmpdir, capture_output=True, text=True, check=True,
+            )
+            self.assertIn('reserve: 002 for alpha', log.stdout)
+
+    def test_reserve_id_sees_existing_reserved_stub(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            make_pipeline(tmpdir, README_WITH_STAGES)
+            self._init_git(tmpdir)
+
+            first = run_status(tmpdir, '--reserve-id', '--slug', 'alpha', script_path=self.script_path)
+            second = run_status(tmpdir, '--reserve-id', '--slug', 'beta', script_path=self.script_path)
+
+            self.assertEqual(first.returncode, 0, first.stderr)
+            self.assertEqual(second.returncode, 0, second.stderr)
+            self.assertEqual(first.stdout, '001\n')
+            self.assertEqual(second.stdout, '002\n')
+            self.assertTrue(os.path.exists(os.path.join(tmpdir, '001-alpha.md')))
+            self.assertTrue(os.path.exists(os.path.join(tmpdir, '002-beta.md')))
+
+    def test_reserve_id_concurrent_returns_distinct_committed_ids(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            make_pipeline(tmpdir, README_WITH_STAGES)
+            self._init_git(tmpdir)
+            env = {**os.environ, 'PIPELINE_DIR': tmpdir}
+            commands = [
+                ['python3', self.script_path, '--reserve-id', '--slug', 'alpha'],
+                ['python3', self.script_path, '--reserve-id', '--slug', 'beta'],
+            ]
+            procs = [
+                subprocess.Popen(cmd, cwd=tmpdir, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                for cmd in commands
+            ]
+            results = [proc.communicate(timeout=10) + (proc.returncode,) for proc in procs]
+            for stdout, stderr, returncode in results:
+                self.assertEqual(returncode, 0, stderr)
+                self.assertRegex(stdout, r'^\d{3}\n$')
+            ids = sorted(stdout.strip() for stdout, _stderr, _returncode in results)
+            self.assertEqual(ids, ['001', '002'])
+
+            validation = run_status(tmpdir, '--validate', script_path=self.script_path)
+            self.assertEqual(validation.returncode, 0, validation.stderr)
+            self.assertEqual(validation.stdout, 'VALID\n')
+
+            reserved_files = sorted(
+                name for name in os.listdir(tmpdir)
+                if name.endswith(('-alpha.md', '-beta.md'))
+            )
+            self.assertEqual(len(reserved_files), 2)
+            log = subprocess.run(
+                ['git', 'log', '--oneline', '--', *reserved_files],
+                cwd=tmpdir, capture_output=True, text=True, check=True,
+            )
+            self.assertIn('reserve:', log.stdout)
+
+    def test_release_reserved_id_removes_stub_and_commits(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            make_pipeline(tmpdir, README_WITH_STAGES)
+            self._init_git(tmpdir)
+            reserved = run_status(tmpdir, '--reserve-id', '--slug', 'alpha', script_path=self.script_path)
+            self.assertEqual(reserved.returncode, 0, reserved.stderr)
+
+            result = run_status(tmpdir, '--release-id', '001', script_path=self.script_path)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn('released: 001-alpha', result.stdout)
+            self.assertFalse(os.path.exists(os.path.join(tmpdir, '001-alpha.md')))
+
+            porcelain = subprocess.run(
+                ['git', 'status', '--porcelain'], cwd=tmpdir,
+                capture_output=True, text=True, check=True,
+            )
+            self.assertEqual(porcelain.stdout, '')
+            log = subprocess.run(
+                ['git', 'log', '-1', '--oneline'], cwd=tmpdir,
+                capture_output=True, text=True, check=True,
+            )
+            self.assertIn('release: 001-alpha', log.stdout)
+
+    def test_promote_reserved_id_preserves_id_and_slug(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            make_pipeline(tmpdir, README_WITH_STAGES)
+            self._init_git(tmpdir)
+            reserved = run_status(tmpdir, '--reserve-id', '--slug', 'alpha', script_path=self.script_path)
+            self.assertEqual(reserved.returncode, 0, reserved.stderr)
+
+            result = run_status(
+                tmpdir,
+                '--promote-id',
+                '001',
+                'status=backlog',
+                'source=accepted',
+                script_path=self.script_path,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn('promoted: 001-alpha', result.stdout)
+
+            fields = self._frontmatter(os.path.join(tmpdir, '001-alpha.md'))
+            self.assertEqual(fields['id'], '001')
+            self.assertEqual(fields['status'], 'backlog')
+            self.assertEqual(fields['source'], 'accepted')
+
+            validation = run_status(tmpdir, '--validate', script_path=self.script_path)
+            self.assertEqual(validation.returncode, 0, validation.stderr)
+
+    def test_stale_reserved_id_reports_only_old_reservations(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            old_stub = textwrap.dedent("""\
+                ---
+                id: 001
+                title: Old
+                status: reserved
+                reserved-at: 2026-01-01T00:00:00Z
+                reserved-by: test
+                score:
+                worktree:
+                ---
+
+                Reserved.
+                """)
+            fresh_stub = textwrap.dedent("""\
+                ---
+                id: 002
+                title: Fresh
+                status: reserved
+                reserved-at: 2026-01-02T23:30:00Z
+                reserved-by: test
+                score:
+                worktree:
+                ---
+
+                Reserved.
+                """)
+            make_pipeline(tmpdir, README_WITH_STAGES, {
+                '001-old.md': old_stub,
+                '002-fresh.md': fresh_stub,
+            })
+            result = run_status(
+                tmpdir,
+                '--stale-reservations',
+                '--stale-hours',
+                '24',
+                script_path=self.script_path,
+                extra_env={'SPACEDOCK_TEST_NOW': '2026-01-03T00:00:00Z'},
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn('001-old', result.stdout)
+            self.assertNotIn('002-fresh', result.stdout)
+
 
 class TestIdStyleStrategies(unittest.TestCase):
     """Test pluggable id-style behavior for sequential, slug, and sd-b32."""

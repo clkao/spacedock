@@ -137,6 +137,21 @@ def test_first_officer_docs_are_id_style_aware_for_task_creation():
     assert "generated stores" not in combined
 
 
+def test_first_officer_docs_use_reserve_id_for_sequential_creation():
+    shared = read_text("skills/first-officer/references/first-officer-shared-core.md")
+    codex = read_text("skills/first-officer/references/codex-first-officer-runtime.md")
+    claude = read_text("skills/first-officer/references/claude-first-officer-runtime.md")
+
+    for text in (shared, codex, claude):
+        assert "--reserve-id" in text
+        assert "--release-id" in text
+        assert "status: reserved" in text
+
+    assert "read-only compatibility path" in shared
+    assert "not a safe allocator" in shared
+    assert "sequential stores the returned numeric ID from `status --reserve-id --slug" in shared
+
+
 def test_refit_docs_preserve_id_style_and_defer_migration_rewrites():
     text = read_text("skills/refit/SKILL.md")
 
