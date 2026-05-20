@@ -205,6 +205,17 @@ Staff reviewer surfaced 7 material findings undermining the soundness of cycle-1
 
 Polish-tier findings (non-blocking but worth fixing): arithmetic reconciliation (~6900 baseline − ~4660 kept-content claim ≠ ~1200 saved claim); two off-by-small line citations (`ensign-shared-core.md:15-17` should be 16; `claude-team:368-379` should be 369-379); entity table row labels don't align with source `prompt_parts` comment numbers; "~50 lines" + "9 prompt_parts blocks" inconsistency (table has 11).
 
+#### Cycle 2 — re-reviewed; approved with one hygiene fix (2026-05-20)
+
+Re-review verified all 7 cycle-1 material findings as genuinely addressed (not papered over), prior-art citations on the two reversals (rows 8b, 10c) verified verbatim, all 4 polish findings fixed. Reviewer's closing line: "cycle-2 ideation is materially solid; the single remaining material finding is a documentation-hygiene issue, not a design soundness issue."
+
+Captain approved cycle 2 and chose to route a quick hygiene pass back as cycle 3 (option a) rather than absorb into implementation. Reuse OK (10.2% of 1M context budget). Cycle 3 brief:
+
+1. **Drop or mark-superseded the stale cycle-1 Summary paragraph at entity lines 179-190.** That paragraph still claims "four pure-boilerplate blocks / 1100-1300 chars saved" — cycle 2's actual disposition is three drops / ~990 chars. The cycle-2 stage report supersedes it correctly, but the contradiction is a documentation hazard for later readers (especially PR reviewers reading top-to-bottom). Either edit in place to match cycle-2 reality, or strike with a one-line "superseded by Stage Report: ideation (cycle 2) below" note.
+2. **Sanity-check `tests/test_claude_team.py:914` and `:931` line citations in AC-2.** Reviewer verified `:856` exists; the other two are unverified. Open the test file, confirm the lines match the cited assertions on the `Read the entity file at {expected_entity} for the current spec` phrase, and either confirm in place or correct.
+
+Polish-tier (also do these while you're in there if cheap; absorb into implementation if not): rephrase AC-3 to specify structural requirements ("the explanatory paragraph enumerates the four omissions; mentions the Skill-directive reliance") instead of asserting a literal draft sentence at line 123 of the runtime adapter — coupling the test to draft wording is brittle. Split the 7-line Failsafe acknowledgment paragraph at entity line 122 into two sentences for readability.
+
 ## Stage Report: ideation (cycle 2)
 
 - DONE: Engage with `_archive/claude-team-inject-skill-invoke.md` on the `### Summary` line (row 7b → row 8b). Reclassify or argue with evidence.
