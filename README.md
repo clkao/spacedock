@@ -34,7 +34,7 @@ Prerequisite: [Claude Code](https://docs.claude.com/en/docs/claude-code) install
    claude --agent spacedock:first-officer "/spacedock:commission Email triage: fetch, categorize, and act on Gmail inbox. Entity: a batch of up to 50 emails. Stages: intake (use gws-cli, triage in:inbox and read email body if necessary, categorize, propose action per email, output as table) then approval (Captain reviews proposal) then execute (carry out approved actions, do not mark as read). Use gws-cli (https://github.com/googleworkspace/cli/tree/main/skills/gws-gmail), GOOGLE_WORKSPACE_CLI_CONFIG_DIR=~/.config/gws/<account> for different accounts. Walk me through gws-cli setup if not already done."
    ```
 
-The First Officer commissions the workflow, dispatches an Ensign to gather your inbox, then pauses with a categorized proposal and waits for your approval before touching anything.
+The First Officer commissions the workflow, dispatches an Ensign to gather your inbox, then pauses with a categorized proposal and waits for your approval before touching anything. If you do not already have `gws-cli` configured for the Gmail account you want triaged, the mission tells the First Officer to walk you through setup before it touches your inbox.
 
 ### If you are a developer
 
@@ -44,9 +44,11 @@ Same install line. Commission with this mission instead:
 claude --agent spacedock:first-officer "/spacedock:commission Dev task workflow: superpowers-style design then plan then implement then review with ## Design and ## Implementation Plan inlined in the entity body (no separate spec/plan files), implement on isolated worktrees with strict TDD, design and review gated for approval."
 ```
 
+The First Officer commissions a generic dev workflow with four stages, opens a worktree for implementation, and pauses at design and review for your call. For deeper dev shapes (PR review queue, Linear ticket ship, cross-repo upgrade), see [`docs/EXAMPLES.md`](docs/EXAMPLES.md).
+
 ## Codex CLI
 
-The Codex CLI path is supported but experimental. See the Codex section of [`docs/USAGE.md`](docs/USAGE.md) for the setup steps, the plugin manifest layout, and the legacy skills symlink fallback.
+The Codex CLI path is supported but experimental. See the Codex section of [`docs/USAGE.md`](docs/USAGE.md) for the setup steps and the plugin manifest layout.
 
 ## Where to go next
 

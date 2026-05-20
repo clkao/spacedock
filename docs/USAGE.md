@@ -99,6 +99,8 @@ stages:
 
 The YAML is the artifact. The commission mission string is the spec. Running `/spacedock:commission` writes the YAML from the mission. If commission gets a flag wrong, edit the YAML by hand. The First Officer reads it on every loop and needs no restart.
 
+`feedback-to:` is not implicit. If you want a gated stage to bounce work back to an earlier stage on rejection, name that stage explicitly. Without `feedback-to:`, a rejection exits the entity rather than bouncing it.
+
 ## Approval gates and adversarial review
 
 Gates are not rubber-stamps. When a stage has `gate: true`, the First Officer pauses, presents the Ensign's stage report (findings, verdicts, artifacts, anomalies), and asks the Captain to approve, redirect, or reject. Approval moves the item forward. Rejection bounces it back to the stage named in `feedback-to:` with the Captain's one-line feedback included in the next Ensign's prompt.
@@ -136,7 +138,7 @@ git clone https://github.com/clkao/spacedock.git /path/to/spacedock
 cd /path/to/spacedock
 ```
 
-In Codex, open `/plugins` and install Spacedock from the repo-local marketplace entry at `.agents/plugins/marketplace.json`. The exact install command pair varies by Codex version; see `docs/plans/codex-marketplace-root-source.md` for the current steps and `.codex-plugin/plugin.json` for the authoritative plugin manifest.
+Then start Codex with multi-agent support. In Codex, open `/plugins` and install Spacedock from the repo-local marketplace entry. The catalog lives at `.agents/plugins/marketplace.json` and points at `./plugins/spacedock`, which is a checked-in symlink to the repository root so Codex loads the real plugin package directly. The authoritative plugin manifest is `.codex-plugin/plugin.json`.
 
 Once installed, prompt Codex to use the first-officer skill:
 
@@ -149,3 +151,8 @@ Use the spacedock:first-officer skill to run /spacedock:commission <your mission
 - Run Spacedock inside a sandbox. Recommended options: `agent-safehouse` (macOS), `packnplay`, a devcontainer, or a VM.
 - Approve at gates with care. Approval is the signal Spacedock uses to advance and it cannot recover gracefully from approval given in error.
 - Run `git status` before approving a stage that ran in a worktree if you suspect uncommitted local changes.
+
+## Where to go next
+
+- `EXAMPLES.md` for eight worked examples (household, knowledge work, and three developer workflows).
+- `PROMPTS.md` for an Initiating Prompt template that asks Claude to look at your recurring work and propose tailored workflows.

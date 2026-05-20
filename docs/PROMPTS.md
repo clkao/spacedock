@@ -235,6 +235,6 @@ Please:
 
 ## After Claude responds
 
-1. Read `EXAMPLES.md` for the closest worked example. Compare Claude's proposed mission against it side by side and adjust stage names or flags that drift.
+1. Read `EXAMPLES.md` for the closest worked example. Compare Claude's proposed mission against it side by side and adjust stage names or flags that drift. The Household and finance variant straddles two examples; compare against both example 3 (Tax and finance prep) and example 6 (Household admin).
 2. Commission the one workflow Claude recommends. Run it for two weeks before adding a second.
 3. Edit the generated `{workflow-dir}/README.md` directly if a flag is wrong. The First Officer reads it on every loop, so a hand edit takes effect on the next run with no restart.

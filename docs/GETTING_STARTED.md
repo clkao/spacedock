@@ -27,12 +27,13 @@ The mission describes the entity (a batch of up to 50 emails), the stages (intak
 
 ### Step 3: Watch the First Officer start up
 
-The First Officer reads the new workflow README, prints the stage list it found, scaffolds the work-item file for the first batch, and dispatches an Ensign to the intake stage. You will see something like:
+The First Officer reads the new workflow README, prints the stage list it found, scaffolds the work-item file for the first batch, and dispatches an Ensign to the intake stage. You will see output that names the workflow, lists the stages it found, and announces the dispatch. The exact wording varies by Claude Code version; an illustrative shape:
 
 ```
-[first-officer] workflow: email-triage
-[first-officer] stages: intake -> approval -> execute
-[first-officer] dispatching ensign to intake (entity: batch-001)
+First Officer (illustrative)
+  workflow: email-triage
+  stages: intake then approval then execute
+  dispatching ensign to intake (entity: batch-001)
 ```
 
 The Ensign then runs `gws-cli`, walks your inbox, and writes its findings into the batch markdown file.
@@ -92,9 +93,10 @@ The mission asks for four stages (design, plan, implement, review), inlined desi
 The First Officer scaffolds the workflow directory, prints the stage list, and waits for you to seed work-item files (one per ticket or PR you want shipped). You can drop a markdown file into the entities directory by hand, or ask the First Officer to create one from a Linear ticket or PR URL. Once an entity exists, the First Officer dispatches an Ensign to the design stage.
 
 ```
-[first-officer] workflow: dev-task
-[first-officer] stages: design -> plan -> implement -> review
-[first-officer] no entities yet; seed one to begin
+First Officer (illustrative)
+  workflow: dev-task
+  stages: design then plan then implement then review
+  no entities yet; seed one to begin
 ```
 
 ### Step 4: Your first gate
@@ -127,5 +129,5 @@ Same flow as the email walkthrough: the next session reads the markdown and resu
 ## Where to go next
 
 - [`USAGE.md`](USAGE.md) for the mental model and the YAML schema.
-- [`EXAMPLES.md`](EXAMPLES.md) for six more worked examples (trip planning, taxes, content, research, household, job search) and three developer workflows.
+- [`EXAMPLES.md`](EXAMPLES.md) for the remaining workflows: six non-developer examples (trip planning, taxes, content publishing, research synthesis, household admin, job search) plus the developer cluster (PR review queue, Linear ticket ship, cross-repo upgrade coordination).
 - [`PROMPTS.md`](PROMPTS.md) for an Initiating Prompt template that asks Claude to look at your recurring work and propose tailored workflows.

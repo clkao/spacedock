@@ -72,7 +72,7 @@ claude --agent spacedock:first-officer "/spacedock:commission Tax and finance pr
 | --- | --- | --- |
 | `intake` | Lists every document found in the year folder, names what is missing (W-2, 1099-NEC, brokerage statements, charitable receipts). | `parked: true` while documents trickle in. |
 | `categorize` | Bins line items into expense categories with confidence notes on edge cases. | None. |
-| `deductions-review` | Proposes deductions with one-line rationale per item. | `gate: true`. Rejection bounces to `categorize`. |
+| `deductions-review` | Proposes deductions with one-line rationale per item. | `gate: true`, `feedback-to: categorize`. Rejection bounces to `categorize`. |
 | `summary` | Builds a clean accountant-ready export (CSV plus a one-pager). | Terminal. |
 
 ### What success looks like
@@ -98,7 +98,7 @@ claude --agent spacedock:first-officer "/spacedock:commission Content publishing
 | `idea` | Captures the angle, the audience, and source notes. | None. |
 | `draft` | Produces a first draft from the idea notes. | None. |
 | `edit` | Captain rewrites in the entity body. Ensign is idle. | None. |
-| `fact-check` | Verifies claims, flags unsourced statements. | `gate: true`. Rejection routes back to `edit`. |
+| `fact-check` | Verifies claims, flags unsourced statements. | `gate: true`, `feedback-to: edit`. Rejection routes back to `edit`. |
 | `publish` | Captain publishes. Ensign drafts social posts. | Terminal. |
 
 ### What success looks like
@@ -124,7 +124,7 @@ claude --agent spacedock:first-officer "/spacedock:commission Research synthesis
 | `intake` | Lists every source, attaches abstracts and citation info. | None. |
 | `summarize` | One summary per source with quoted evidence so claims are traceable. | None. |
 | `cross-reference` | Surfaces overlaps and contradictions between sources. | None. |
-| `synthesis` | Pulls the cross-reference notes into a single argument. | `gate: true`. Rejection routes back to `cross-reference`. |
+| `synthesis` | Pulls the cross-reference notes into a single argument. | `gate: true`, `feedback-to: cross-reference`. Rejection routes back to `cross-reference`. |
 | `write-up` | Drafts a handoff-ready write-up the Captain can pass on. | Terminal. |
 
 ### What success looks like
@@ -208,7 +208,7 @@ claude --agent spacedock:first-officer "/spacedock:commission PR review queue fo
 | --- | --- | --- |
 | `intake` | Mod-populated. Many PRs can sit here. | None. |
 | `review` | Runs an antagonistic review skill, writes severity-tagged findings into the entity body. | `worktree: true`, `concurrency: 1`. |
-| `verdict` | Surfaces the proposed verdict. | `gate: true`. Rejection bounces to `review` with feedback for a fresh pass. APPROVE or REQUEST_CHANGES posts to GitHub. |
+| `verdict` | Surfaces the proposed verdict. | `gate: true`, `feedback-to: review`. Rejection bounces to `review` with feedback for a fresh pass. APPROVE or REQUEST_CHANGES posts to GitHub. |
 | `posted` | Review submitted. | Terminal. |
 
 #### What success looks like
@@ -265,7 +265,7 @@ claude --agent spacedock:first-officer "/spacedock:commission Cross-repo upgrade
 | `upstream` | Implement and ship in the OSS package repo. Must merge and publish. | `worktree: true`. pr-merge mod advances the stage. |
 | (parked between) | Wait on publish before downstream starts. | `parked: true` on entry to `downstream` until the version is live. |
 | `downstream` | Pull the new version, fix breakages, ship a paired PR. | `worktree: true`. pr-merge mod advances. |
-| `verify` | Run full test suites in both repos. | `gate: true`, `fresh: true`. Rejection routes to `downstream`. |
+| `verify` | Run full test suites in both repos. | `gate: true`, `fresh: true`, `feedback-to: downstream`. Rejection routes to `downstream`. |
 | `done` | Both PRs merged, both suites green. | Terminal. |
 
 #### What success looks like
