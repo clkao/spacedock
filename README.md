@@ -2,7 +2,7 @@
 
 Spacedock runs agent work through defined stages so you can delegate in batches and only weigh in on the calls that need your judgment.
 
-You queue up the work, the agents move each item through its stages, and you get pulled in at approval gates with a stage report (findings, evidence, anomalies) ready for a yes, a redirect, or a rejection. No raw output dumps, no babysitting one chat at a time.
+You queue up the work, the agents move each item through its stages, and you get pulled in at approval gates with a stage report (findings, verdicts, artifacts, anomalies) ready for a yes or a no. No raw output dumps, no babysitting one chat at a time.
 
 ## Is this for me?
 
@@ -14,13 +14,15 @@ You queue up the work, the agents move each item through its stages, and you get
 
 ## What is Spacedock?
 
-A workflow is a directory of markdown work item files plus a README that defines the stages, the schema, and the gates. There are three roles: Captain (you), First Officer (orchestrator), Ensign (worker). The First Officer reads the workflow README, dispatches Ensigns for items ready to advance, and pauses at gates to ask the Captain to approve, redirect, or reject.
+A workflow is a directory of markdown work item files plus a README that defines the stages, the schema, and the gates. There are three roles: Captain (you), First Officer (orchestrator), Ensign (worker). The First Officer reads the workflow README, dispatches Ensigns for items ready to advance, and pauses at gates to ask the Captain to approve or reject. (Rejection can bounce the item back to an earlier stage for revision; details in `docs/USAGE.md`.)
 
 Spacedock is not a chat agent and not a single-skill loop. Gates present structured evidence so the Captain decides on findings, not transcript. Review gates can be adversarial: they push back instead of rubber-stamping. The Captain queues many work items and decides as each surfaces, instead of running one session at a time. When a pattern emerges (a stage that never fires, a gate that keeps bouncing), `/spacedock:refit` adjusts the workflow without losing local mods. Stages that touch shared state run in their own git worktree; lighter stages run inline. When an Ensign hits the context limit, a successor picks up the in-flight state from the markdown files and carries on.
 
-## Five-minute quick start
+## Quick start
 
-Prerequisite: [Claude Code](https://docs.claude.com/en/docs/claude-code) installed (Anthropic's CLI; runs on macOS, Windows, and Linux). Nothing in the steps below runs against your inbox or your machine until the First Officer pauses at a gate and you approve.
+Prerequisites: [Claude Code](https://docs.claude.com/en/docs/claude-code) installed (Anthropic's CLI; runs on macOS, Linux, and Windows via WSL). For the email example: a working `gws-cli` for Gmail (setup notes: https://github.com/googleworkspace/cli/tree/main/skills/gws-gmail; this includes a one-time Google OAuth flow).
+
+Once those are in place, the steps below take about five minutes. With a clean machine and no tools installed, plan on twenty minutes total. Nothing runs against your inbox until the First Officer pauses at a gate and you approve.
 
 1. Install the plugin:
 
@@ -34,7 +36,7 @@ Prerequisite: [Claude Code](https://docs.claude.com/en/docs/claude-code) install
    claude --agent spacedock:first-officer "/spacedock:commission Email triage: fetch, categorize, and act on Gmail inbox. Entity: a batch of up to 50 emails. Stages: intake (use gws-cli, triage in:inbox and read email body if necessary, categorize, propose action per email, output as table) then approval (Captain reviews proposal) then execute (carry out approved actions, do not mark as read). Use gws-cli (https://github.com/googleworkspace/cli/tree/main/skills/gws-gmail), GOOGLE_WORKSPACE_CLI_CONFIG_DIR=~/.config/gws/<account> for different accounts. Walk me through gws-cli setup if not already done."
    ```
 
-The First Officer commissions the workflow, dispatches an Ensign to gather your inbox, then pauses with a categorized proposal and waits for your approval before touching anything. If you do not already have `gws-cli` configured for the Gmail account you want triaged, the mission tells the First Officer to walk you through setup before it touches your inbox.
+The First Officer commissions the workflow, dispatches an Ensign to gather your inbox, then pauses with a categorized proposal and waits for your approval before touching anything.
 
 ### If you are a developer
 

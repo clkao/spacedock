@@ -1,6 +1,6 @@
 # How Spacedock works
 
-Spacedock has three roles. The Captain is you. The First Officer is the orchestrator agent that reads the workflow and decides what to do next. The Ensign is a worker agent dispatched to move a single work item through one stage. The basic loop is simple: the First Officer reads the workflow, dispatches Ensigns to advance work items, and pauses at gates to ask the Captain for a call.
+Spacedock has three roles. The Captain is you. The First Officer is the orchestrator agent that reads the workflow and decides what to do next. The Ensign is a worker agent dispatched to move a single work item through one stage. The basic loop: the First Officer reads the workflow, dispatches Ensigns to advance work items, and pauses at gates to ask the Captain for a call.
 
 ## When Spacedock helps and when it does not
 
@@ -16,7 +16,7 @@ For one-shots, keep using ordinary skills. Looking up a Slack thread, creating a
 | Work item | A single markdown file representing one thing being worked on (an email batch, a trip, a ticket, a draft). |
 | Workflow | A directory of work items plus a README that defines stages, schema, and gates. |
 | Stage | A named step a work item passes through (intake, design, review, etc.). |
-| Gate | A pause point at a stage boundary where the Captain approves, redirects, or rejects. |
+| Gate | A pause point at a stage boundary where the Captain approves or rejects. |
 
 | Role | Who |
 |------|-----|
@@ -86,26 +86,29 @@ stages:
       terminal: true
 ```
 
-| Flag | What it does |
-|------|--------------|
-| `initial: true` | Where new work items land when created. |
-| `gate: true` | First Officer pauses and asks the Captain to approve or reject before advancing. |
-| `worktree: true` | Stage runs inside an isolated git worktree. |
-| `concurrency: N` | Maximum work items in this stage at the same time. |
-| `fresh: true` | Dispatches a brand-new Ensign with no prior session context (the manual `/clear` between phases). |
-| `feedback-to: <stage>` | On rejection, status snaps back to that stage with the Captain's feedback baked in. |
-| `parked: true` | Stage waits on an external signal (PR merge, reply, time) instead of auto-advancing. |
-| `terminal: true` | End of the workflow. |
+| Flag | What it does | Default |
+| --- | --- | --- |
+| `initial: true` | Where new work items land when created. | false |
+| `gate: true` | First Officer pauses and asks the Captain to approve or reject before advancing. | false |
+| `worktree: true` | Stage runs inside an isolated git worktree. | false |
+| `concurrency: N` | Maximum simultaneously-active worktree dispatches into this stage. Has no effect on stages without `worktree: true`. | 2 |
+| `fresh: true` | Dispatches a brand-new Ensign with no prior session context (the manual `/clear` between phases). | false |
+| `feedback-to: <stage>` | On rejection at a gate, status routes back to the named stage with the Captain's feedback included in the next Ensign's prompt. | absent |
+| `parked: true` | Captain-facing convention marking a stage that is expected to wait on an external signal (PR merge, reply, an out-of-band action). The runtime does not enforce parking; a parked stage advances when the Captain or a mod transitions the entity out of it. | false |
+| `terminal: true` | End of the workflow. | false |
+| `agent: <name>` | Override the default Ensign for this stage. | `ensign` |
 
 The YAML is the artifact. The commission mission string is the spec. Running `/spacedock:commission` writes the YAML from the mission. If commission gets a flag wrong, edit the YAML by hand. The First Officer reads it on every loop and needs no restart.
 
-`feedback-to:` is not implicit. If you want a gated stage to bounce work back to an earlier stage on rejection, name that stage explicitly. Without `feedback-to:`, a rejection exits the entity rather than bouncing it.
+Set `feedback-to:` on any gate that should bounce work back to an earlier stage on rejection. Without `feedback-to:`, a rejection has no defined bounce target.
+
+The workflow README also carries an `id-style:` frontmatter field, set by commission, that chooses how new work items get their IDs: `sequential` (zero-padded numbers, the default for single-writer workflows), `sd-b32` (short collision-resistant IDs for collaborative or worktree-heavy workflows), or `slug` (kebab-case derived from titles or external identifiers like a Linear ticket or GitHub PR number).
 
 ## Approval gates and adversarial review
 
-Gates are not rubber-stamps. When a stage has `gate: true`, the First Officer pauses, presents the Ensign's stage report (findings, verdicts, artifacts, anomalies), and asks the Captain to approve, redirect, or reject. Approval moves the item forward. Rejection bounces it back to the stage named in `feedback-to:` with the Captain's one-line feedback included in the next Ensign's prompt.
+When a stage has `gate: true`, the First Officer pauses, presents the Ensign's stage report (findings, verdicts, artifacts, anomalies), and asks the Captain to approve or reject. Approval moves the item forward. Rejection at a stage with `feedback-to: <prior-stage>` routes the item back to that prior stage with the Captain's one-line feedback included in the next Ensign's prompt.
 
-Adversarial review is a stage configured to push back instead of confirm. Combine `gate: true`, `fresh: true`, and `feedback-to:` on a review stage. A clean Ensign reads the diff cold, the Captain can challenge thin evidence, and rejection re-dispatches with a stronger frame. In practice this collapses what used to be five rounds of re-running a review skill with progressively stronger language into one stage with three flags.
+Adversarial review is a stage configured to push back instead of confirm. Combine `gate: true`, `fresh: true`, and `feedback-to:` on a review stage. A clean Ensign reads the work cold, the Captain can challenge thin evidence, and rejection re-dispatches with a stronger frame. The intent is to replace the manual loop of rerunning a review skill with progressively stronger language: one stage, three flags, repeatable.
 
 ## Refit and iteration
 
@@ -123,7 +126,7 @@ State lives in the work-item markdown files, not in the Ensign's session. When a
 
 At the end of a working session, run `/spacedock:debrief` to record what happened: commits, status changes, decisions, open issues. The next session reads the debrief and continues from there.
 
-Sessions are not the unit of work. The work item is. You can come back next week and the workflow still knows what is in flight.
+The work item, not the session, is the unit of state. You can come back next week and the workflow still knows what is in flight.
 
 ## Mods at a glance
 
@@ -138,7 +141,7 @@ git clone https://github.com/clkao/spacedock.git /path/to/spacedock
 cd /path/to/spacedock
 ```
 
-Then start Codex with multi-agent support. In Codex, open `/plugins` and install Spacedock from the repo-local marketplace entry. The catalog lives at `.agents/plugins/marketplace.json` and points at `./plugins/spacedock`, which is a checked-in symlink to the repository root so Codex loads the real plugin package directly. The authoritative plugin manifest is `.codex-plugin/plugin.json`.
+Then start Codex with multi-agent support enabled, and install Spacedock from the repo-local marketplace entry. The catalog lives at `.agents/plugins/marketplace.json` and points at `./plugins/spacedock`, which is a checked-in symlink to the repository root so Codex loads the real plugin package directly. The authoritative plugin manifest is `.codex-plugin/plugin.json`. The exact Codex install command varies by version; see your Codex docs for the current plugin install path.
 
 Once installed, prompt Codex to use the first-officer skill:
 
@@ -149,10 +152,10 @@ Use the spacedock:first-officer skill to run /spacedock:commission <your mission
 ## Running Spacedock safely
 
 - Run Spacedock inside a sandbox. Recommended options: `agent-safehouse` (macOS), `packnplay`, a devcontainer, or a VM.
-- Approve at gates with care. Approval is the signal Spacedock uses to advance and it cannot recover gracefully from approval given in error.
+- Approve at gates with care. Approval is irreversible: the next stage executes as soon as you say yes.
 - Run `git status` before approving a stage that ran in a worktree if you suspect uncommitted local changes.
 
 ## Where to go next
 
 - `EXAMPLES.md` for eight worked examples (household, knowledge work, and three developer workflows).
-- `PROMPTS.md` for an Initiating Prompt template that asks Claude to look at your recurring work and propose tailored workflows.
+- `PROMPTS.md` for an Initiating Prompt template that asks Claude to look at your recurring work and propose workflows shaped to it.

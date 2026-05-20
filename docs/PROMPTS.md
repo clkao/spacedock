@@ -1,6 +1,8 @@
 # Initiating prompts
 
-Paste one of the prompts in this doc into Claude Code where Spacedock is checked out. Claude reads the project, asks you about your recurring work, and proposes two or three Spacedock workflows tailored to you. For the mental model, see `USAGE.md`. For copy-paste workflow examples, see `EXAMPLES.md`.
+Paste one of the prompts in this doc into Claude Code where Spacedock is checked out. Claude reads the project, asks you about your recurring work, and proposes two or three Spacedock workflows shaped to your work. For the mental model, see `USAGE.md`. For copy-paste workflow examples, see `EXAMPLES.md`.
+
+A heads up before pasting: prompts that mine your local Claude history (the developer variant) point Claude at `~/.claude/projects/`. Those directories hold every project session you have ever run. If you are using a hosted or shared Claude environment with logging, treat that history as content you are sharing with whoever sees the session. Skip the history paragraph if that is a concern.
 
 ## The template (fill in the blanks)
 
@@ -49,6 +51,7 @@ Based on what you read and what I told you, please:
 3. If you have local history, point Claude at it. Otherwise skip that paragraph; the prompt still works without it.
 4. Ask Claude to start small. One workflow run for two weeks beats four workflows on day one.
 5. Read `EXAMPLES.md` after Claude proposes a mission. Compare its mission string against the example closest to your persona to sanity-check stage names and flags.
+6. Tell Claude to spell out `feedback-to:` on every gate that should bounce back on rejection. Without that flag, a rejection has no defined bounce target and the work item stalls.
 
 ## Variant: Developer
 
@@ -111,6 +114,8 @@ Constraints:
   archived in bulk.
 - Sensitive senders (named contacts, my manager, anything tagged Important) go
   to a manual queue, not the auto-archive.
+- On every gate that should bounce on rejection, name `feedback-to: <stage>`
+  explicitly. A rejection without `feedback-to:` has no bounce target.
 
 Please:
 
@@ -127,17 +132,19 @@ I have Spacedock checked out locally at `<PATH TO SPACEDOCK>`. Please read its
 `README.md` and `docs/USAGE.md` first.
 
 My recurring work:
-- Plan multi-week trips two or three times a year.
+- Plan multi-week trips a few times a year.
 - Research destinations (neighborhoods, transit, food, day trips).
-- Draft itineraries that survive contact with reality.
+- Draft itineraries that the first day of the trip will not immediately break.
 - Identify the booking decisions that need to happen and in what order.
-- Build packing lists tailored to the trip.
+- Build per-trip packing lists from the locked itinerary.
 
 Constraints:
 - Do not actually book anything. Ever.
 - Collect options with prices and tradeoffs, then surface a decision pass for
   the Captain (me) to make the call.
 - Keep one work-item file per trip so I can pick the same trip up next weekend.
+- On every gate that should bounce on rejection, name `feedback-to: <stage>`
+  explicitly so rejection has a defined bounce target.
 
 Please:
 
@@ -165,6 +172,8 @@ Constraints:
 - Do not pay anything. Do not file anything.
 - Produce a clear summary I review before I act.
 - Anything financial goes through an explicit Captain-approval gate.
+- On every gate that should bounce on rejection, name `feedback-to: <stage>`
+  explicitly so rejection has a defined bounce target.
 
 Please:
 
@@ -197,6 +206,8 @@ Constraints:
   final draft before anything goes live.
 - Fact-check stage runs against a clean Ensign so it cannot rubber-stamp the
   drafting Ensign's claims.
+- On every gate that should bounce on rejection, name `feedback-to: <stage>`
+  explicitly so rejection has a defined bounce target.
 
 Please:
 
@@ -224,6 +235,8 @@ Constraints:
 - The synthesis pass must be an explicit Captain-approval gate. Do not let the
   workflow ship a write-up without me reviewing the cross-reference output.
 - Per-source summaries can auto-advance; synthesis cannot.
+- On every gate that should bounce on rejection, name `feedback-to: <stage>`
+  explicitly so rejection has a defined bounce target.
 
 Please:
 

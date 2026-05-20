@@ -1,6 +1,8 @@
 # Getting started
 
-This guide has two complete walkthroughs (email triage and pull request review). Pick whichever fits your work. Each walkthrough takes about five minutes end to end. The mental model lives in [`USAGE.md`](USAGE.md); the cookbook of more examples lives in [`EXAMPLES.md`](EXAMPLES.md).
+This guide has two complete walkthroughs (email triage and pull request review). Pick whichever fits your work. Each walkthrough takes about five minutes once your tools are already installed; budget twenty minutes total if you also need to set up `gws-cli` or fresh-clone a repo. The mental model lives in [`USAGE.md`](USAGE.md); the cookbook of more examples lives in [`EXAMPLES.md`](EXAMPLES.md).
+
+A few terms used below before they get formal definitions in `USAGE.md`: a "stage" is a named step a work item passes through; a "gate" is a pause point at a stage boundary where you decide approve or reject; a "worktree" is an isolated git working directory the agent uses for code-bearing work; a "mod" is an optional markdown file in `_mods/` that extends a workflow with lifecycle hooks.
 
 ## Before you start
 
@@ -51,16 +53,16 @@ batch-001 intake report
 | pat@acme.co       | RE: contract redlines    | reply    | draft a 3-line reply  |
 | security@aws.com  | Unusual sign-in detected | escalate | surface to Captain    |
 
-approve / redirect / reject?
+approve or reject?
 ```
 
-You answer with `approve`, `redirect`, or `reject`. Redirect lets you edit the table inline (recategorize a row, change a proposed action) and re-submit. Reject sends the batch back to intake.
+You answer with `approve` or `reject`. To recategorize a row before approving, edit the batch markdown file directly and then approve. To send the batch back for a fresh pass with your feedback, reject; the next intake Ensign reads your feedback note from the work-item file.
 
 ### Step 5: Approve and execute
 
 On approval, the First Officer dispatches an Ensign to the execute stage. That Ensign runs each approved action through `gws-cli`: archive the receipt, draft the reply in your Drafts folder, leave the escalation untouched. The batch file gets a closing report (what ran, what skipped, any failures), and the entity moves to the terminal stage.
 
-On rejection, the batch bounces back to intake with your feedback recorded in the work-item file. The next intake Ensign reads that feedback and produces a revised proposal instead of starting fresh.
+For the batch to bounce back to intake on rejection (rather than exit), the workflow's `approval` stage needs `feedback-to: intake` in its YAML. If commission did not add it, edit the generated `{workflow-dir}/README.md` and add the flag. The next intake Ensign reads your feedback note from the work-item file and produces a revised proposal instead of starting fresh.
 
 ### Step 6: End the session
 
@@ -101,7 +103,7 @@ First Officer (illustrative)
 
 ### Step 4: Your first gate
 
-When the design Ensign finishes, the First Officer pauses at the design gate and shows you the proposed `## Design` section inlined in the entity body: the problem statement, the chosen approach, the tradeoffs considered, and the test contracts the implement stage will be held to. You answer `approve`, `redirect`, or `reject`. Redirect lets you push back on a specific tradeoff; reject sends design back with your notes.
+When the design Ensign finishes, the First Officer pauses at the design gate and shows you the proposed `## Design` section inlined in the entity body: the problem statement, the chosen approach, the tradeoffs considered, and the test contracts the implement stage will be held to. You answer `approve` or `reject`. To push back on a tradeoff before approving, edit the entity body and then approve. To send the design back for a fresh pass with your feedback, reject.
 
 ### Step 5: Approve and execute
 
@@ -121,7 +123,7 @@ Same flow as the email walkthrough: the next session reads the markdown and resu
 
 - The first commission does not actually execute work; it scaffolds the workflow directory and README. Work starts on the next loop or when you re-invoke the First Officer.
 - If a stage that should run in a worktree complains about uncommitted changes, commit or stash them first; Spacedock will not silently overwrite local edits.
-- Approval gates pause the First Officer; the workflow does not advance until the Captain answers. This is by design.
+- Approval gates pause the First Officer; the workflow does not advance until the Captain answers.
 - If you want to bounce a stage back with feedback, reject (do not approve), and Spacedock will re-dispatch the previous stage with your feedback baked in.
 - Commission cannot scaffold custom mods. It can only copy pre-shipped ones (currently just `pr-merge`). Custom mods are authored by hand in `_mods/`.
 - The plugin is the source of truth for stage flags; the generated `{workflow-dir}/README.md` controls per-workflow behavior. If commission gets the YAML flags wrong, edit the YAML; the First Officer reads it on every loop.
@@ -130,4 +132,4 @@ Same flow as the email walkthrough: the next session reads the markdown and resu
 
 - [`USAGE.md`](USAGE.md) for the mental model and the YAML schema.
 - [`EXAMPLES.md`](EXAMPLES.md) for the remaining workflows: six non-developer examples (trip planning, taxes, content publishing, research synthesis, household admin, job search) plus the developer cluster (PR review queue, Linear ticket ship, cross-repo upgrade coordination).
-- [`PROMPTS.md`](PROMPTS.md) for an Initiating Prompt template that asks Claude to look at your recurring work and propose tailored workflows.
+- [`PROMPTS.md`](PROMPTS.md) for an Initiating Prompt template that asks Claude to look at your recurring work and propose workflows shaped to it.

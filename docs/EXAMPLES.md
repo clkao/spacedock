@@ -21,12 +21,12 @@ claude --agent spacedock:first-officer "/spacedock:commission Email triage: fetc
 | Stage | What the Ensign does | What the gate decides |
 | --- | --- | --- |
 | `intake` | Pulls `in:inbox`, reads bodies where the subject is ambiguous, categorizes, and writes a proposed action per email into a table. | None. Stage exit is automatic. |
-| `approval` | Renders the proposal table. | Captain approves, edits cells, or rejects rows back to intake. |
+| `approval` | Renders the proposal table. | `gate: true`, `feedback-to: intake`. Captain approves; to send rows back, edit the work-item file and reject. |
 | `execute` | Carries out the approved actions (file, archive, draft reply). Does not mark as read. | Terminal. |
 
 ### What success looks like
 
-Morning triage drops to one approval pass per batch. Receipts get routed to tax folders without manual sorting, newsletters get archived, and only the messages that need a real response remain in the inbox. After two weeks the categorizer has learned your senders well enough that approval is mostly a thumbs up.
+Morning triage drops to one approval pass per batch. Receipts get routed to tax folders without manual sorting, newsletters get archived, and only the messages that need a real response remain in the inbox. If you keep correcting categorizations on rejection, the workflow's prompt evolves with your edits and the approval pass shortens.
 
 ## 2. Trip planning
 
@@ -161,12 +161,12 @@ The household runs on the workflow instead of on memory. Renewals get handled a 
 
 **Who this is for**: someone running an active job search across one or several open roles.
 
-**Recurring pain it removes**: tailored resumes and cover letters get written in a panic, follow-ups are forgotten, and interviewing momentum is lost between weeks.
+**Recurring pain it removes**: resumes and cover letters get written in a panic, follow-ups are forgotten, and interviewing momentum is lost between weeks.
 
 ### Mission
 
 ```bash
-claude --agent spacedock:first-officer "/spacedock:commission Job search: one entity per role (a company plus a job posting). Stages: intake (capture posting text, contact name, deadline) then tailor (Ensign drafts a tailored resume and cover letter from the posting; Captain edits in the entity body) then apply (gate: Captain confirms send) then follow-up (parked until response or a follow-up date) then interview (Captain logs notes per round into the entity body) then outcome (terminal: offer, rejection, or withdrawn). Working text lives in the entity body."
+claude --agent spacedock:first-officer "/spacedock:commission Job search: one entity per role (a company plus a job posting). Stages: intake (capture posting text, contact name, deadline) then tailor (Ensign drafts a resume and cover letter tuned to the posting; Captain edits in the entity body) then apply (gate: Captain confirms send) then follow-up (parked until response or a follow-up date) then interview (Captain logs notes per round into the entity body) then outcome (terminal: offer, rejection, or withdrawn). Working text lives in the entity body."
 ```
 
 ### Stages
@@ -174,7 +174,7 @@ claude --agent spacedock:first-officer "/spacedock:commission Job search: one en
 | Stage | What the Ensign does | Flags and gate |
 | --- | --- | --- |
 | `intake` | Captures posting, contact, deadline. | None. |
-| `tailor` | Drafts a tailored resume and cover letter. Captain edits. | None. |
+| `tailor` | Drafts a resume and cover letter tuned to the posting. Captain edits. | None. |
 | `apply` | Final review of the materials. | `gate: true`. Captain confirms send. |
 | `follow-up` | Waits for a reply or a follow-up date. | `parked: true`. |
 | `interview` | Captain logs notes round by round into the entity body. | None. |
@@ -182,7 +182,7 @@ claude --agent spacedock:first-officer "/spacedock:commission Job search: one en
 
 ### What success looks like
 
-The search runs in parallel across many roles without dropping any. Tailored materials accumulate as a library you can reuse on the next round. Follow-ups happen on time because the workflow surfaces parked items on their follow-up date.
+The search runs in parallel across many roles without dropping any. Per-role materials accumulate as a library you can reuse on the next round. Follow-ups happen on time because the workflow surfaces parked items on their follow-up date.
 
 ## 8. Software development
 
@@ -197,7 +197,7 @@ Three developer workflows. They share a shape: the entity is one unit of work, t
 #### Mission
 
 ```bash
-claude --agent spacedock:first-officer "/spacedock:commission PR review queue for PRs where I am set as a requested reviewer. Entity: a single GitHub PR awaiting my review. Auto-intake is provided by a hand-authored mod at _mods/pr-review-intake.md. The mod polls GitHub on a 20-minute debounce, creates entities for new PRs, and auto-archives entities whose PRs are merged, closed, converted to draft, or whose review request was removed. Stages: intake (auto-populated by the mod; multiple entities can sit here simultaneously while waiting their turn) then review (concurrency: 1, only one PR is reviewed at a time; run an antagonistic review skill; assume the worst, look for hidden brittleness, verify test coverage; output severity-tagged findings into the entity body) then verdict (gate: Captain approves the verdict APPROVE or REQUEST_CHANGES or NEEDS_DEEPER_REVIEW; on rejection bounce back to review with one-line feedback for a fresh adversarial pass; on APPROVE or REQUEST_CHANGES post the review to GitHub) then posted (terminal: review submitted). Use worktree on review for branch inspection. Set id-style to slug so entity filenames can be {owner}-{repo}-pr-{number}. Decline the pr-merge mod when offered; this workflow does not create PRs."
+claude --agent spacedock:first-officer "/spacedock:commission PR review queue for PRs where I am set as a requested reviewer. Entity: a single GitHub PR awaiting my review. Auto-intake is provided by a hand-authored mod at _mods/pr-review-intake.md. The mod runs on the First Officer's idle hook with a self-imposed 20-minute minimum between GitHub polls, creates entities for new PRs, and auto-archives entities whose PRs are merged, closed, converted to draft, or whose review request was removed. Stages: intake (auto-populated by the mod; multiple entities can sit here simultaneously while waiting their turn) then review (concurrency: 1, only one PR is reviewed at a time; run an antagonistic review skill; assume the worst, look for hidden brittleness, verify test coverage; output severity-tagged findings into the entity body) then verdict (gate: Captain approves the verdict APPROVE or REQUEST_CHANGES or NEEDS_DEEPER_REVIEW; on rejection bounce back to review with one-line feedback for a fresh adversarial pass) then posted (terminal: an Ensign here posts the approved review to GitHub via gh pr review). Use worktree on review for branch inspection. Set id-style to slug so entity filenames can be {owner}-{repo}-pr-{number}. Decline the pr-merge mod when offered; this workflow does not create PRs."
 ```
 
 > Heads up: commission cannot scaffold new mods. It only copies pre-shipped ones. The `pr-review-intake.md` mod referenced above has to be authored by hand and dropped into `{workflow-dir}/_mods/` after commission finishes. Order does not matter; the First Officer re-scans `_mods/` on every loop.
@@ -208,8 +208,8 @@ claude --agent spacedock:first-officer "/spacedock:commission PR review queue fo
 | --- | --- | --- |
 | `intake` | Mod-populated. Many PRs can sit here. | None. |
 | `review` | Runs an antagonistic review skill, writes severity-tagged findings into the entity body. | `worktree: true`, `concurrency: 1`. |
-| `verdict` | Surfaces the proposed verdict. | `gate: true`, `feedback-to: review`. Rejection bounces to `review` with feedback for a fresh pass. APPROVE or REQUEST_CHANGES posts to GitHub. |
-| `posted` | Review submitted. | Terminal. |
+| `verdict` | Surfaces the proposed verdict for Captain approval. | `gate: true`, `feedback-to: review`. Rejection bounces to `review` with feedback for a fresh pass. |
+| `posted` | An Ensign posts the approved review to GitHub via `gh pr review --approve` or `--request-changes`. | Terminal. |
 
 #### What success looks like
 
@@ -219,7 +219,7 @@ The review queue clears on a daily pass. Antagonistic re-runs happen automatical
 
 **Who this is for**: a developer shipping Linear tickets end to end.
 
-**Recurring pain it removes**: tickets stretch across multiple sessions, status drifts out of sync with Linear, and review feels stale because it ran in the same context as implementation.
+**Recurring pain it removes**: tickets stretch across multiple sessions, the Linear ticket stays in Todo while you ship code locally, and review feels stale because it ran in the same context as implementation.
 
 #### Mission
 
@@ -233,7 +233,7 @@ claude --agent spacedock:first-officer "/spacedock:commission Linear ticket ship
 
 | Stage | Role | Flags and gate |
 | --- | --- | --- |
-| `intake` | Mod creates entities from Linear. | `gate: true`, `concurrency: 100`, captain-curated. |
+| `intake` | Mod creates entities from Linear. | `gate: true`, captain-curated. (Concurrency is unbounded in practice: intake entities have no worktree, so the `concurrency` flag is a documentation marker, not enforced.) |
 | `triage` | Classify, pick the affected repo. | `gate: true`. |
 | `design` | Write Design and Acceptance Criteria into the entity body. | `gate: true`. |
 | `implement` | TDD on an isolated branch. | `worktree: true`, `concurrency: 1`. Mod sets Linear to In Progress. |
@@ -243,7 +243,7 @@ claude --agent spacedock:first-officer "/spacedock:commission Linear ticket ship
 
 #### What success looks like
 
-Tickets ship without status drift because the mod keeps Linear honest. Review is genuinely independent because the Ensign starts cold on a fresh worktree. Multiple PRs can be in flight without losing track of which one is at which stage.
+Tickets ship and Linear stays in sync because the mod updates the ticket state on every stage entry. Review reads the diff cold on a fresh worktree, so it catches problems an in-session reviewer would skim past. Multiple PRs can be in flight and the workflow holds the state for each.
 
 ### Cross-repo upgrade coordination
 
@@ -270,4 +270,4 @@ claude --agent spacedock:first-officer "/spacedock:commission Cross-repo upgrade
 
 #### What success looks like
 
-Pairing notes are durable across sessions because they live in the entity body. Consumer work does not start before the upstream package is published because the workflow parks itself on the publish gate. Verification is independent of the implementation context because it runs fresh.
+Pairing notes live in the entity body, so they survive sessions and context limits. Consumer work waits for the upstream package to publish because the downstream stage is parked. Verification reads both repos cold because it dispatches a fresh Ensign.
