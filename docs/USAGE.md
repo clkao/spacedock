@@ -4,7 +4,7 @@ Spacedock has three roles. The Captain is you. The First Officer is the orchestr
 
 ## When Spacedock helps and when it does not
 
-Spacedock is a batch and approval layer that sits on top of skills. It does not replace skills. It pays off when work has natural pause points where you would want to glance at output before letting an agent move on, when work spans sessions so you come back tomorrow to the same item, or when you would otherwise re-run the same skill manually several times against your own output (the antagonistic re-review pattern).
+Spacedock is a batch and approval layer that sits on top of skills. It does not replace skills. It pays off when work has natural pause points where you would want to glance at output before letting an agent move on, when work spans sessions so you come back tomorrow to the same item, or when you would otherwise re-run the same skill manually several times against your own output (the adversarial re-review pattern).
 
 For one-shots, keep using ordinary skills. Looking up a Slack thread, creating a worktree, managing plugins, running `/clear` between thoughts: none of these need a workflow. Reach for Spacedock when there is a stream of similar work items moving through the same shape, or when a single item has enough phases that you want a record of what happened at each one.
 
@@ -96,17 +96,24 @@ stages:
 | `feedback-to: <stage>` | On rejection at a gate, status routes back to the named stage with the Captain's feedback included in the next Ensign's prompt. | absent |
 | `parked: true` | Captain-facing convention marking a stage that is expected to wait on an external signal (PR merge, reply, an out-of-band action). The runtime does not enforce parking; a parked stage advances when the Captain or a mod transitions the entity out of it. | false |
 | `terminal: true` | End of the workflow. | false |
-| `agent: <name>` | Override the default Ensign for this stage. | `ensign` |
+| `agent: <name>` | Override the default agent (`spacedock:ensign`) for this stage. Useful for routing a stage to a specialized agent like `spacedock:first-officer` for orchestration work. | `spacedock:ensign` |
+| `model: <id>` | Force a specific Claude model for the Ensign at this stage (e.g. `haiku`, `sonnet`, `opus`). Inherits from `stages.defaults.model` if set, otherwise uses the Ensign's default. | inherits |
 
-The YAML is the artifact. The commission mission string is the spec. Running `/spacedock:commission` writes the YAML from the mission. If commission gets a flag wrong, edit the YAML by hand. The First Officer reads it on every loop and needs no restart.
+The YAML is the artifact. The commission mission string is the spec. Running `/spacedock:commission` writes the YAML from the mission. If commission gets a flag wrong, edit the YAML by hand. The First Officer reads the workflow README at startup; a running session uses its in-memory copy of the workflow, so hand edits take effect on the next First Officer boot (close the session and reopen). The status binary always re-reads from disk, so `status --boot` and friends pick up the edit immediately.
 
-Set `feedback-to:` on any gate that should bounce work back to an earlier stage on rejection. Without `feedback-to:`, a rejection has no defined bounce target.
+Set `feedback-to:` on any gate that should bounce work back to an earlier stage on rejection. Without `feedback-to:`, a rejection has no defined bounce target. On rejection, the Captain gives a one-line reason at the gate prompt; longer feedback goes in the entity body under `## Captain feedback` before rejecting. The next Ensign reads both. The runtime caps feedback cycles at three rounds per stage; after that the entity escalates rather than looping forever.
 
-The workflow README also carries an `id-style:` frontmatter field, set by commission, that chooses how new work items get their IDs: `sequential` (zero-padded numbers, the default for single-writer workflows), `sd-b32` (short collision-resistant IDs for collaborative or worktree-heavy workflows), or `slug` (kebab-case derived from titles or external identifiers like a Linear ticket or GitHub PR number).
+The workflow README also carries an `id-style:` frontmatter field, set by commission, that chooses how new work items get their IDs: `sequential` (zero-padded numbers, the default), `sd-b32` (short collision-resistant IDs for collaborative or worktree-heavy workflows), or `slug` (kebab-case derived from titles or external identifiers like a Linear ticket or GitHub PR number). Stage names must match `[a-z0-9][a-z0-9-]*[a-z0-9]` (lowercase, kebab-case, no underscores); `status --validate` enforces this.
+
+The workflow directory itself is wherever you ran `/spacedock:commission` from. It is a normal directory inside your project; you can move it, copy it, commit it, or delete it. Worktrees live at `.worktrees/<worker-key>-<slug>` under the repo root and clean up on terminal merge.
 
 ## Approval gates and adversarial review
 
-When a stage has `gate: true`, the First Officer pauses, presents the Ensign's stage report (findings, verdicts, artifacts, anomalies), and asks the Captain to approve or reject. Approval moves the item forward. Rejection at a stage with `feedback-to: <prior-stage>` routes the item back to that prior stage with the Captain's one-line feedback included in the next Ensign's prompt.
+When a stage has `gate: true`, the First Officer pauses, presents the Ensign's stage report (findings, verdicts, artifacts, anomalies), and asks the Captain to approve or reject. You have three responses:
+
+1. Approve as-is. The next stage runs.
+2. Edit the entity body, then approve. Your edits carry forward and the next stage uses them.
+3. Reject. If `feedback-to: <prior-stage>` is set on this gate, the item routes back to that prior stage with your one-line gate-prompt reason and any `## Captain feedback` you added to the entity body. Without `feedback-to:`, the rejection has no defined bounce target.
 
 Adversarial review is a stage configured to push back instead of confirm. Combine `gate: true`, `fresh: true`, and `feedback-to:` on a review stage. A clean Ensign reads the work cold, the Captain can challenge thin evidence, and rejection re-dispatches with a stronger frame. The intent is to replace the manual loop of rerunning a review skill with progressively stronger language: one stage, three flags, repeatable.
 
@@ -152,8 +159,17 @@ Use the spacedock:first-officer skill to run /spacedock:commission <your mission
 ## Running Spacedock safely
 
 - Run Spacedock inside a sandbox. Recommended options: `agent-safehouse` (macOS), `packnplay`, a devcontainer, or a VM.
-- Approve at gates with care. Approval is irreversible: the next stage executes as soon as you say yes.
+- Approve at gates with care. Approval is irreversible: the next stage executes as soon as you say yes. If you are not sure, reject; the bounce flow is the recovery mechanism.
 - Run `git status` before approving a stage that ran in a worktree if you suspect uncommitted local changes.
+- Stop a running workflow by closing the Claude Code session (Ctrl-D or `/quit`). The First Officer halts; work-item files keep the in-flight state for next time.
+
+## Cost, data, and recovery
+
+- **Cost.** Each Ensign dispatch is a Claude session. A workflow that runs many Ensigns (intake every few minutes, fresh adversarial review, successors on context limit) will spend tokens at the rate of those sessions. Use `model: haiku` on lightweight stages to cap cost; reserve Sonnet or Opus for stages that need it.
+- **Data.** Inbox-, calendar-, and document-touching workflows send the data they read to Claude as part of the Ensign's session. Treat anything in a work-item file or in a stage report as something that has been read by Claude. If your organization restricts what may be sent to third-party LLMs, scope your workflows accordingly.
+- **OAuth scopes.** Tools like `gws-cli` ask for Google OAuth scopes during their own setup, not through Spacedock. Read the tool's setup notes before authorising. Revocation is in your Google account's third-party access settings, not in Spacedock.
+- **Mistakes.** Ensigns can be wrong. Build in protection at the workflow level: keep the destructive stage (send, file, book, publish) gated; let the Ensign propose the action and only execute on the Captain's approval. Email triage in `EXAMPLES.md` is shaped this way: `intake` writes a proposal, `approval` gates, only `execute` touches Gmail. If an action you approved turns out to be wrong, recover with the touched system's own tools (Gmail trash, `git revert`, the upstream service's undo).
+- **Multiple workflows.** Spacedock does not orchestrate across workflows. Each is its own directory with its own First Officer session. Open one at a time.
 
 ## Where to go next
 

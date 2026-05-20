@@ -13,7 +13,7 @@ Pick the closest example, adapt the mission text to your situation, and paste it
 ### Mission
 
 ```bash
-claude --agent spacedock:first-officer "/spacedock:commission Email triage: fetch, categorize, and act on Gmail inbox. Entity: a batch of up to 50 emails. Stages: intake (use gws-cli, triage in:inbox and read email body if necessary, categorize, propose action per email, output as table) then approval (Captain reviews proposal) then execute (carry out approved actions, do not mark as read). Use gws-cli (https://github.com/googleworkspace/cli/tree/main/skills/gws-gmail), GOOGLE_WORKSPACE_CLI_CONFIG_DIR=~/.config/gws/<account> for different accounts. Walk me through gws-cli setup if not already done."
+claude --agent spacedock:first-officer "/spacedock:commission Email triage: fetch, categorize, and act on Gmail inbox. Entity: an email batch (up to 50 messages). Stages: intake (use gws-cli, triage in:inbox and read email body if necessary, categorize, propose action per email, output as table) then approval (Captain reviews proposal) then execute (carry out approved actions, do not mark as read). Use gws-cli (https://github.com/googleworkspace/cli/tree/main/skills/gws-gmail), GOOGLE_WORKSPACE_CLI_CONFIG_DIR=~/.config/gws/<account> for different accounts. Walk me through gws-cli setup if not already done."
 ```
 
 ### Stages
@@ -47,7 +47,7 @@ claude --agent spacedock:first-officer "/spacedock:commission Trip planning: sha
 | `research` | Gathers neighborhoods, sights, transit, and weather notes. Writes them into the entity body. | None. |
 | `itinerary` | Drafts a day-by-day plan with decision points highlighted. | None. |
 | `decisions` | Surfaces the lodging and day-trip choices. | `gate: true`. Captain picks. |
-| `booking` | Lists what to book (links, times, confirmation numbers field empty). | `parked: true`. Waits for the Captain to actually book and paste confirmations back. |
+| `booking` | Lists what to book (links, times, confirmation numbers field empty). | `parked: true` (captain-facing marker). Captain books off-platform, pastes confirmations back, then transitions the entity to `packing`. |
 | `packing` | Generates a packing list keyed off climate windows and the locked itinerary. | Terminal. |
 
 ### What success looks like
@@ -70,7 +70,7 @@ claude --agent spacedock:first-officer "/spacedock:commission Tax and finance pr
 
 | Stage | What the Ensign does | Flags and gate |
 | --- | --- | --- |
-| `intake` | Lists every document found in the year folder, names what is missing (W-2, 1099-NEC, brokerage statements, charitable receipts). | `parked: true` while documents trickle in. |
+| `intake` | Lists every document found in the year folder, names what is missing (W-2, 1099-NEC, brokerage statements, charitable receipts). | `parked: true` (captain-facing marker). Captain re-runs intake as documents arrive and transitions to `categorize` when the list is complete. |
 | `categorize` | Bins line items into expense categories with confidence notes on edge cases. | None. |
 | `deductions-review` | Proposes deductions with one-line rationale per item. | `gate: true`, `feedback-to: categorize`. Rejection bounces to `categorize`. |
 | `summary` | Builds a clean accountant-ready export (CSV plus a one-pager). | Terminal. |
@@ -150,7 +150,7 @@ claude --agent spacedock:first-officer "/spacedock:commission Household admin: o
 | `intake` | Captain or a mod creates new items. | None. |
 | `triage` | Proposes priority and a deadline based on the item type. | None. |
 | `action` | Lists the proposed action (call, file, schedule). | `gate: true`. Captain approves. |
-| `follow-up` | Waits for a reply or a date. | `parked: true`. |
+| `follow-up` | Waits for a reply or a date. | `parked: true` (captain-facing marker). Captain transitions to `closed` when the item is resolved. |
 | `closed` | Item resolved. | Terminal. |
 
 ### What success looks like
@@ -176,7 +176,7 @@ claude --agent spacedock:first-officer "/spacedock:commission Job search: one en
 | `intake` | Captures posting, contact, deadline. | None. |
 | `tailor` | Drafts a resume and cover letter tuned to the posting. Captain edits. | None. |
 | `apply` | Final review of the materials. | `gate: true`. Captain confirms send. |
-| `follow-up` | Waits for a reply or a follow-up date. | `parked: true`. |
+| `follow-up` | Waits for a reply or a follow-up date. | `parked: true` (captain-facing marker). Captain transitions to `interview` on response or back to `intake` when the trail goes cold. |
 | `interview` | Captain logs notes round by round into the entity body. | None. |
 | `outcome` | Offer, rejection, or withdrawn. | Terminal. |
 
@@ -188,6 +188,8 @@ The search runs in parallel across many roles without dropping any. Per-role mat
 
 Three developer workflows. They share a shape: the entity is one unit of work, the implementation stages run on isolated worktrees, and review is a fresh adversarial pass instead of self-review.
 
+All three assume `gh` (GitHub CLI) is installed and authenticated; the PR-review queue uses `gh pr review`, the ticket-ship workflow uses the shipped `pr-merge` mod which calls `gh pr create`, and the cross-repo workflow uses both. The `pr-merge` mod will not push or open a PR without explicit Captain approval; expect a confirmation prompt before any write to GitHub.
+
 ### PR review queue
 
 **Who this is for**: a developer who is regularly added as a requested reviewer on GitHub PRs.
@@ -197,7 +199,7 @@ Three developer workflows. They share a shape: the entity is one unit of work, t
 #### Mission
 
 ```bash
-claude --agent spacedock:first-officer "/spacedock:commission PR review queue for PRs where I am set as a requested reviewer. Entity: a single GitHub PR awaiting my review. Auto-intake is provided by a hand-authored mod at _mods/pr-review-intake.md. The mod runs on the First Officer's idle hook with a self-imposed 20-minute minimum between GitHub polls, creates entities for new PRs, and auto-archives entities whose PRs are merged, closed, converted to draft, or whose review request was removed. Stages: intake (auto-populated by the mod; multiple entities can sit here simultaneously while waiting their turn) then review (concurrency: 1, only one PR is reviewed at a time; run an antagonistic review skill; assume the worst, look for hidden brittleness, verify test coverage; output severity-tagged findings into the entity body) then verdict (gate: Captain approves the verdict APPROVE or REQUEST_CHANGES or NEEDS_DEEPER_REVIEW; on rejection bounce back to review with one-line feedback for a fresh adversarial pass) then posted (terminal: an Ensign here posts the approved review to GitHub via gh pr review). Use worktree on review for branch inspection. Set id-style to slug so entity filenames can be {owner}-{repo}-pr-{number}. Decline the pr-merge mod when offered; this workflow does not create PRs."
+claude --agent spacedock:first-officer "/spacedock:commission PR review queue for PRs where I am set as a requested reviewer. Entity: a PR awaiting my review. Auto-intake is provided by a hand-authored mod at _mods/pr-review-intake.md. The mod runs on the First Officer's idle hook with a self-imposed 20-minute minimum between GitHub polls, creates entities for new PRs, and auto-archives entities whose PRs are merged, closed, converted to draft, or whose review request was removed. Stages: intake (auto-populated by the mod; multiple entities can sit here simultaneously while waiting their turn) then review (concurrency: 1, only one PR is reviewed at a time; run an adversarial review skill; assume the worst, look for hidden brittleness, verify test coverage; output severity-tagged findings into the entity body) then verdict (gate: Captain approves the verdict APPROVE or REQUEST_CHANGES or NEEDS_DEEPER_REVIEW; on rejection bounce back to review with one-line feedback for a fresh adversarial pass) then posted (terminal: an Ensign here posts the approved review to GitHub via gh pr review). Use worktree on review for branch inspection. Set id-style to slug so entity filenames can be {owner}-{repo}-pr-{number}. Decline the pr-merge mod when offered; this workflow does not create PRs."
 ```
 
 > Heads up: commission cannot scaffold new mods. It only copies pre-shipped ones. The `pr-review-intake.md` mod referenced above has to be authored by hand and dropped into `{workflow-dir}/_mods/` after commission finishes. Order does not matter; the First Officer re-scans `_mods/` on every loop.
@@ -207,13 +209,13 @@ claude --agent spacedock:first-officer "/spacedock:commission PR review queue fo
 | Stage | What the Ensign does | Flags and gate |
 | --- | --- | --- |
 | `intake` | Mod-populated. Many PRs can sit here. | None. |
-| `review` | Runs an antagonistic review skill, writes severity-tagged findings into the entity body. | `worktree: true`, `concurrency: 1`. |
+| `review` | Runs an adversarial review skill, writes severity-tagged findings into the entity body. | `worktree: true`, `concurrency: 1`. |
 | `verdict` | Surfaces the proposed verdict for Captain approval. | `gate: true`, `feedback-to: review`. Rejection bounces to `review` with feedback for a fresh pass. |
 | `posted` | An Ensign posts the approved review to GitHub via `gh pr review --approve` or `--request-changes`. | Terminal. |
 
 #### What success looks like
 
-The review queue clears on a daily pass. Antagonistic re-runs happen automatically on rejection instead of by hand. Nothing sits in your queue silently because the mod auto-archives PRs that no longer need you.
+The review queue clears on a daily pass. Adversarial re-runs happen automatically on rejection instead of by hand. Nothing sits in your queue silently because the mod auto-archives PRs that no longer need you.
 
 ### Linear ticket ship workflow
 
@@ -224,7 +226,7 @@ The review queue clears on a daily pass. Antagonistic re-runs happen automatical
 #### Mission
 
 ```bash
-claude --agent spacedock:first-officer "/spacedock:commission Linear ticket ship workflow: one entity per Linear ticket assigned to me. Auto-intake is provided by a hand-authored mod at _mods/linear-intake.md. Stages: intake (mod-populated, captain-curated, gate, concurrency: 100; the mod creates the entity but never auto-promotes) then triage (gate: classify the ticket, pick the affected repo, escalate if cross-repo) then design (gate: write Design and Acceptance Criteria into the entity body) then implement (worktree, concurrency: 1, TDD; mod transitions Linear to In Progress on stage entry) then review (worktree, fresh, gate, feedback-to: implement; dispatch a separate Ensign for an antagonistic review) then ship (parked: open the PR; mod transitions Linear to In Review when the PR field is set) then merged (terminal; pr-merge mod advances when the PR lands on main; mod transitions Linear to Done). Accept the pr-merge mod when offered."
+claude --agent spacedock:first-officer "/spacedock:commission Linear ticket ship workflow: one entity per Linear ticket assigned to me. Auto-intake is provided by a hand-authored mod at _mods/linear-intake.md. Stages: intake (mod-populated, captain-curated, gate, concurrency: 100; the mod creates the entity but never auto-promotes) then triage (gate: classify the ticket, pick the affected repo, escalate if cross-repo) then design (gate: write Design and Acceptance Criteria into the entity body) then implement (worktree, concurrency: 1, TDD; mod transitions Linear to In Progress on stage entry) then review (worktree, fresh, gate, feedback-to: implement; dispatch a separate Ensign for an adversarial review) then ship (parked: open the PR; mod transitions Linear to In Review when the PR field is set) then merged (terminal; pr-merge mod advances when the PR lands on main; mod transitions Linear to Done). Accept the pr-merge mod when offered."
 ```
 
 > Heads up: the `linear-intake.md` mod is hand-authored, like the PR review intake mod above. Commission only copies pre-shipped mods (today that means `pr-merge` only). Drop your `linear-intake.md` into `{workflow-dir}/_mods/` after commission finishes.
@@ -237,8 +239,8 @@ claude --agent spacedock:first-officer "/spacedock:commission Linear ticket ship
 | `triage` | Classify, pick the affected repo. | `gate: true`. |
 | `design` | Write Design and Acceptance Criteria into the entity body. | `gate: true`. |
 | `implement` | TDD on an isolated branch. | `worktree: true`, `concurrency: 1`. Mod sets Linear to In Progress. |
-| `review` | A fresh Ensign runs an antagonistic review. | `worktree: true`, `fresh: true`, `gate: true`, `feedback-to: implement`. |
-| `ship` | Open the PR. | `parked: true`. Mod sets Linear to In Review. |
+| `review` | A fresh Ensign runs an adversarial review. | `worktree: true`, `fresh: true`, `gate: true`, `feedback-to: implement`. |
+| `ship` | Open the PR. | `parked: true` (captain-facing marker). The pr-merge mod transitions the entity to `merged` when the PR merges; the mod is what does the work, not the `parked` flag. |
 | `merged` | PR merged. | Terminal. Mod sets Linear to Done. |
 
 #### What success looks like
@@ -262,12 +264,11 @@ claude --agent spacedock:first-officer "/spacedock:commission Cross-repo upgrade
 | Stage | What happens | Flags and gate |
 | --- | --- | --- |
 | `scope` | List call sites, propose a phased plan. | `gate: true`. |
-| `upstream` | Implement and ship in the OSS package repo. Must merge and publish. | `worktree: true`. pr-merge mod advances the stage. |
-| (parked between) | Wait on publish before downstream starts. | `parked: true` on entry to `downstream` until the version is live. |
-| `downstream` | Pull the new version, fix breakages, ship a paired PR. | `worktree: true`. pr-merge mod advances. |
+| `upstream` | Implement and ship in the OSS package repo. Must merge and publish before `downstream` starts. | `worktree: true`. The pr-merge mod opens the PR and advances this entity to the next stage when the PR merges. |
+| `downstream` | Pull the new version, fix breakages, ship a paired PR. Captain holds this stage open until the upstream package version is live on the registry. | `worktree: true`, `parked: true`. The Captain transitions out when ready. |
 | `verify` | Run full test suites in both repos. | `gate: true`, `fresh: true`, `feedback-to: downstream`. Rejection routes to `downstream`. |
 | `done` | Both PRs merged, both suites green. | Terminal. |
 
 #### What success looks like
 
-Pairing notes live in the entity body, so they survive sessions and context limits. Consumer work waits for the upstream package to publish because the downstream stage is parked. Verification reads both repos cold because it dispatches a fresh Ensign.
+Pairing notes live in the entity body, so they survive sessions and context limits. Consumer work waits for the upstream package to publish because the downstream stage is parked and the Captain only transitions out when the version is live. Verification reads both repos cold because it dispatches a fresh Ensign.

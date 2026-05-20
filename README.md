@@ -33,7 +33,7 @@ Once those are in place, the steps below take about five minutes. With a clean m
 2. Commission an email triage workflow:
 
    ```bash
-   claude --agent spacedock:first-officer "/spacedock:commission Email triage: fetch, categorize, and act on Gmail inbox. Entity: a batch of up to 50 emails. Stages: intake (use gws-cli, triage in:inbox and read email body if necessary, categorize, propose action per email, output as table) then approval (Captain reviews proposal) then execute (carry out approved actions, do not mark as read). Use gws-cli (https://github.com/googleworkspace/cli/tree/main/skills/gws-gmail), GOOGLE_WORKSPACE_CLI_CONFIG_DIR=~/.config/gws/<account> for different accounts. Walk me through gws-cli setup if not already done."
+   claude --agent spacedock:first-officer "/spacedock:commission Email triage: fetch, categorize, and act on Gmail inbox. Entity: an email batch (up to 50 messages). Stages: intake (use gws-cli, triage in:inbox and read email body if necessary, categorize, propose action per email, output as table) then approval (Captain reviews proposal) then execute (carry out approved actions, do not mark as read). Use gws-cli (https://github.com/googleworkspace/cli/tree/main/skills/gws-gmail), GOOGLE_WORKSPACE_CLI_CONFIG_DIR=~/.config/gws/<account> for different accounts. Walk me through gws-cli setup if not already done."
    ```
 
 The First Officer commissions the workflow, dispatches an Ensign to gather your inbox, then pauses with a categorized proposal and waits for your approval before touching anything.

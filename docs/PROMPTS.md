@@ -88,9 +88,11 @@ Then please:
    on a code-bearing stage, and at least one that uses an adversarial review
    gate (`fresh: true` + `gate: true` + `feedback-to: <prior-stage>`) so review
    does not run in the same context as implementation.
-4. Suggest which workflow to start with and why.
-5. Call out anything I do that should stay a one-shot skill call, not a workflow.
-6. End with one concrete next step.
+4. On every gate that should bounce on rejection, name `feedback-to: <stage>`
+   explicitly so the rejection routes back instead of exiting.
+5. Suggest which workflow to start with and why.
+6. Call out anything I do that should stay a one-shot skill call, not a workflow.
+7. End with one concrete next step.
 ```
 
 ## Variant: Email triager
@@ -250,4 +252,4 @@ Please:
 
 1. Read `EXAMPLES.md` for the closest worked example. Compare Claude's proposed mission against it side by side and adjust stage names or flags that drift. The Household and finance variant straddles two examples; compare against both example 3 (Tax and finance prep) and example 6 (Household admin).
 2. Commission the one workflow Claude recommends. Run it for two weeks before adding a second.
-3. Edit the generated `{workflow-dir}/README.md` directly if a flag is wrong. The First Officer reads it on every loop, so a hand edit takes effect on the next run with no restart.
+3. Edit the generated `{workflow-dir}/README.md` directly if a flag is wrong. A running First Officer holds the workflow in memory from boot, so close the session and reopen to pick up the edit.

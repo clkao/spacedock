@@ -22,7 +22,7 @@ claude plugin marketplace add clkao/spacedock && claude plugin install spacedock
 ### Step 2: Commission the workflow
 
 ```bash
-claude --agent spacedock:first-officer "/spacedock:commission Email triage: fetch, categorize, and act on Gmail inbox. Entity: a batch of up to 50 emails. Stages: intake (use gws-cli, triage in:inbox and read email body if necessary, categorize, propose action per email, output as table) then approval (Captain reviews proposal) then execute (carry out approved actions, do not mark as read). Use gws-cli (https://github.com/googleworkspace/cli/tree/main/skills/gws-gmail), GOOGLE_WORKSPACE_CLI_CONFIG_DIR=~/.config/gws/<account> for different accounts. Walk me through gws-cli setup if not already done."
+claude --agent spacedock:first-officer "/spacedock:commission Email triage: fetch, categorize, and act on Gmail inbox. Entity: an email batch (up to 50 messages). Stages: intake (use gws-cli, triage in:inbox and read email body if necessary, categorize, propose action per email, output as table) then approval (Captain reviews proposal) then execute (carry out approved actions, do not mark as read). Use gws-cli (https://github.com/googleworkspace/cli/tree/main/skills/gws-gmail), GOOGLE_WORKSPACE_CLI_CONFIG_DIR=~/.config/gws/<account> for different accounts. Walk me through gws-cli setup if not already done."
 ```
 
 The mission describes the entity (a batch of up to 50 emails), the stages (intake, approval, execute), the tool to use (`gws-cli`), and the constraint that execute must not mark messages as read. Commission turns that prose into a workflow directory plus a README that the First Officer will read on every loop. Nothing executes against your inbox at this point. The workflow files appear on disk, and that is it until the First Officer dispatches the first Ensign.
@@ -109,7 +109,7 @@ When the design Ensign finishes, the First Officer pauses at the design gate and
 
 On approval, the entity advances through plan and then into implement. The implement stage runs inside an isolated git worktree so the working tree of your main checkout is untouched. The Ensign writes failing tests first, makes them pass, and commits in small increments. When implement finishes, the review gate fires: an adversarial review Ensign reads the diff and either signs off or files specific objections you decide on.
 
-If you reject review, the entity bounces back to implement with the objection text baked in, and the next Ensign starts from there.
+If you reject review, the entity bounces back to implement with the objection text baked in, and the next Ensign starts from there. This works because the dev commission writes `feedback-to: implement` on the review gate by default; verify the YAML if you want to be sure, since rejection without `feedback-to:` has no bounce target.
 
 ### Step 6: End the session
 
@@ -126,7 +126,7 @@ Same flow as the email walkthrough: the next session reads the markdown and resu
 - Approval gates pause the First Officer; the workflow does not advance until the Captain answers.
 - If you want to bounce a stage back with feedback, reject (do not approve), and Spacedock will re-dispatch the previous stage with your feedback baked in.
 - Commission cannot scaffold custom mods. It can only copy pre-shipped ones (currently just `pr-merge`). Custom mods are authored by hand in `_mods/`.
-- The plugin is the source of truth for stage flags; the generated `{workflow-dir}/README.md` controls per-workflow behavior. If commission gets the YAML flags wrong, edit the YAML; the First Officer reads it on every loop.
+- The plugin is the source of truth for stage flags; the generated `{workflow-dir}/README.md` controls per-workflow behavior. If commission gets the YAML flags wrong, edit the YAML. A running First Officer holds the workflow in memory from when it booted, so close and reopen the session to pick up your edit.
 
 ## Where to go next
 
