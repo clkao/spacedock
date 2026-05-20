@@ -1,13 +1,13 @@
 ---
 id: 4q934ttakvtv5ngt662pez34
 title: "claude-team build dispatch prompts are ~7000 chars; could be ~500"
-status: ideation
+status: done
 source: "GitHub issue #229 — CL observed dispatch prompts inline boilerplate that duplicates `spacedock:ensign` skill body"
 started: 2026-05-20T20:34:07Z
-completed:
-verdict:
+completed: 2026-05-20T22:26:57Z
+verdict: REJECTED
 score:
-worktree:
+worktree: 
 issue: "#229"
 pr:
 ---
