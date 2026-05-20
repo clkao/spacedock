@@ -99,15 +99,19 @@ def test_release_script_uses_codex_files_as_authority_and_updates_legacy_mirrors
 
 def test_docs_and_skill_surfaces_describe_codex_authority_and_legacy_compatibility():
     readme = read_text("README.md")
+    usage = read_text("docs/USAGE.md")
+    user_docs = readme + "\n" + usage
     commission = read_text("skills/commission/SKILL.md")
     refit = read_text("skills/refit/SKILL.md")
     debrief = read_text("skills/debrief/SKILL.md")
 
-    assert ".codex-plugin/plugin.json" in readme
-    assert ".agents/plugins/marketplace.json" in readme
-    assert "plugins/spacedock" in readme
-    assert "~/.agents/skills/spacedock" in readme
-    assert "legacy" in readme.lower()
+    # README hands off Codex setup detail to docs/USAGE.md, so the
+    # required strings can live in either user-facing doc.
+    assert ".codex-plugin/plugin.json" in user_docs
+    assert ".agents/plugins/marketplace.json" in user_docs
+    assert "plugins/spacedock" in user_docs
+    assert "~/.agents/skills/spacedock" in user_docs
+    assert "legacy" in user_docs.lower()
 
     for text in (commission, refit, debrief):
         assert ".codex-plugin/plugin.json" in text
