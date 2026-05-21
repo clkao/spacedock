@@ -10,6 +10,7 @@ score:
 worktree:
 issue:
 pr:
+archived: 2026-05-21T05:02:21Z
 ---
 
 ## Status: superseded by 0x9 (PR #231 merged 2026-05-21)
