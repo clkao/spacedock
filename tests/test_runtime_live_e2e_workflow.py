@@ -13,6 +13,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 WORKFLOW_PATH = REPO_ROOT / ".github" / "workflows" / "runtime-live-e2e.yml"
 README_PATH = REPO_ROOT / "tests" / "README.md"
+TOP_README_PATH = REPO_ROOT / "README.md"
 MAKEFILE_PATH = REPO_ROOT / "Makefile"
 GATE_GUARDRAIL_PATH = REPO_ROOT / "tests" / "test_gate_guardrail.py"
 CODEX_PACKAGED_AGENT_PATH = REPO_ROOT / "tests" / "test_codex_packaged_agent_e2e.py"
@@ -370,3 +371,53 @@ def test_tests_readme_documents_runtime_live_e2e_workflow():
     # The env-approval gate is the security guarantee for fork-PR runs —
     # README must tell maintainers what to review before approving.
     assert "env-approval gate" in text or "environment approval" in text
+
+
+def _makefile_target_body(text: str, target: str) -> str:
+    marker = f"\n{target}:\n"
+    start = text.index(marker) + len(marker)
+    lines = []
+    for line in text[start:].splitlines():
+        if line and not (line.startswith("\t") or line.startswith(" ") or line.startswith("#")):
+            break
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def test_runtime_live_e2e_bare_job_displays_sonnet_as_effective_model():
+    """AC-2: the claude-live-bare job's tool-versions step must display sonnet
+    (not haiku) as the effective model when MODEL_OVERRIDE is empty. The bare
+    job's default routes through `make test-live-claude-bare`, which now
+    pins --model sonnet."""
+    text = read_workflow()
+    bare_section = section(text, "  claude-live-bare")
+
+    assert 'EFFECTIVE_MODEL="(make default — sonnet)"' in bare_section
+    assert 'EFFECTIVE_MODEL="(pytest default — haiku)"' not in bare_section
+
+
+def test_makefile_bare_target_pins_sonnet_and_drops_haiku():
+    """AC-3: the test-live-claude-bare target must default to sonnet (via the
+    BARE_MODEL variable) and must not invoke --model haiku."""
+    text = read_makefile()
+
+    assert "BARE_MODEL ?= sonnet" in text
+
+    bare_body = _makefile_target_body(text, "test-live-claude-bare")
+    assert "--model $(BARE_MODEL)" in bare_body
+    assert "--model haiku" not in bare_body
+
+
+def test_top_readme_documents_supported_models_floor():
+    """AC-4: the top-level README must declare the sonnet-or-above floor for
+    bare-mode FO and cross-reference the archived empirical evidence."""
+    text = TOP_README_PATH.read_text()
+
+    assert "## Supported models" in text
+    supported_start = text.index("## Supported models")
+    supported_end = text.index("\n## ", supported_start + 1)
+    supported_section = text[supported_start:supported_end]
+
+    assert "sonnet" in supported_section.lower()
+    assert "bare-mode" in supported_section.lower() or "bare mode" in supported_section.lower()
+    assert "_archive/haiku-bare-fo-startup-protocol-adherence.md" in supported_section

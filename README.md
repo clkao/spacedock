@@ -79,6 +79,14 @@ The first officer coordinates the flow: it dispatches workers to advance each wo
 
 > Codex multi-agent is experimental. The Claude Code path is the primary supported surface.
 
+## Supported models
+
+Spacedock's first officer drives a startup protocol (load operating-contract skills, read stage definitions, enforce gate semantics) that requires careful instruction-following. The supported floor for the **bare-mode** first officer is **Claude Sonnet or above**. Haiku has been empirically observed to flake below the protocol-adherence bar in bare mode (cwd drift, gate self-approve, early-terminate failure modes — see archived empirical evidence in `docs/plans/_archive/haiku-bare-fo-startup-protocol-adherence.md`).
+
+In **teams mode**, the first officer can run reliably on Haiku because the teams runtime provides extra protocol scaffolding (skill preloading, agent-discovery hooks). Ensigns may use any model the user chooses; the floor applies to the first officer role specifically.
+
+If you point Spacedock at a sub-floor model for the bare-mode first officer, expect intermittent stage-advancement failures and gate-state corruption. The Spacedock test matrix exercises `sonnet` for bare-mode and `haiku` for teams-mode.
+
 ## What a Work Item Looks Like
 
 ```yaml

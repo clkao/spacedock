@@ -344,7 +344,7 @@ jobs:
           if [ -n "$MODEL_OVERRIDE" ]; then
             EFFECTIVE_MODEL="$MODEL_OVERRIDE"
           else
-            EFFECTIVE_MODEL="(pytest default — haiku)"
+            EFFECTIVE_MODEL="(make default — sonnet)"
           fi
           {
             echo "### Tool versions"

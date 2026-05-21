@@ -7,6 +7,7 @@ RUNTIME ?= claude
 LIVE_CLAUDE_WORKERS ?= 4
 LIVE_CODEX_WORKERS ?= 4
 OPUS_MODEL ?= opus
+BARE_MODEL ?= sonnet
 
 test-static:
 	unset CLAUDECODE && uv run pytest tests/ --ignore=tests/fixtures \
@@ -58,9 +59,9 @@ test-live-codex:
 test-live-claude-bare:
 	unset CLAUDECODE CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS && { \
 	  uv run pytest tests/ --ignore=tests/fixtures \
-	    -m "live_claude and serial" --runtime claude --team-mode=bare -x -v ; SEQ=$$? ; \
+	    -m "live_claude and serial" --runtime claude --team-mode=bare --model $(BARE_MODEL) -x -v ; SEQ=$$? ; \
 	  uv run pytest tests/ --ignore=tests/fixtures \
-	    -m "live_claude and not serial" --runtime claude --team-mode=bare \
+	    -m "live_claude and not serial" --runtime claude --team-mode=bare --model $(BARE_MODEL) \
 	    -n $(LIVE_CLAUDE_WORKERS) -v ; PAR=$$? ; \
 	  test $$SEQ -eq 0 -a $$PAR -eq 0 ; \
 	}
