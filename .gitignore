@@ -1,6 +1,7 @@
 .worktrees/
 .claude/worktrees/
 .private-journal/
+.superpowers/
 testflight-*/
 .claude/settings.local.json
 .obsidian/
