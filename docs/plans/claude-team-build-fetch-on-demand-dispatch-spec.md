@@ -1,13 +1,13 @@
 ---
 id: 0x93enxe1hpmk95a25476zyn
 title: "claude-team build emits fetch-on-demand spec; ensign loads stage def + standing section on first action"
-status: validation
+status: done
 source: "supersedes 4q9 (claude-team-build-dispatch-prompt-shrink) — CL refocused scope after cycle-3 ideation surfaced ~990 char savings as too small; the real lever is dispatch prompts referencing fetch commands instead of inlining content, which saves both ensign-side prompt size AND FO-side context (claude-team output + Agent prompt args = 3x cost)"
 started: 2026-05-20T22:27:58Z
-completed:
-verdict:
+completed: 2026-05-21T05:01:39Z
+verdict: PASSED
 score:
-worktree: .worktrees/spacedock-ensign-claude-team-build-fetch-on-demand-dispatch-spec
+worktree: 
 issue: "#229"
 pr: "#231"
 mod-block: 
