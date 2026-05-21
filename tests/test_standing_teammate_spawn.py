@@ -145,15 +145,28 @@ def test_standing_teammate_spawns_and_roundtrips(test_project, model, effort):
             label="ensign Agent() dispatched",
         )
         ensign_prompt = _agent_input(ensign_dispatch).get("prompt", "")
-        assert "### Standing teammates available in your team" in ensign_prompt, (
-            "Ensign dispatch prompt missing the standing-teammates section. "
-            f"Prompt preview: {ensign_prompt[:200]!r}"
+        # Post fetch-on-demand restructure: the helper-path dispatch references the
+        # standing-teammates body via `claude-team show-standing` rather than inlining
+        # it. The break-glass fallback path inlines neither (no standing-teammates
+        # section at all). Either dispatch shape is acceptable here — what we're
+        # really pinning is that the FO surfaced echo-agent for the ensign to reach.
+        # Helper-path: ensign prompt carries the fetch-command reference and the
+        # ensign reads the body via Bash. Break-glass path: not exercised in this
+        # test because the FO must use the helper to reach lazy-spawn semantics.
+        helper_path = "claude-team show-standing" in ensign_prompt
+        inlined = "### Standing teammates available in your team" in ensign_prompt
+        assert helper_path or inlined, (
+            "Ensign dispatch prompt must either inline the standing-teammates "
+            "section (legacy/break-glass) or reference it via "
+            "`claude-team show-standing` (fetch-on-demand). "
+            f"Prompt preview: {ensign_prompt[:300]!r}"
         )
-        assert "echo-agent" in ensign_prompt, (
-            "Standing-teammates section did not list echo-agent by name. "
-            f"Prompt preview: {ensign_prompt[:200]!r}"
-        )
-        print("[OK] ensign dispatch prompt includes standing-teammates section with echo-agent")
+        if inlined:
+            assert "echo-agent" in ensign_prompt
+        # Under fetch-on-demand the rendered body lives in `show-standing` output;
+        # the ensign-side Bash invocation is verified by the downstream
+        # ECHO-roundtrip ground-truth assertion at the end of the test.
+        print("[OK] ensign dispatch prompt surfaces standing-teammates (helper or inlined path)")
 
         ensign_record = w.expect_dispatch_close(
             overall_timeout_s=ENSIGN_OVERALL_S,

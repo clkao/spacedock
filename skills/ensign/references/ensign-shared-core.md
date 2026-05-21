@@ -79,3 +79,25 @@ Rules:
 ## Completion
 
 When done, send a minimal completion signal that points the first officer back to the entity file, then stop. The entity file is the artifact; keep the message itself minimal.
+
+## Fetch-on-Demand Bootstrap
+
+The first officer's dispatch may contain a `### Fetch commands` section near the
+top of your prompt. If present:
+
+1. Read each command listed under that heading. They appear one per line,
+   four-space-indented (markdown code-block convention).
+2. Run each command via Bash in the order listed.
+3. Concatenate the stdouts. Treat the concatenated result as if it had been
+   inlined into your prompt at the position of the `### Fetch commands` block.
+4. Then proceed with the rest of your assignment (entity read, checklist).
+
+If a fetch command exits non-zero, report the failure to the first officer
+through your runtime's normal teammate-message channel (see your runtime
+adapter's `## Completion Signal` section for the call shape). Include the
+command, exit code, and stderr — do not silently proceed. A missing or
+unreadable stage definition is a dispatch-shape failure that the first officer
+must surface to the captain; the ensign is not the right place to paper over it.
+
+If the dispatch prompt has no `### Fetch commands` block (legacy or breakglass
+shape), skip this step. The rest of the prompt is self-contained.

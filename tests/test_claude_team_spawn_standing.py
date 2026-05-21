@@ -381,6 +381,14 @@ class TestRoutingUsagePayload:
     )
 
     def _build(self, tmp_path, mods: dict[str, str], team: str, members: list) -> dict:
+        """Run cmd_build then compose the legacy `prompt` shape by inlining
+        `show-standing` output where the fetch-on-demand restructure replaced
+        the inlined section. Pre-restructure the standing-teammates body lived
+        inside cmd_build's emitted prompt; post-restructure that body is
+        emitted by `claude-team show-standing` and the prompt only references
+        it via a fetch command. This wrapper preserves the assertion surface
+        these tests pin (the rendering contract is unchanged — only the
+        emission boundary moved)."""
         wf, entity = _write_build_workflow(tmp_path)
         mods_dir = wf / "_mods"
         mods_dir.mkdir()
@@ -398,7 +406,14 @@ class TestRoutingUsagePayload:
         }
         result = _run_build_with_home(wf, inp, home=tmp_path)
         assert result.returncode == 0, f"stderr: {result.stderr}"
-        return json.loads(result.stdout)
+        parsed = json.loads(result.stdout)
+        show_result = subprocess.run(
+            [sys.executable, str(SCRIPT), "show-standing", "--workflow-dir", str(wf)],
+            capture_output=True, text=True,
+        )
+        assert show_result.returncode == 0, f"show-standing stderr: {show_result.stderr}"
+        parsed["prompt"] = parsed["prompt"] + "\n" + show_result.stdout
+        return parsed
 
     def test_routing_usage_body_rendered_with_bullets_preserved(self, tmp_path):
         """AC-1: body spliced under teammate header; bullets survive reindent."""
@@ -592,10 +607,22 @@ class TestBuildDeclaredTeammatesSection:
         out = json.loads(result.stdout)
         prompt = out["prompt"]
 
-        assert "### Standing teammates available in your team" in prompt
-        assert "These standing teammates are available in your team" in prompt
-        assert "The FO has spawned" not in prompt
-        assert "comm-officer" in prompt
+        # Post fetch-on-demand restructure: the inlined standing-teammates section
+        # is replaced by a `### Fetch commands` reference to `show-standing`. The
+        # rendered body now lives in show-standing's stdout.
+        assert "show-standing" in prompt, (
+            "dispatch prompt must reference the show-standing fetch command"
+        )
+        show_result = subprocess.run(
+            [sys.executable, str(SCRIPT), "show-standing", "--workflow-dir", str(wf)],
+            capture_output=True, text=True,
+        )
+        assert show_result.returncode == 0, show_result.stderr
+        rendered = show_result.stdout
+        assert "### Standing teammates available in your team" in rendered
+        assert "These standing teammates are available in your team" in rendered
+        assert "The FO has spawned" not in rendered
+        assert "comm-officer" in rendered
 
 
 if __name__ == "__main__":

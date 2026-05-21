@@ -781,5 +781,26 @@ def test_claude_runtime_points_to_shared_core_entity_body_inspection_rule():
     assert "status --set" in text
 
 
+def test_ensign_shared_core_carries_fetch_on_demand_bootstrap_section():
+    """AC-6: ensign-shared-core's ## Fetch-on-Demand Bootstrap section names the
+    ### Fetch commands heading, instructs Bash execution in listed order, defines the
+    empty-block degenerate case, and instructs report-to-FO on a non-zero exit.
+
+    The report-to-FO instruction is phrased runtime-agnostically (no literal
+    SendMessage) because the shared-core file is loaded by both Claude and
+    Codex ensign runtimes; the call shape lives in each runtime adapter's
+    `## Completion Signal` section."""
+    text = read_text("skills/ensign/references/ensign-shared-core.md")
+    assert "## Fetch-on-Demand Bootstrap" in text, (
+        "shared-core must carry a top-level ## Fetch-on-Demand Bootstrap section"
+    )
+    assert "### Fetch commands" in text
+    assert "Run each command via Bash in the order listed" in text
+    assert "skip this step" in text
+    # Report-to-FO contract is named without naming a specific transport tool.
+    assert "report the failure to the first officer" in text
+    assert "non-zero" in text
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__]))

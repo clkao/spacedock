@@ -9,6 +9,7 @@ import importlib.util
 import json
 import os
 import re
+import shlex
 import sys
 from pathlib import Path
 
@@ -97,6 +98,7 @@ def _heading_first_token(line):
     return tokens[0]
 
 
+# RUNTIME-NEUTRAL
 def extract_stage_subsection(readme_path, stage_name):
     r"""Extract the full ### {stage_name} subsection from a workflow README.
 
@@ -352,8 +354,13 @@ def cmd_build(args):
     # 1. Header
     prompt_parts.append(f'You are working on: {entity_title}\n\nStage: {stage}\n')
 
-    # 2. Stage definition
-    prompt_parts.append(f'### Stage definition:\n\n{stage_subsection}\n')
+    # 2. Stage definition — replaced by literal fetch command. The ensign reads
+    # this section's content on first action via `claude-team show-stage-def`.
+    fetch_commands = []
+    fetch_commands.append(
+        f'claude-team show-stage-def --workflow-dir {shlex.quote(workflow_dir)} '
+        f'--stage {shlex.quote(stage)}'
+    )
 
     # 3. Worktree instructions (conditional)
     if worktree_path:
@@ -386,7 +393,10 @@ def cmd_build(args):
     if scope_notes:
         prompt_parts.append(f'{scope_notes}\n')
 
-    # 8. Completion checklist
+    # 8. Completion checklist + Summary slot. The Stage Report appending-
+    # instructions block previously emitted here is now sourced from the
+    # `## Stage Report Protocol` section of ensign-shared-core.md, which the
+    # Skill(skill="spacedock:ensign") load brings into the ensign's context.
     checklist_text = '\n'.join(checklist)
     prompt_parts.append(
         '### Completion checklist\n\n'
@@ -394,60 +404,40 @@ def cmd_build(args):
         '### Summary\n'
         '{brief description of what was accomplished}\n'
     )
-    prompt_parts.append(
-        '\n### Stage report\n\n'
-        'Append a Stage Report section at the end of the entity file (per the shared-core Stage Report Protocol). '
-        'Use the title `Stage Report: {stage}`. '
-        'Account for every checklist item above with a `- DONE:` / `- SKIPPED:` / `- FAILED:` entry. '
-        'Use the checklist item text verbatim when possible.\n'
-    )
 
-    # 9. Standing teammates available (conditional: team mode, alive members found)
+    # 9. Standing teammates fetch line — emitted only when at least one
+    # declared standing teammate exists for this workflow. Bare-mode and
+    # zero-standing dispatches omit the line entirely; no `show-standing`
+    # call ever runs in a context where it would have nothing to render.
     standing_teammates = enumerate_declared_standing_teammates(workflow_dir, team_name)
     if standing_teammates:
-        lines = [
-            '### Standing teammates available in your team',
-            '',
-            'These standing teammates are available in your team; you MAY route to them via '
-            'SendMessage. Best-effort, non-blocking, 2-minute timeout; proceed with '
-            'un-polished/un-reviewed content if no reply.',
-            '',
-        ]
-        for name, description, mod_path in standing_teammates:
-            desc = description or 'standing teammate'
-            usage_body = _parse_routing_usage_body(mod_path) if mod_path else None
-            if usage_body:
-                lines.append(f'- **{name}** ({desc})')
-                for body_line in usage_body.split('\n'):
-                    if body_line:
-                        lines.append(f'  {body_line}')
-                    else:
-                        lines.append('')
-            else:
-                lines.append(
-                    f'- **{name}** ({desc}): SendMessage with the relevant input '
-                    f'shape; reply format per the mod.'
-                )
-        lines.append('')
-        lines.append(
-            'Full routing contract: see '
-            '`skills/first-officer/references/first-officer-shared-core.md` '
-            '`## Standing Teammates`.'
+        fetch_commands.append(
+            f'claude-team show-standing --workflow-dir {shlex.quote(workflow_dir)}'
         )
-        prompt_parts.append('\n'.join(lines))
 
-    # 10. Completion signal (conditional, team mode only)
+    # Emit the `### Fetch commands` block. The block references content the
+    # ensign loads on first action via Bash; the shared-core `## Fetch-on-Demand
+    # Bootstrap` section (loaded via Skill(skill="spacedock:ensign")) tells the
+    # ensign how to consume this heading.
+    fetch_lines = ['### Fetch commands', '']
+    for cmd in fetch_commands:
+        fetch_lines.append(f'    {cmd}')
+    prompt_parts.append('\n'.join(fetch_lines))
+
+    # 10. Completion signal (conditional, team mode only). The plain-text /
+    # no-JSON / idle-notification prose previously appended here is now
+    # sourced from claude-ensign-runtime.md `## Completion Signal`, which the
+    # Skill(skill="spacedock:ensign") load brings into the ensign's context.
+    # The FO-forwarding warning is retained because its audience is the FO at
+    # Agent-forwarding time, not the ensign.
     if not bare_mode and team_name:
         entity_file_ref = worktree_entity_path if worktree_path else entity_path
         prompt_parts.append(
             '\n\n### Completion Signal\n\n'
-            'This is a team-mode dispatch. When you finish (after all commits and '
-            'stage report writes are done), your last action MUST be:\n\n'
+            'When you finish (after all commits and stage report writes are done), '
+            'your last action MUST be:\n\n'
             f'    SendMessage(to="team-lead", message="Done: {entity_title} completed '
             f'{stage}. Report written to {entity_file_ref}.")\n\n'
-            'Plain text only. No JSON. Until you send this message, the first officer '
-            'keeps waiting for that explicit completion message. Idle notifications are '
-            'normal between-turn state while it waits.\n\n'
             '**If you are the first officer forwarding this prompt to Agent():** copy '
             'the entire block above into `Agent(prompt=...)` character-for-character. '
             'Do NOT paraphrase `SendMessage(to="team-lead", ...)` as "SendMessage with '
@@ -462,6 +452,7 @@ def cmd_build(args):
         'schema_version': SCHEMA_VERSION,
         'subagent_type': subagent_type,
         'description': f'{entity_title}: {stage}',
+        'fetch_commands': list(fetch_commands),
         'prompt': prompt,
         'model': effective_model,
     }
@@ -635,6 +626,49 @@ def extract_runtime_models(jsonl_path: str) -> set[str]:
     return models
 
 
+def render_standing_teammates_section(standing_teammates):
+    """Assemble the `### Standing teammates available in your team` markdown.
+
+    Takes the output of `enumerate_declared_standing_teammates` and renders
+    the exact markdown block `cmd_build` previously inlined and `cmd_show_standing`
+    now exposes as a subcommand. Returns an empty string when the input list is
+    empty (degenerate case — no declared standing teammates).
+    """
+    if not standing_teammates:
+        return ""
+    lines = [
+        '### Standing teammates available in your team',
+        '',
+        'These standing teammates are available in your team; you MAY route to them via '
+        'SendMessage. Best-effort, non-blocking, 2-minute timeout; proceed with '
+        'un-polished/un-reviewed content if no reply.',
+        '',
+    ]
+    for name, description, mod_path in standing_teammates:
+        desc = description or 'standing teammate'
+        usage_body = _parse_routing_usage_body(mod_path) if mod_path else None
+        if usage_body:
+            lines.append(f'- **{name}** ({desc})')
+            for body_line in usage_body.split('\n'):
+                if body_line:
+                    lines.append(f'  {body_line}')
+                else:
+                    lines.append('')
+        else:
+            lines.append(
+                f'- **{name}** ({desc}): SendMessage with the relevant input '
+                f'shape; reply format per the mod.'
+            )
+    lines.append('')
+    lines.append(
+        'Full routing contract: see '
+        '`skills/first-officer/references/first-officer-shared-core.md` '
+        '`## Standing Teammates`.'
+    )
+    return '\n'.join(lines)
+
+
+# RUNTIME-NEUTRAL
 def enumerate_declared_standing_teammates(workflow_dir: str, team_name) -> list[tuple[str, str, str]]:
     """Return [(name, description, mod_path)] for declared standing teammates.
 
@@ -704,6 +738,7 @@ def member_exists(team: str, name: str) -> bool:
     return False
 
 
+# RUNTIME-NEUTRAL
 def _parse_routing_usage_body(mod_path: str) -> str | None:
     """Extract the body of a mod's `## Routing Usage` section, or None.
 
@@ -899,6 +934,58 @@ def cmd_spawn_standing(args: argparse.Namespace) -> int:
     return 0
 
 
+# RUNTIME-NEUTRAL
+def cmd_show_stage_def(args: argparse.Namespace) -> int:
+    """Emit the README's ### {stage} subsection on stdout.
+
+    Thin CLI wrapper over `extract_stage_subsection`. Exit 0 with stdout on
+    success; exit non-zero with the same parser-diagnostic message
+    `extract_stage_subsection` raises today when the heading is malformed.
+    """
+    workflow_dir = args.workflow_dir
+    stage = args.stage
+
+    if not os.path.isdir(workflow_dir):
+        print(f"error: workflow directory not found: {workflow_dir}", file=sys.stderr)
+        return 1
+    readme_path = os.path.join(workflow_dir, 'README.md')
+    if not os.path.isfile(readme_path):
+        print(f"error: workflow README not found at '{readme_path}'", file=sys.stderr)
+        return 1
+
+    try:
+        subsection = extract_stage_subsection(readme_path, stage)
+    except ValueError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+    if subsection is None:
+        print(f"error: stage '{stage}' heading not found in {readme_path}", file=sys.stderr)
+        return 1
+    print(subsection)
+    return 0
+
+
+def cmd_show_standing(args: argparse.Namespace) -> int:
+    """Emit the rendered `### Standing teammates available in your team` markdown.
+
+    Composes runtime-neutral helpers (`enumerate_declared_standing_teammates`,
+    `render_standing_teammates_section`); the rendered output body itself uses
+    Claude-specific SendMessage routing language. Exit 0 on success including
+    the degenerate case where no standing teammates are declared (empty stdout).
+    """
+    workflow_dir = args.workflow_dir
+    if not os.path.isdir(workflow_dir):
+        print(f"error: workflow directory not found: {workflow_dir}", file=sys.stderr)
+        return 1
+    # Pass a truthy sentinel for team_name; the filesystem scan is team-agnostic,
+    # and the bare-mode short-circuit gate lives in cmd_build upstream of this call.
+    standing_teammates = enumerate_declared_standing_teammates(workflow_dir, '_show_standing_')
+    rendered = render_standing_teammates_section(standing_teammates)
+    if rendered:
+        print(rendered)
+    return 0
+
+
 def cmd_list_standing(args: argparse.Namespace) -> int:
     """Emit absolute paths of `standing: true` mods under {workflow_dir}/_mods/*.md.
 
@@ -1082,6 +1169,25 @@ def main():
         "--workflow-dir", required=True, help="Absolute path to workflow directory"
     )
 
+    show_stage_def_parser = subparsers.add_parser(
+        "show-stage-def",
+        help="Emit a workflow README's ### {stage} subsection on stdout",
+    )
+    show_stage_def_parser.add_argument(
+        "--workflow-dir", required=True, help="Absolute path to workflow directory"
+    )
+    show_stage_def_parser.add_argument(
+        "--stage", required=True, help="Stage name (e.g. ideation)"
+    )
+
+    show_standing_parser = subparsers.add_parser(
+        "show-standing",
+        help="Emit the rendered '### Standing teammates available in your team' markdown",
+    )
+    show_standing_parser.add_argument(
+        "--workflow-dir", required=True, help="Absolute path to workflow directory"
+    )
+
     args = parser.parse_args()
 
     if args.command is None:
@@ -1096,6 +1202,10 @@ def main():
         sys.exit(cmd_spawn_standing(args))
     elif args.command == "list-standing":
         sys.exit(cmd_list_standing(args))
+    elif args.command == "show-stage-def":
+        sys.exit(cmd_show_stage_def(args))
+    elif args.command == "show-standing":
+        sys.exit(cmd_show_standing(args))
 
 
 if __name__ == "__main__":

@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "entity_path": "__ENTITY_PATH__",
+  "workflow_dir": "__WORKFLOW_DIR__",
+  "stage": "implementation",
+  "checklist": [
+    "1. Read the entity body and confirm the proposal.",
+    "2. Run the dispatch path against the entity.",
+    "3. Capture results in the entity stage report."
+  ],
+  "team_name": null,
+  "feedback_context": null,
+  "scope_notes": null,
+  "bare_mode": true,
+  "is_feedback_reflow": false
+}

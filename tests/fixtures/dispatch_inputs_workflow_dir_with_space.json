@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "entity_path": "__ENTITY_PATH__",
+  "workflow_dir": "__WORKFLOW_DIR_WITH_SPACE__",
+  "stage": "implementation",
+  "checklist": [
+    "1. Verify shlex.quote() applies to fetch-command arguments."
+  ],
+  "team_name": "fetch-on-demand-test-team",
+  "feedback_context": null,
+  "scope_notes": null,
+  "bare_mode": false,
+  "is_feedback_reflow": false
+}

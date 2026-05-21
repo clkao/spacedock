@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "entity_path": "__ENTITY_PATH__",
+  "workflow_dir": "__WORKFLOW_DIR__",
+  "stage": "implementation",
+  "checklist": [
+    "1. Read the entity body and confirm the proposal.",
+    "2. Run the dispatch path."
+  ],
+  "team_name": "fetch-on-demand-test-team",
+  "feedback_context": null,
+  "scope_notes": null,
+  "bare_mode": false,
+  "is_feedback_reflow": false
+}

@@ -1,0 +1,45 @@
+## First action
+
+Before anything else, invoke your operating contract:
+
+    Skill(skill="spacedock:ensign")
+
+This loads the shared ensign discipline (stage-report format, BashOutput polling, worktree ownership, completion signal protocol). The call is safe to call more than once; if the agent-definition preload ever starts working, calling it again is a no-op (the skill content is re-loaded but has no behavioral effect). Do not paraphrase; call the tool.
+
+You are working on: claude-team build emits fetch-on-demand spec; ensign loads stage def + standing section on first action (fixture mirror)
+
+Stage: ideation
+
+Your working directory is __GIT_ROOT__/.worktrees/sample-001
+All file reads and writes MUST use paths under __GIT_ROOT__/.worktrees/sample-001.
+Your git branch is spacedock-ensign/001-sample-entity. All commits MUST be on this branch. Do NOT switch branches or commit to main.
+
+Read the entity file at __GIT_ROOT__/.worktrees/sample-001/workflow/001-sample-entity.md for the full spec. It contains:
+
+### Completion checklist
+
+1. Read the entity body and confirm the proposal: a fetch-on-demand dispatch shape that swaps inlined stage definitions and standing-teammate sections for literal Bash fetch commands the ensign expands on first action.
+2. Spike a minimal PoC helper that emits the fetch-on-demand spec for the canonical dispatch input. Measure helper stdout chars, FO Agent prompt arg chars, and ensign first-action latency.
+3. Translate the spike findings into a complete design, acceptance criteria, and test plan inside the entity body.
+4. Address the skip-skill-load failure mode and the FO break-glass template question: explicitly enumerate functional / detectable / recoverable failure modes for path-A (Skill loads), path-B (Skill skips but fetch runs), and path-C (fetch skips).
+5. Sample 5-10 recent archived entities to evidence the path-C self-containment claim. Report the sample list verbatim in the entity body so the reviewer can cross-check.
+6. Apply shell-quoting via shlex.quote() to every user/workflow-derived argument the helper substitutes into the literal fetch-command lines. Add a fixture with workflow_dir containing a space to pin the contract.
+7. Add a Runtime-boundary disposition subsection classifying every new piece of 0x9 code on the runtime-neutral / Claude-specific axis. Annotate runtime-neutral functions with # RUNTIME-NEUTRAL markers so future extraction is mechanical.
+8. Append a Stage Report section at the end of the entity file with one DONE / SKIPPED / FAILED bullet per checklist item, using the checklist item text verbatim.
+
+### Summary
+{brief description of what was accomplished}
+
+### Fetch commands
+
+    claude-team show-stage-def --workflow-dir __WORKFLOW_DIR__ --stage ideation
+    claude-team show-standing --workflow-dir __WORKFLOW_DIR__
+
+
+### Completion Signal
+
+When you finish (after all commits and stage report writes are done), your last action MUST be:
+
+    SendMessage(to="team-lead", message="Done: claude-team build emits fetch-on-demand spec; ensign loads stage def + standing section on first action (fixture mirror) completed ideation. Report written to __GIT_ROOT__/.worktrees/sample-001/workflow/001-sample-entity.md.")
+
+**If you are the first officer forwarding this prompt to Agent():** copy the entire block above into `Agent(prompt=...)` character-for-character. Do NOT paraphrase `SendMessage(to="team-lead", ...)` as "SendMessage with to='team-lead'" or any other English rewrite — the parenthesis-equals syntax is the literal call the ensign must emit, not a description of one.

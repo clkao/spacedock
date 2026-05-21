@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "entity_path": "__ENTITY_PATH__",
+  "workflow_dir": "__WORKFLOW_DIR__",
+  "stage": "ideation",
+  "checklist": [
+    "1. Read the entity body and confirm the proposal: a fetch-on-demand dispatch shape that swaps inlined stage definitions and standing-teammate sections for literal Bash fetch commands the ensign expands on first action.",
+    "2. Spike a minimal PoC helper that emits the fetch-on-demand spec for the canonical dispatch input. Measure helper stdout chars, FO Agent prompt arg chars, and ensign first-action latency.",
+    "3. Translate the spike findings into a complete design, acceptance criteria, and test plan inside the entity body.",
+    "4. Address the skip-skill-load failure mode and the FO break-glass template question: explicitly enumerate functional / detectable / recoverable failure modes for path-A (Skill loads), path-B (Skill skips but fetch runs), and path-C (fetch skips).",
+    "5. Sample 5-10 recent archived entities to evidence the path-C self-containment claim. Report the sample list verbatim in the entity body so the reviewer can cross-check.",
+    "6. Apply shell-quoting via shlex.quote() to every user/workflow-derived argument the helper substitutes into the literal fetch-command lines. Add a fixture with workflow_dir containing a space to pin the contract.",
+    "7. Add a Runtime-boundary disposition subsection classifying every new piece of 0x9 code on the runtime-neutral / Claude-specific axis. Annotate runtime-neutral functions with # RUNTIME-NEUTRAL markers so future extraction is mechanical.",
+    "8. Append a Stage Report section at the end of the entity file with one DONE / SKIPPED / FAILED bullet per checklist item, using the checklist item text verbatim."
+  ],
+  "team_name": "fetch-on-demand-test-team",
+  "feedback_context": null,
+  "scope_notes": null,
+  "bare_mode": false,
+  "is_feedback_reflow": false
+}
