@@ -219,3 +219,22 @@ The empirical spike (5/5 PASSED, $3.26 cost, all FO commands workspace-rooted wi
 ### Summary
 
 Implementation pass landed cleanly in one commit (`cd2f9128`): the load-bearing Makefile pin to `sonnet`, the YAML display-string fix, the README `## Supported models` section, and three parse-scoped static-content tests covering AC-2/AC-3/AC-4. `make test-static` green at 629 passed. AC-6 (the captain's cross-cycle live-test gate) ran but blocked on a 401 `authentication_failed` from the harness's clean-home OAuth token — same auth-class failure the dispatch's credential-propagation note pre-flagged. `fo-log.jsonl` independently confirms the Makefile change worked correctly (`"model":"claude-sonnet-4-6"` in every sampled init record, zero haiku references in any bare-job artifact), so the gate failure is auth-shape, not capability-shape. Not signaling complete; surfacing to team-lead so the captain can either refresh `~/.claude/benchmark-token` and re-dispatch the AC-6 re-run, or accept the gate evidence under captain judgement.
+
+## Stage Report: validation
+
+- DONE: AC-1 spike evidence cross-check.
+  Entity body `## Empirical findings → ### Spike report` shows 5/5 PASSED with per-run table (test result, first Bash, FO cwd, bash_count, cd $HOME drift). Verdict explicitly cites 1/1 captain-lowered threshold satisfied; artifacts at `/tmp/2yd-spike/baseline/run{1..5}/`. Cost $3.26.
+- DONE: AC-2 YAML display-string cross-check.
+  `.github/workflows/runtime-live-e2e.yml:347` reads `EFFECTIVE_MODEL="(make default — sonnet)"` inside the `claude-live-bare` job. `(pytest default — haiku)` no longer present in the bare job block.
+- DONE: AC-3 Makefile cross-check.
+  Makefile:10 defines `BARE_MODEL ?= sonnet` adjacent to `OPUS_MODEL ?= opus` (line 9). `test-live-claude-bare` target body (lines 59-67) carries `--model $(BARE_MODEL)` on both pytest invocations (serial line 62, parallel line 64). Zero `--model haiku` references in the target body.
+- DONE: AC-4 README section cross-check.
+  `## Supported models` section at README.md:82 sits between `## Quick Start` (line 21) and `## What a Work Item Looks Like` (line 90). Section contains `sonnet`, `bare-mode`, and `_archive/haiku-bare-fo-startup-protocol-adherence.md` substrings.
+- DONE: AC-5 static-content tests landed + `make test-static` green.
+  Three new tests in `tests/test_runtime_live_e2e_workflow.py` (parse-scoped per ideation cycle-1 territory correction): `test_runtime_live_e2e_bare_job_displays_sonnet_as_effective_model` (line 387, YAML block-scoped via `section()`), `test_makefile_bare_target_pins_sonnet_and_drops_haiku` (line 399, Makefile target-body-scoped via `_makefile_target_body()`), `test_top_readme_documents_supported_models_floor` (line 411, README section-scoped via heading-bracketed slice). `make test-static` from worktree: **629 passed, 27 deselected, 15 subtests passed in 29.39s** — +3 above the 626 baseline cited in the implementation report, matching the new test count exactly.
+- SKIPPED: AC-6 live-test gate.
+  Waived per captain decision (dispatch verbatim: "AC-6 live test waived locally; defer to CI"). Cycle-1 ideation spike provided 5/5 PASSED on the same `test_gate_guardrail` test under sonnet-bare (`/tmp/2yd-spike/baseline/run{1..5}/` artifacts, $3.26). Implementation run's `fo-log.jsonl` `modelUsage` independently confirmed `claude-sonnet-4-6` as the effective model from `make test-live-claude-bare TEST=test_gate_guardrail`; the run's exit-non-zero was a clean-home OAuth 401, not a code/test issue. CI on the PR will exercise `test_gate_guardrail` under the new Makefile path automatically. Captain's framing: "once we PR we'll know the rest."
+
+### Summary
+
+All static cross-checks (AC-1 spike evidence, AC-2 YAML display, AC-3 Makefile pin, AC-4 README section, AC-5 `make test-static`) pass cleanly on the worktree branch. The implementation commits (`cd2f9128` + `b52494ac`) plus the advance commit (`7a5f27fc`) land the load-bearing changes with parse-scoped tests guarding regression. AC-6 is waived per captain decision with the cycle-1 spike (5/5 PASSED) and implementation `modelUsage` proof (`claude-sonnet-4-6`) standing in as the empirical evidence; the PR's CI run is the final gate. Recommend **PASSED**.
