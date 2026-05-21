@@ -9,7 +9,7 @@ verdict:
 score:
 worktree: .worktrees/spacedock-ensign-bare-mode-ci-model-floor-haiku-to-sonnet
 issue:
-pr:
+pr: #233
 ---
 
 ## Problem
