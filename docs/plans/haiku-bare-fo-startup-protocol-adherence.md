@@ -1,13 +1,13 @@
 ---
 id: nwwqsx5qh090mf6sm12ajee9
 title: "Haiku-bare FO startup-protocol adherence: prose-hardening attempt at #200's medium-term branch"
-status: ideation
+status: implementation
 source: "PR #231 CI surfaced the exact #200 Pattern A flake (haiku-bare-FO cd's to $HOME, freelances ahead of `status --boot`, declares 'no workflow found') AND today's FO log artifact shows the FO never runs the canonical `status --boot` first call — it freelances with cd/find/ls/cat. #200 closed with only its near-term xfail bandaid landing (and that marker has since drifted out of `test_gate_guardrail.py`). The medium-term FO-prose-hardening branch was never chased. Captain decision today (2026-05-21): attempt option C (prose tightening) with an empirical stop-loss; if it doesn't measurably move the needle, recommend option B (retire bare-haiku coverage) as the honest accounting."
 started: 2026-05-21T01:56:33Z
 completed:
 verdict:
 score:
-worktree:
+worktree: .worktrees/spacedock-ensign-haiku-bare-fo-startup-protocol-adherence
 issue:
 pr:
 ---
