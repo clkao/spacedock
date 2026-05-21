@@ -1,13 +1,13 @@
 ---
 id: 2ydg3csfyx22kt1qhgcphjm8
 title: "Raise supported-model floor for bare-mode FO CI from haiku to sonnet"
-status: validation
+status: done
 source: "Captain pivot at the cycle-5 gate of `nwwqsx5q` (haiku-bare-fo-startup-protocol-adherence, REJECTED, archived). Cycle-4 spike (14 runs, real API, full data) showed: baseline production prose passes haiku-bare 5/5 locally (#200 Pattern A doesn't reproduce off-CI), candidate prose tightening regresses haiku-bare pass rate from 5/5 to 3/5 (introduces over-approve + early-terminate failure modes), cross-check shows opus-bare 2/2 PASS and haiku-teams 2/2 PASS (candidate doesn't regress working modes). Honest conclusion: prose tightening alone can't lift haiku's protocol-adherence floor; sonnet sits between haiku and opus on capability and is the cheapest model empirically plausible to clear the bar. Captain (CL) chose option D — raise the model floor — over option B (retire bare-haiku coverage) on 2026-05-21."
 started: 2026-05-21T05:59:31Z
-completed:
-verdict:
+completed: 2026-05-21T15:49:26Z
+verdict: PASSED
 score:
-worktree: .worktrees/spacedock-ensign-bare-mode-ci-model-floor-haiku-to-sonnet
+worktree: 
 issue:
 pr: "#233"
 mod-block: 
