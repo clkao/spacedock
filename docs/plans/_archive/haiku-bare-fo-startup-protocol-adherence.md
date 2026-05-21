@@ -10,6 +10,7 @@ score:
 worktree: .worktrees/spacedock-ensign-haiku-bare-fo-startup-protocol-adherence
 issue:
 pr:
+archived: 2026-05-21T05:58:04Z
 ---
 
 ## Problem
