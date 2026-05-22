@@ -232,6 +232,27 @@ When an entity reaches its terminal stage:
 8. Archive the entity into `{workflow_dir}/_archive/`.
 9. Remove the worktree (`git worktree remove {path}`) and delete the local branch (`git branch -d {branch}`). Do NOT delete the remote branch while a PR is still pending — the PR reviewer needs it on the remote. Remote-branch cleanup belongs to the PR merge, not the FO.
 
+### Worktree removal safety
+
+Use `git worktree remove {path}` (no `--force`). The default
+mode refuses to delete a worktree with untracked changes —
+that refusal is the safety net.
+
+If `git worktree remove` fails because untracked files
+exist, the FO MUST:
+
+1. Audit those files (`git -C {path} status --short` from
+   the parent worktree).
+2. Decide per file: commit to the worktree branch (if
+   audit-essential per repo's gitignore policy), move to a
+   persistent location (if experiment-output that belongs
+   outside the worktree), or explicitly confirm destruction
+   with the captain.
+3. ONLY after the audit pass, `--force` is permitted.
+
+The `--force` flag is never default; it is an explicit
+captain-confirmed bypass.
+
 ## State Management
 
 - The first officer owns YAML frontmatter on the main branch (see FO Write Scope below).
