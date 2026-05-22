@@ -283,3 +283,66 @@ The plugin-presence check needs to know where Claude Code stores plugin metadata
 ### Summary
 
 Spike validated the translation contract end-to-end with a real Go binary and stubbed safehouse, confirming the argv shape is `safehouse [--enable=K]* -- claude --agent spacedock:first-officer [forwarded...]`. The biggest correction relative to the seed spec: `--agent` is Claude Code's flag, not safehouse's, and safehouse uses `--enable=KEY` (equals form) with an optional `--` separator — both verified against the official agent-safehouse.dev docs. Design section now contains binary layout, plugin-check probe paths, full YAML config schema with four sections (enable/add_dirs/add_dirs_ro/append_profile), and a brew formula skeleton mirroring rtk's own-tap pattern. AC-6 (independence from sub-project #1) is preserved; no Spacedock frontmatter is parsed by the launcher.
+
+## Staff Review: ideation
+
+Independent review by staff reviewer at 2026-05-22. Scope: ideation-gate sanity check; does NOT recommend approve/reject.
+
+### Material findings
+
+1. **Flag-ownership claim verified.** Independently confirmed via `claude --help` on this machine: `--agent <agent>` is a documented Claude Code flag (`Agent for the current session. Overrides the 'agent' setting.`). Independently confirmed via agent-safehouse.dev/docs/options.html: `--agent` is NOT in the safehouse flag list. The ensign's correction is correct. The translation contract `safehouse [flags] -- claude --agent spacedock:first-officer [args...]` is well-formed.
+
+2. **Safehouse `--enable` flag-form claim is partially imprecise.** agent-safehouse.dev/docs/options.html states "Path/feature flags accept both `--flag=value` and `--flag value`" — i.e., BOTH `--enable=ssh` (equals) AND `--enable ssh` (space) are valid. The Design and AC-3 lock in the equals form, which is fine, but the entity body claims `--enable=KEY` is "THE documented flag form" (line 75, line 212), which overstates the constraint. Suggest softening to "the equals form is canonical in agent-safehouse.dev examples; the space form also works but we standardize on equals for unambiguous parsing." Non-blocking, but the ensign's grounding citation does not actually exclude the space form.
+
+3. **Spike did not exercise live safehouse — risk acknowledged but not mitigated.** Line 212 admits `~/.local/bin/safehouse` was sandbox-blocked and the contract was grounded purely from docs. This staff reviewer also could not exercise the live binary (`safehouse not found` on PATH; `~/.local/bin/safehouse` is `Operation not permitted` from this sandbox). The bash-stub argv-recording approach is a faithful substitute for testing the LAUNCHER's emitted argv, but does NOT verify that safehouse actually accepts that argv. Before implementation locks the contract, recommend a manual smoke test from an unsandboxed shell (the captain's own terminal): `safehouse --enable=ssh -- claude --agent spacedock:first-officer --help` should produce claude's help output, not a safehouse flag error. This is cheap and de-risks AC-1/AC-3 against a live-binary surprise.
+
+4. **AC-1 ordering verified against spike.** AC-1 (line 218) requires `--agent spacedock:first-officer` BEFORE forwarded args. Spike main.go line 36-37 emits: `args = append(args, "claude", "--agent", "spacedock:first-officer")` then `args = append(args, forwarded...)`. Agreement confirmed. Recorded argv from line 209 (`claude --agent spacedock:first-officer --foo bar`) matches.
+
+5. **AC-3 flag-shape/`--` consistency.** AC-3 (line 224) requires `--enable=ssh` (equals) AND the `--` separator. Spike main.go line 31-34 emits `--enable=ssh` then conditionally `--`, only when `useSeparator` is true. Recorded argv from line 210 (`--enable=ssh -- claude --agent spacedock:first-officer --foo bar`) matches. Internally consistent.
+
+6. **`--` separator policy inconsistency.** Design line 76 says: "when any safehouse-flags are inserted, the launcher emits an explicit `--`; when no safehouse flags are present, the launcher omits `--`." AC-1 (line 218) confirms the no-config path omits `--`. agent-safehouse.dev examples support BOTH forms (`safehouse claude ...` AND `safehouse --add-dirs=... -- claude ...`). This is fine, but worth noting: emitting `--` unconditionally would be simpler and equally valid per the docs. Recommend the ensign justify the conditional policy in the entity body or simplify to always-emit. Non-blocking polish.
+
+7. **AC-6 independence claim — clean.** The plugin-presence check probes `~/.claude/plugins/installed_plugins.json` (a JSON file maintained by Claude Code) or the marketplace directory. Verified on this machine: the JSON file exists and has a documented `{"plugins": {"name@marketplace": [{...}]}}` shape. The launcher parsing this JSON does NOT touch Spacedock frontmatter or mdschema; the independence claim holds. Parsing Claude Code's installed_plugins.json is structurally unrelated to parsing Spacedock entity frontmatter (different format, different domain, different schema authority). AC-6's static test (`go list -m all` + ripgrep for `frontmatter`/`mdschema`) is well-defined.
+
+8. **Plugin-presence probe — spacedock plugin not currently installed via installed_plugins.json on this machine.** Grepped `~/.claude/plugins/installed_plugins.json` for "spacedock" — zero hits. BUT `~/.claude/plugins/marketplaces/spacedock/` directory DOES exist (a marketplace dev clone, not an installed plugin). Design's two-probe approach (line 110-113) correctly handles this: the marketplace-directory fallback would catch this case. Good. However, the Design's exact-key-shape hand-wave on line 112 ("`spacedock@spacedock-marketplace` or similar — exact key shape verified at implementation time") is a soft commitment. The implementation stage will need to actually install the plugin to a test HOME and observe the key. Recommend AC-2's test fixture include both an installed-via-marketplace case AND a marketplace-clone-only case to nail down the probe shape.
+
+9. **Brew formula `bin.install` and `-ldflags` audit.**
+   - `bin.install "spacedock"` on line 185 — correct for a single binary at the tarball root.
+   - The formula does NOT contain `--ldflags -X main.Version=#{version}`. This is because the formula installs a PRE-BUILT release tarball (the `url` lines on 170/174 fetch `spacedock-aarch64-apple-darwin.tar.gz`), so the ldflags happen at the release-build step (GitHub Actions or release script), NOT at brew-install time. The Design's "Versioning" section (line 198) correctly attributes `-ldflags "-X main.Version=$(git describe ...)"` to the build-time release step. This is consistent with rtk's pattern. However, AC-4 does not explicitly require the version-stamping mechanism — it only requires `spacedock --version` returns a non-empty string. Recommend strengthening AC-4 OR adding a sub-AC that the release pipeline (Makefile/goreleaser/script) is committed and produces a binary with `main.Version` correctly populated.
+
+10. **YAML vs TOML rationale present.** Line 127: YAML chosen because "every other config file the captain interacts with daily is YAML or YAML-adjacent." TOML rationale is "adds zero value for this small key set and a new mental model." This is a reasonable rationale, even if brief. Acceptable.
+
+11. **Scope vs "tiny" framing — borderline.** The roadmap budget is ~500-700 LOC. Design surfaces:
+    - 4 internal packages (claude, codex, plugin, safehouseconfig) — reasonable
+    - YAML config schema with FOUR sections (`enable`, `add_dirs`, `add_dirs_ro`, `append_profile`) plus unknown-key warning — the seed spec only mentioned `enable: [ssh]`. The other three sections (add_dirs, add_dirs_ro, append_profile) appeared during ideation without explicit ACs covering them. AC-3 only tests `enable: [ssh]`. The other three schema sections are spec-without-test.
+    - Plugin probe TWO paths (installed_plugins.json + marketplaces/spacedock/ dir)
+    
+    Recommend either (a) tightening v1 to ONLY `enable:` (matches AC-3 and seed spec), pushing add_dirs/add_dirs_ro/append_profile to a follow-up entity with their own ACs; OR (b) adding sub-ACs for the three additional schema sections so v1's deliverable matches its specified surface. Currently the entity claims four schema sections but only tests one. This is the biggest scope-vs-"tiny" tension.
+
+12. **AC-5 (codex stub) — borderline justifiable, not necessary.** The roadmap (per the ensign's framing) anticipates `spacedock codex` as a future sibling. Shipping a stub that exits non-zero with a clear message has small upside (claims the subcommand name; signals intent; ~10 LOC; testable via AC-5) and minimal downside (small surface area). However, it is NOT required for the launcher's stated purpose ("`spacedock claude`"). YAGNI argues for omission until codex runtime work begins. Recommend the captain explicitly decide: ship stub (current design) vs omit (YAGNI). Either is defensible. The current AC is testable and self-contained, so it doesn't break the gate.
+
+13. **Self-containment audit of ACs 1-6.**
+    - AC-1: testable inside this entity (Go integration test with stub on PATH). ✓
+    - AC-2: testable inside this entity (temp HOME, no plugin). ✓
+    - AC-3: testable inside this entity (fixture YAML + stub). ✓ but only covers `enable:` — see finding 11.
+    - AC-4: partially self-contained. The formula commit and `brew audit` lint are inside; the actual `brew install` smoke is documented but "CI may skip" (line 228). This is fine for v1 but soft — recommend tightening to "formula committed AND `brew audit --strict` passes" as the in-entity bar.
+    - AC-5: testable inside this entity. ✓
+    - AC-6: testable inside this entity (static checks). ✓
+
+### Polish findings
+
+- Line 78 says "All `args...` after `spacedock claude` are forwarded verbatim" — fine, but worth noting: this means a captain who passes `spacedock claude --agent some-other-agent` would emit `safehouse claude --agent spacedock:first-officer --agent some-other-agent`, and Claude Code would apply last-flag-wins semantics. Probably not what the captain wants, but verbatim-forward is the simplest contract. Worth a one-line note in the entity body documenting this edge case (no AC needed).
+
+- Line 119 install-hint message is long. Consider splitting onto multiple stderr lines for readability, or pointing to a shorter canonical URL in the README.
+
+- Line 75 cites `agent-safehouse.dev/docs/options.html` — actual verified URL is the same; good. But the `--enable=KEY` framing as the ONLY documented form is slightly stronger than what the docs say (see Material finding 2).
+
+- Line 199 says the formula `version` and build-time `main.Version` are "kept in sync at release time by the release script (out of scope here)". A one-sentence pointer to where that release script will live (e.g., `.github/workflows/release.yml`, `scripts/release.sh`) would tighten the design.
+
+- Risk C mentions "probe via the Claude Code CLI itself if it exposes a `list-plugins` command". Spot-checked `claude --help`: there IS a `claude plugin` subcommand (`plugin|plugins   Manage Claude Code plugins`). Worth a quick implementation-stage probe to see if `claude plugin list --json` (or similar) exists and would be a more durable detection mechanism than file-system probing. Non-blocking.
+
+- The entity body uses both "rc != 0" and "exit non-zero" — minor stylistic inconsistency. Either is fine; pick one.
+
+### Summary
+
+The translation contract is sound and the flag-ownership correction is independently verified. The two material concerns are (a) scope creep in the YAML config schema (four sections specified, one tested — finding 11) and (b) the contract has never touched a live safehouse binary (finding 3). Both are addressable without re-architecting. AC self-containment is mostly clean with one soft spot (AC-4 brew install).
