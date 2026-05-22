@@ -1,9 +1,9 @@
 ---
 id: bxntyscd4sgxxdar9xty4nnt
 title: "Spacedock frontmatter & state-machine contract spec (Go port sub-project #1)"
-status: backlog
+status: ideation
 source: "Sub-project #1 of the Go port roadmap at docs/superpowers/specs/2026-05-12-spacedock-go-port-roadmap.md. A v0 draft was committed on 2026-05-12 (commit 410a0731 'spec(v0): spacedock frontmatter + state machine contract') but accidentally landed on the wip/fake-star-spike branch instead of main and never came back. The v0 file is at docs/superpowers/specs/2026-05-12-spacedock-frontmatter-contract-spec.md on that wip branch (374 lines, multiple inline TBDs). This entity drives v0 → v1: resolve TBDs, write the machine-checkable mdschema artifacts, prove conformance against today's corpus, and pull the doc onto main."
-started:
+started: 2026-05-22T23:10:56Z
 completed:
 verdict:
 score:
