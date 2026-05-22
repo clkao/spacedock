@@ -94,14 +94,15 @@ The only permitted path for initial `Agent()` dispatch is:
    ```
    echo '<json>' | {spacedock_plugin_dir}/skills/commission/bin/claude-team build --workflow-dir {workflow_dir}
    ```
-3. **REQUIRED — On exit 0, parse the stdout JSON and call `Agent()` with the emitted fields verbatim.** The `name`, `prompt`, and `model` fields MUST come from helper output unchanged. The `prompt` already contains the team-mode `SendMessage(to="team-lead", ...)` completion signal — do not strip or rewrite it. Forward `output.model` as the `Agent()` `model=` parameter when present; when null, OMIT the `model=` argument entirely (do NOT pass `model=None` — default-inheritance only applies when the argument is absent):
+3. **REQUIRED — On exit 0, parse the stdout JSON and call `Agent()` with the emitted fields verbatim.** The `name`, `description`, `prompt`, and `model` fields MUST come from helper output unchanged. The `description` field is REQUIRED by the Agent tool — do not omit it. The `prompt` is a file-pointer (`Skill(...) ; then Read /tmp/spacedock-dispatch/{name}.md and treat its content as your assignment.`); the ensign Reads the file on first action and treats the body (including the SendMessage completion-signal section) as the inline assignment. Do not strip or rewrite the prompt. Forward `output.model` as the `Agent()` `model=` parameter when present; when null, OMIT the `model=` argument entirely (do NOT pass `model=None` — default-inheritance only applies when the argument is absent):
    ```
    Agent(
        subagent_type=output.subagent_type,
-       name=output.name,           // omit if bare mode (field absent)
-       team_name=output.team_name, // omit if bare mode (field absent)
-       model=output.model,         // omit when output.model is null
-       prompt=output.prompt
+       name=output.name,                 // omit if bare mode (field absent)
+       team_name=output.team_name,       // omit if bare mode (field absent)
+       description=output.description,   // REQUIRED — Agent tool rejects missing description
+       model=output.model,               // omit when output.model is null
+       prompt=output.prompt              // ~175 chars; ensign Reads dispatch_file_path on first action
    )
    ```
 4. **On non-zero exit ONLY** (or if the binary is unavailable): read stderr, report the helper failure to the captain, and fall back to Break-Glass Manual Dispatch below. A zero-exit run is never a break-glass trigger.

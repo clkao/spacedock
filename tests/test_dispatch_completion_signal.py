@@ -68,6 +68,25 @@ def _first_agent_dispatch_prompt(fo_log_path: Path) -> str:
     return ""
 
 
+def _first_agent_dispatch_body(fo_log_path: Path) -> str:
+    """Return the dispatch body the ensign sees: under schema_version: 2 the
+    `Agent(prompt=...)` arg is a file-pointer of the shape
+    `... Read /tmp/spacedock-dispatch/{name}.md ...`; this helper extracts the
+    path and returns the file content.
+    """
+    import json
+    import re
+
+    prompt = _first_agent_dispatch_prompt(fo_log_path)
+    m = re.search(r"(/tmp/spacedock-dispatch/[A-Za-z0-9_\-]+\.md)", prompt)
+    if not m:
+        return prompt
+    path = Path(m.group(1))
+    if not path.is_file():
+        return prompt
+    return path.read_text(encoding="utf-8")
+
+
 @pytest.mark.live_claude
 @pytest.mark.teams_mode
 def test_dispatch_completion_signal(test_project, model, effort):
@@ -205,10 +224,13 @@ def test_dispatch_completion_signal(test_project, model, effort):
     print()
     print("[Dispatch Template Sanity]")
     fo_log_path = t.log_dir / "fo-log.jsonl"
-    dispatch_prompt = _first_agent_dispatch_prompt(fo_log_path)
+    # Under schema_version: 2 (dispatch-prompt-as-file-pointer), the Agent() prompt
+    # arg is a ~175-char file-pointer. The team-mode SendMessage completion-signal
+    # instruction lives in the dispatch body the ensign Reads on first action.
+    dispatch_body = _first_agent_dispatch_body(fo_log_path)
     t.check(
-        "team-mode ensign prompt carries SendMessage completion-signal instruction",
-        'SendMessage(to="team-lead"' in dispatch_prompt,
+        "team-mode ensign dispatch carries SendMessage completion-signal instruction",
+        'SendMessage(to="team-lead"' in dispatch_body,
     )
 
     t.finish()

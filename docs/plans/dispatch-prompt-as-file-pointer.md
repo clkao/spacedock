@@ -15,14 +15,14 @@ mod-block: merge:pr-merge
 
 ## Problem
 
-After PR #231 (0x9, fetch-on-demand dispatch spec), the FO's per-dispatch context cost is still **~14,000 chars** even though the ensign-side prompt was shrunk significantly:
+After PR #231 (0x9, fetch-on-demand dispatch spec), the FO's per-dispatch context cost is still **~6,000 chars** even though the ensign-side prompt was shrunk significantly (F2 from staff review: measured baseline is ~6,000 chars per dispatch, not the originally-claimed ~14,000):
 
-- ~7,000 chars from `claude-team build`'s stdout JSON (the FO reads this to dispatch)
-- ~7,000 chars from `Agent(prompt=...)` (the FO emits this verbatim to spawn the ensign)
+- ~3,000 chars from `claude-team build`'s stdout JSON (the FO reads this to dispatch)
+- ~3,000 chars from `Agent(prompt=...)` (the FO emits this verbatim to spawn the ensign)
 
 The prompt enters the FO's context twice per dispatch. PR #231 only fixed the ensign side (`### Fetch commands` block makes the ensign load stage def + standing teammates JIT). The FO still has to carry the full prompt through its own reasoning surface.
 
-A captain-session of 20 dispatches accumulates ~280,000 chars of FO-side prompt-passing. That's a significant fraction of the FO's context budget that the FO never reasons about — it's purely pass-through cost.
+A captain-session of 20 dispatches accumulates ~120,000 chars of FO-side prompt-passing. That's a significant fraction of the FO's context budget that the FO never reasons about — it's purely pass-through cost.
 
 ## Why this matters
 
@@ -339,8 +339,8 @@ End-state properties of the finished entity:
 1. **`claude-team build` (with `schema_version: 2` input) emits a spec where `prompt` is ≤200 chars** and contains the substrings `Skill(skill="spacedock:ensign")`, `Read`, `/tmp/spacedock-dispatch/` (the predictable path pattern), and `treat its content as your assignment` (the load-bearing trailing imperative confirmed by the spike). The full per-dispatch content (today's PR #231 shape) is written to a file at `/tmp/spacedock-dispatch/{name}.md`.
    - **Test:** parser-level test in `tests/test_claude_team.py` runs the helper against a canonical v2 input and asserts (a) the emitted `prompt` length is ≤200, (b) the four substrings appear, (c) `dispatch_file_path` field is set and the file exists at that path with the expected content.
 
-2. **The helper preserves v1 schema input** (today's shape) for backwards compatibility OR cleanly errors out with a clear migration message. Decision deferred to implementation; either is acceptable, but the behavior is verified by a test.
-   - **Test:** parser-level test pipes a v1 input to the helper and asserts (a) either the helper produces a v1-shape output (back-compat), or the helper exits non-zero with a message containing `schema_version: 2 required`.
+2. **CLEAN-BREAK: helper rejects v1 input with `schema_version: 2 required`.** Captain decision 2026-05-22 (F4 from staff review): v1 input is rejected, not preserved. Skill + claude-team ship together in this entity; a larger refactor is planned, so the v1 back-compat surface buys nothing.
+   - **Test:** parser-level test pipes a v1 input to the helper and asserts exit code 2 with stderr containing `schema_version: 2 required` (`tests/test_claude_team.py::TestBuildSchemaVersion::test_build_schema_version_v1_rejection`).
 
 3. **`skills/ensign/references/ensign-shared-core.md` `## First action` section contains the `DISPATCH_FILE:` clause** with the two properties: (a) instructs Read on a matching prompt pattern; (b) instructs SendMessage-on-failure with `DISPATCH_FILE_MISSING:` prefix.
    - **Test:** static-content test asserts both substrings appear in the file.
@@ -348,14 +348,14 @@ End-state properties of the finished entity:
 4. **Spike result is documented** in the entity body's `## Empirical findings` section with verdict PASS/INCONCLUSIVE/FAIL and per-run table. Captain-set threshold: ≥4/5 PASS. The ideation-cycle spike landed 5/5 PASS on sonnet; this AC is satisfied at the ideation gate and a future cycle does not re-run it.
    - **Test:** entity body content check — section exists, contains verdict, contains per-run table.
 
-5. **FO context savings are measured and ≥10,000 chars per dispatch** in a worked example. Comparison shape: today's helper-output-prompt vs. v2-helper-output-prompt against an identical input fixture.
-   - **Test:** golden-file test pinning the v2 emitted prompt size at ≤200 chars AND a derived test asserting `helper_stdout_size_v2 < helper_stdout_size_v1 - 10000` for the canonical fixture.
+5. **v2 helper `prompt` field is ≥85% smaller than the v1-equivalent assembly** on a canonical fixture (F1 from staff review: reframed in percentage terms because the real PR-#231-post v1 prompt is ~2,500-3,200 chars, not the originally-assumed ~7,000; an absolute ≥10,000-char floor is structurally unsupportable. The v1-equivalent is the v2 dispatch-file body — by design, the body equals what v1 would have emitted as `prompt` because the assembly logic is unchanged; only the delivery shape moved).
+   - **Test:** parser-level test runs the helper against a canonical v2 input and asserts `1 - len(prompt) / len(dispatch_body) >= 0.85`. Measured on a representative fixture: v1-equivalent = 2,577 chars; v2 prompt = 175 chars; reduction = 93.2% (recorded in implementation Stage Report).
 
 6. **`make test-static` passes with the changes applied** — no regressions from the new behavior.
    - **Test:** `make test-static` exit code 0.
 
 7. **`make test-live-claude` from worktree** validates a real dispatch via the v2 path completes end-to-end without behavioral regression vs. PR #231 baseline. This is the captain's cross-cycle live-test requirement.
-   - **Test:** `make test-live-claude TEST=test_dispatch_completion_signal` (the natural test exercising single-dispatch shape) exit code 0 with the new prompt shape verified in fo-log.jsonl.
+   - **Test:** `tests/test_dispatch_completion_signal.py::test_dispatch_completion_signal` (F5 from staff review: verified present, `@pytest.mark.live_claude`, exercises a fresh `Agent(subagent_type="spacedock:ensign")` dispatch via `_first_agent_dispatch_prompt`; not a SendMessage reuse-path test). Pass requires exit code 0 and the v2 file-pointer prompt observed in fo-log.jsonl.
 
 ## Test plan
 
@@ -397,7 +397,7 @@ If spike on the proposed shape FAILS, run a follow-up spike with Option D before
 - Spacedock version: 0.11.2+ (post PR #231 + #233)
 - Builds on: PR #231 (0x9, fetch-on-demand dispatch spec — established the ensign-side fetch-on-demand pattern this entity extends to FO-side)
 - Composes with: `mtc76hh8` (runtime-boundary split — would split `claude-team build` into runtime-neutral core + Claude adapter; the file-write logic in this entity lands in the runtime-neutral core), `y15kpj10` (FO retry-path bypass — orthogonal but related to FO dispatch discipline)
-- Predicted impact: ~97% FO per-dispatch context reduction. For a 20-dispatch captain session, ~260,000 chars of FO budget freed.
+- Measured impact: ~93% reduction in the helper's `prompt` field (v1-equivalent 2,577 → v2 175 chars on a canonical fixture) and ~80% reduction in FO per-dispatch context (~5,154 → 1,032 chars when summing helper stdout + Agent prompt arg). For a 20-dispatch captain session, ~82,000 chars of FO budget freed (F2 from staff review corrected the original ~97%/~260,000 claim against today's PR-#231-post baseline).
 - Estimated complexity: small. Helper change ~50 lines Python, ensign-shared-core prose ~10 lines, tests ~50 lines. Spike ~$3-5. Total cost ~$15-20.
 - Empirical evidence required at ideation gate: 5-run sonnet spike with verdict PASS/INCONCLUSIVE/FAIL per AC-4.
 
@@ -451,3 +451,52 @@ Independent ideation-gate review by staff reviewer, 2026-05-22. Reviewer ran `cl
 - Did not run `make test-static` or `make test-live-claude`. Those are implementation-cycle artifacts, not ideation-gate evidence.
 - Did not re-run the 5-sonnet spike. The summary.tsv at `/tmp/rdt-spike/primary/` shows 5/5 PASS and the per-run jsonl logs corroborate the Skill→Read→Write tool sequence. Reviewer trusts the artifact.
 - Did not assess complexity estimate or cost. The `~50 lines Python + ~10 lines prose + ~50 lines tests` claim is plausible for the described work but reviewer did not size the helper file.
+
+## Stage Report: implementation
+
+- DONE: Implement the v2 path in `skills/commission/bin/claude-team build`: accept `schema_version: 2` input, write the full per-dispatch prompt to `/tmp/spacedock-dispatch/{derived_name}.md`, emit the ~119-char file-pointer prompt plus a new `dispatch_file_path` field
+  Bumped `SCHEMA_VERSION = 2` + added file-write logic in commit 7c9467b0 (skills/commission/bin/claude-team:36-44, 449-485). CLEAN-BREAK on v1 input enforced; v1 stdin yields exit 2 with `schema_version: 2 required` per AC-2 + F4. Updated FO runtime adapter (claude-first-officer-runtime.md) and 4 input fixtures (`tests/fixtures/dispatch_inputs_*.json`) atomically.
+- DONE: Add the DISPATCH_FILE clause to `skills/ensign/references/ensign-shared-core.md`
+  Added `## DISPATCH_FILE Bootstrap` section (above `## Fetch-on-Demand Bootstrap`) with the two required properties: (a) Read instruction on the file-pointer pattern and (b) `SendMessage(to="team-lead", message="DISPATCH_FILE_MISSING: {path} - {error}")` failure handler. Verified by new static test `test_ensign_shared_core_carries_dispatch_file_bootstrap_clause` in `tests/test_agent_content.py`.
+- DONE: Run `make test-live-claude` from the worktree (AC-7)
+  See Stage Report below for the live-test outcome. F5 verified the test name: `tests/test_dispatch_completion_signal.py::test_dispatch_completion_signal` exists, is `@pytest.mark.live_claude`, and exercises a fresh `Agent(subagent_type="spacedock:ensign")` dispatch (not a SendMessage reuse path) via `_first_agent_dispatch_prompt`. AC-7 entity-body wording updated to name this verified test ID.
+
+### Cross-cutting work
+
+- F1 honored: AC-5 reframed in percentage terms (≥85% reduction in helper `prompt` field). The ≥10,000-char absolute floor is structurally unsupportable against today's ~2,500-3,200 byte v1 prompt; the percentage framing survives any reasonable input-size variation. New test `TestBuildV2SavingsFloor::test_v2_prompt_at_least_85pct_smaller_than_v1_equivalent` enforces the floor.
+- F2 honored: entity-body `## Problem` and `## Scale context` corrected to reflect today's PR-#231-post baseline (~6,000 chars per dispatch, ~92% reduction), not the original ~14,000-char / ~97% claims.
+- F4 honored: AC-2 locked CLEAN-BREAK per captain (2026-05-22). Helper rejects v1 input; no back-compat shim.
+- F5 honored: AC-7 test name `test_dispatch_completion_signal` verified present + correct dispatch shape.
+
+### AC-5 measurement on canonical fixture
+
+| Field | Value |
+|---|---|
+| Input fixture | Team-mode dispatch, 3-item checklist, feedback_context + scope_notes |
+| v1-equivalent dispatch body | 2,577 chars |
+| v2 helper `prompt` field | 175 chars |
+| Savings | 2,402 chars |
+| Reduction | 93.2% (>85% threshold) |
+| v2 helper stdout | 857 chars |
+| FO per-dispatch (v1, prompt × 2) | ~5,154 chars |
+| FO per-dispatch (v2, stdout + prompt arg) | 1,032 chars |
+| FO per-dispatch reduction | ~80.0% |
+
+### Test impact
+
+- `make test-static`: 635 passed, 27 deselected, 15 subtests passed.
+- 18 pre-existing tests migrated from `out["prompt"]` substring assertions to `dispatch_body(out)` (reads the file content the ensign would see). The helper introduces a small `dispatch_body(out)` test helper in `tests/test_claude_team.py:651-661`.
+- Golden file `tests/fixtures/dispatch_prompt_fetchspec.txt` continues to byte-equal the v2 dispatch body — assembly logic was not changed, only the delivery shape moved (file vs. inline).
+- New tests: `TestBuildDispatchFilePointer` (3 tests for AC-1 substring + length + file-existence + body-content), `TestBuildV2SavingsFloor::test_v2_prompt_at_least_85pct_smaller_than_v1_equivalent` (AC-5 floor), `test_ensign_shared_core_carries_dispatch_file_bootstrap_clause` (AC-3).
+
+### Summary
+
+CLEAN-BREAK v2 helper landed in commit 7c9467b0. `claude-team build` writes the per-dispatch body to `/tmp/spacedock-dispatch/{name}.md` and emits a 175-char file-pointer prompt; v1 input is rejected. Ensign-shared-core gained the `## DISPATCH_FILE Bootstrap` clause covering both the Read path and the `DISPATCH_FILE_MISSING:` failure mode. AC-5 measured 93.2% reduction on a canonical fixture (above the 85% floor); FO per-dispatch context drops ~80% (5,154 → 1,032 chars). All 635 static tests pass; staff-review findings F1, F2, F4, F5 honored. AC-7 live test outcome captured below.
+
+### AC-7 live test outcome
+
+`make test-live-claude TEST=test_dispatch_completion_signal` (run with `--model sonnet --effort low`): **PASSED** end-to-end in 167.97s. All 4 internal checks green: TeamCreate emitted, work dispatch closed in 31.9s, entity advanced and was archived, team-mode ensign dispatch carries SendMessage completion-signal instruction (verified against the dispatch body via `_first_agent_dispatch_body`).
+
+Field-fix discovered during live testing: the Agent tool requires a `description` argument, which the FO runtime adapter did not name in its forwarding block (only `subagent_type, name, team_name, model, prompt`). The first live dispatch hit `InputValidationError: required parameter description is missing`; the model retried with `description` included and the second call succeeded. This was a latent bug in the FO runtime adapter that v1 happened to gloss over because the model often inferred `description` from the prompt content (less likely under v2's tiny prompt). Fixed in this entity by adding `description=output.description` to the runtime adapter's Agent() forwarding block, plus an explicit `REQUIRED — Agent tool rejects missing description` annotation.
+
+Test harness update: `_first_agent_dispatch_body` in `tests/test_dispatch_completion_signal.py` extracts the dispatch file path from the v2 prompt and Reads the body so substring assertions about completion-signal content target the right surface.
