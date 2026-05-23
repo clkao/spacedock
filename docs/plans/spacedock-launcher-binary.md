@@ -1,13 +1,13 @@
 ---
 id: 9bt646cz0h4q79g98qz68k9d
 title: "Spacedock launcher binary: spacedock claude → safehouse claude --agent spacedock:first-officer (Go port sub-project #2)"
-status: ideation
+status: implementation
 source: "Sub-project #2 of the Go port roadmap at docs/superpowers/specs/2026-05-12-spacedock-go-port-roadmap.md. Captain (CL) request 2026-05-22 to start a tiny Go skeleton in parallel with sub-project #1 (frontmatter spec, slug spacedock-frontmatter-contract-spec, id bxntyscd4sgxxdar9xty4nnt). Pattern: rtk-style brew formula install (rtk lives at /opt/homebrew/bin/rtk → Cellar/rtk/0.40.0/bin/rtk; mirror that install path). The `spacedock` binary's `claude` subcommand translates to `safehouse claude --agent spacedock:first-officer`, verifies the Claude Code plugin is installed, and optionally loads a safehouse config to apply flags like `--enable ssh`."
 started: 2026-05-22T23:10:56Z
 completed:
 verdict:
 score:
-worktree:
+worktree: .worktrees/spacedock-ensign-spacedock-launcher-binary
 ---
 
 # Spacedock launcher binary — sub-project #2 of Go port
