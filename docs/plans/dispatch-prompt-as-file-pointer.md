@@ -513,3 +513,16 @@ Test harness update: `_first_agent_dispatch_body` in `tests/test_dispatch_comple
 ### Summary
 
 All seven ACs hold against the committed implementation (commits 7c9467b0 + bfce3da2). AC-7 live test reproduces PASSED in 175.26s (+4.3% drift, within the captain's 10% threshold). `make test-static` reproduces 635 passed exactly. The Agent-`description` fix is in place at the FO runtime adapter line 103. Verdict: **PASSED**.
+
+## Stage Report: implementation (cycle 2)
+
+- DONE: Migrate `tests/test_checklist_e2e.py` live-claude `agent_prompt` validation to handle the v2 file-pointer shape
+  After `agent_prompt = log.agent_prompt()` (claude branch only, codex branch untouched), detect the v2 shape via `re.search(r"Read (/tmp/spacedock-dispatch/[^\s]+\.md)", agent_prompt)` — when matched and the file is readable, reassign `agent_prompt` to the file body so the subsequent substring assertions (`Completion checklist` at line 184, checklist item extraction at line 202) land on the materialized dispatch body. Break-glass fallback (fully-inlined prompt, no `Read /tmp/spacedock-dispatch/...` substring) falls through unchanged.
+- DONE: `make test-static` regression check
+  635 passed, 27 deselected, 15 subtests passed in 29.25s — byte-exact match to validation-cycle baseline. No new failures.
+- SKIPPED: Re-run `make test-live-claude` locally
+  Per assignment instruction; CI on PR #234 re-runs the live suite after push.
+
+### Summary
+
+CYCLE-2 implementation remediation initiated by CI feedback on PR #234. Migrated the single missed test file (`tests/test_checklist_e2e.py`) to the v2 file-pointer shape using the same regex/Read pattern as `dispatch_body(out)` in `tests/test_claude_team.py:651-661`, but operating on a string (`agent_prompt` from `LogParser.agent_prompt()`) rather than a parser output dict. Production code untouched; helper architecture unchanged. Static suite stays at 635 passed; CI on PR #234 will re-verify the live-claude bare and team paths.
