@@ -75,6 +75,7 @@ Rules:
 - do not use markdown checkbox markers in stage reports
 - append the report at the end of the entity file — do not read the entire entity body to find an insertion point
 - if redoing a stage after rejection, append a new `## Stage Report: {stage_name} (cycle N)` section at the end rather than locating and overwriting the prior report — the latest report is always the last one in the file
+- commit the stage-report section in the same commit that completes your stage work — the first officer's call to `status --set status={next_stage}` will refuse to advance if the section is missing when the workflow opted in to `stages.defaults.require-stage-report: true`. Repairing a missing report after the fact requires either (a) appending the section and re-running the FO's advancement, or (b) the FO passing `--force` (reserved for explicit manual recovery).
 
 ## Completion
 

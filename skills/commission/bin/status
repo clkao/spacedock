@@ -2446,6 +2446,63 @@ def main():
             print(f'Warning: --force overriding mod-block ({mod_block}) on entity {slug}',
                   file=sys.stderr)
 
+        # Stage-report-presence guard (issue #235). When the workflow opts in
+        # via `stages.defaults.require-stage-report: true`, refuse to advance
+        # `status: X -> Y` unless the entity body contains a
+        # `## Stage Report: X` section (optionally `(cycle N)`-suffixed for
+        # feedback rounds). Catches the intermittent failure mode where an
+        # FO emits stage-side YAML approvals (e.g. semantic-mapping.yml's
+        # `review.status: approved`) and advances `status` without writing
+        # the prose audit section, leaving a "ghost-approved" entity that
+        # downstream consumers cannot reconstruct from the file alone.
+        new_status_value = next(
+            (value.strip() for field, value in updates if field == 'status'),
+            None,
+        )
+        current_status = current_fields.get('status', '').strip()
+        if (
+            not force
+            and new_status_value is not None
+            and new_status_value
+            and new_status_value != current_status
+            and current_status
+            and os.path.exists(readme_path)
+        ):
+            _stages_for_defaults, defaults = parse_stages_with_defaults(readme_path)
+            require_stage_report = (
+                str(defaults.get('require-stage-report', 'false')).strip().lower()
+                == 'true'
+            )
+            if require_stage_report:
+                # Initial-stage exemption: in some workflows the initial stage
+                # is a pure intake state without a worker, so the very first
+                # advancement has no prior report to require.
+                initial_names = {
+                    s['name'] for s in (stages or []) if s.get('initial')
+                }
+                if current_status not in initial_names:
+                    with open(entity_path, 'r') as _body_handle:
+                        body = _body_handle.read()
+                    stage_report_pattern = re.compile(
+                        r'^## Stage Report:\s*'
+                        + re.escape(current_status)
+                        + r'(\s*\(cycle\s+\d+\))?\s*$',
+                        re.MULTILINE,
+                    )
+                    if not stage_report_pattern.search(body):
+                        print(
+                            f"Error: entity {slug} cannot advance status "
+                            f"{current_status!r} -> {new_status_value!r} — "
+                            f"required audit section "
+                            f"'## Stage Report: {current_status}' is missing "
+                            f"from the entity body. Append the section per the "
+                            f"Stage Report Protocol "
+                            f"(skills/ensign/references/ensign-shared-core.md), "
+                            f"or use --force to bypass.",
+                            file=sys.stderr,
+                        )
+                        sys.exit(1)
+
         try:
             resolved = update_frontmatter(entity_path, updates)
             # Mirror PR metadata back to main for discovery, but keep all
