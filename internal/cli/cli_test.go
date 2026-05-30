@@ -2,8 +2,11 @@ package cli
 
 import (
 	"bytes"
+	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/clkao/spacedock-v1/internal/contract"
 )
 
 func TestHelp(t *testing.T) {
@@ -32,11 +35,38 @@ func TestVersion(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("Run returned %d, want 0", code)
 	}
-	if got := strings.TrimSpace(stdout.String()); got != "spacedock "+Version {
-		t.Fatalf("version output = %q, want %q", got, "spacedock "+Version)
+	want := "spacedock " + Version + " (contract " + strconv.Itoa(contract.CONTRACT_VERSION) + ")"
+	if got := strings.TrimSpace(stdout.String()); got != want {
+		t.Fatalf("version output = %q, want %q", got, want)
 	}
 	if stderr.Len() != 0 {
 		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+}
+
+// TestVersionContractToken locks the AC-1 contract token: --version emits a
+// `contract <N>` token where <N> equals CONTRACT_VERSION and parses as an integer.
+func TestVersionContractToken(t *testing.T) {
+	var stdout bytes.Buffer
+	Run([]string{"--version"}, &stdout, &bytes.Buffer{})
+
+	got := stdout.String()
+	marker := "(contract "
+	idx := strings.Index(got, marker)
+	if idx < 0 {
+		t.Fatalf("version output %q missing %q token", got, marker)
+	}
+	rest := got[idx+len(marker):]
+	end := strings.IndexByte(rest, ')')
+	if end < 0 {
+		t.Fatalf("version contract token not closed by ')': %q", got)
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(rest[:end]))
+	if err != nil {
+		t.Fatalf("contract token %q does not parse as integer: %v", rest[:end], err)
+	}
+	if n != contract.CONTRACT_VERSION {
+		t.Fatalf("contract token = %d, want CONTRACT_VERSION = %d", n, contract.CONTRACT_VERSION)
 	}
 }
 

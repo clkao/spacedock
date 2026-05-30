@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 
+	"github.com/clkao/spacedock-v1/internal/contract"
 	"github.com/clkao/spacedock-v1/internal/dispatch"
 	"github.com/clkao/spacedock-v1/internal/status"
 )
@@ -36,12 +37,24 @@ func run(ctx context.Context, args []string, env []string, dir string, stdin io.
 		printUsage(stdout)
 		return 0
 	case "--version", "version":
-		fmt.Fprintf(stdout, "spacedock %s\n", Version)
+		fmt.Fprintf(stdout, "spacedock %s (contract %d)\n", Version, contract.CONTRACT_VERSION)
 		return 0
 	case "status":
 		return runStatus(ctx, args[1:], env, dir, stdin, stdout, stderr, runner)
 	case "dispatch":
 		return dispatch.Run(args[1:], stdin, stdout, stderr)
+	case "claude":
+		devBranch = envValue(env, "SPACEDOCK_DEV_BRANCH")
+		return runClaude(ctx, args[1:], execHost{}, stdout, stderr)
+	case "codex":
+		devBranch = envValue(env, "SPACEDOCK_DEV_BRANCH")
+		return runCodex(ctx, args[1:], execHost{}, stdout, stderr)
+	case "init":
+		devBranch = envValue(env, "SPACEDOCK_DEV_BRANCH")
+		return runInit(ctx, args[1:], execHost{}, stdout, stderr)
+	case "doctor":
+		devBranch = envValue(env, "SPACEDOCK_DEV_BRANCH")
+		return runDoctor(ctx, args[1:], execHost{}, stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "unknown command: %s\n", args[0])
 		printUsage(stderr)
@@ -70,6 +83,17 @@ func runStatus(ctx context.Context, args []string, env []string, dir string, std
 	return code
 }
 
+// envValue returns the value of key in a KEY=VALUE env slice, or "" when absent.
+func envValue(env []string, key string) string {
+	prefix := key + "="
+	for _, kv := range env {
+		if len(kv) >= len(prefix) && kv[:len(prefix)] == prefix {
+			return kv[len(prefix):]
+		}
+	}
+	return ""
+}
+
 // cwd returns the working directory, falling back to "" so a getwd failure does
 // not abort the command — the runner derives a scan root from --workflow-dir.
 func cwd() string {
@@ -84,12 +108,20 @@ func printUsage(w io.Writer) {
 	fmt.Fprint(w, `spacedock is the Spacedock v1 launcher.
 
 Usage:
+  spacedock claude [args...]                          version-gate then launch claude --agent spacedock:first-officer
+  spacedock codex [args...]                           version-gate then print the documented Codex launch prose
+  spacedock init [--host claude|codex] [--check]      install the per-host plugin, then run doctor
+  spacedock doctor [--host claude|codex] [--plugin-manifest PATH]
   spacedock status [args...]
   spacedock dispatch build --workflow-dir DIR
   spacedock dispatch show-stage-def --workflow-dir DIR --stage STAGE
   spacedock --version
   spacedock --help
 
+claude/codex are the host front doors: they version-gate against the installed
+plugin's requires-contract and fail fast on a mismatch before launching.
+init installs the per-host plugin via the host plugin mechanism (no skill-file copies).
+doctor reports the compatibility verdict against the binary's CONTRACT_VERSION.
 status forwards its arguments to the workflow status command.
 dispatch assembles ensign dispatch artifacts (build, show-stage-def).
 `)
