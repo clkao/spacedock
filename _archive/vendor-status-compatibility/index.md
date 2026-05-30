@@ -8,6 +8,7 @@ worktree:
 started: 2026-05-30T04:24:41Z
 completed: 2026-05-30T05:30:42Z
 verdict: PASSED
+archived: 2026-05-30T05:30:43Z
 ---
 
 # Vendor Status Compatibility
