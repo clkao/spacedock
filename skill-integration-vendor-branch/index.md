@@ -1,10 +1,10 @@
 ---
 id: v2j735kcfmsg6yv30nqt8t61
 title: Integrate skills with launcher
-status: ideation
+status: implementation
 score: "0.75"
 source: bootstrap roadmap
-worktree:
+worktree: /Users/clkao/git/spacedock-research/spacedock-v1/.worktrees/spacedock-ensign-skill-integration-vendor-branch
 started: 2026-05-30T04:30:15Z
 ---
 
