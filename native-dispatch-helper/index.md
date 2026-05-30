@@ -112,3 +112,15 @@ AC-1, AC-2, AC-3 in the frontmatter `## Acceptance criteria` section stand as wr
 ### Summary
 
 Fleshed out the native dispatch-helper task into problem statement, three scope/design decisions, refined ACs, and a test plan. Key findings the implementer must not miss: the parity oracle is the PROJECT-VENDORED `skills/commission/bin/claude-team` (carries the Stage-4 slug-not-stem + split-root amendments), NOT the plugin copy which still derives `index` for folder-form entities; Stage 7 is already merged so the sequencing caveat is satisfied; and `package status` has a documented prior same-package collision (356c7e7), making the disjoint-package boundary load-bearing rather than precautionary. Two open choices left for the gate: leaf-package lift (recommended) vs export-in-place for sharing the 3 pure parsers, and the `dispatch` vs `team` command-name framing (recommend `dispatch`). No frontmatter modified; ideation committed to main (non-worktree entity).
+
+## Feedback Cycles
+
+### Cycle 1 — ideation gate REJECT (staff audit, 2026-05-30)
+
+Three-lens adversarial staff audit returned material-concerns; rejected to ideation. Captain- and FO-resolved directives the revision MUST honor:
+
+- **Parity north-star reframed (captain).** NOT byte-identical to the Python oracle. Target = a semantically-equivalent dispatch spec: byte-identical on the non-fetch channels (the spec JSON minus fetch_commands, the dispatch-file body, exit codes), with ALL dispatch-path fetch lines — `show-stage-def` AND `show-standing` — rewritten to `spacedock dispatch …`. The Python `str(e)` error paths (invalid-JSON L206, dispatch_file_write_failed L528) are structurally-equivalent, not byte-equal (carve them out explicitly). This pulls the show-standing fetch-line emission into native scope (needs a Go mod-metadata parser + a `_mods` fixture), which closes the Decision-1-vs-AC-2 conflict the audit found.
+- **Helper-sharing seam (FO).** export-in-place — `internal/dispatch` imports `internal/status`'s exported parsers — NOT the leaf-lift, which would rewrite `handlers.go` and collide with the concurrent agent-output-modes work. Matches the Python precedent (dispatch imports the sibling status module).
+- **Sequencing (captain).** This entity lands FIRST, before spacedock-packaging.
+
+Revision must run a **SPIKE**: execute the project-vendored Python oracle on a `_mods` fixture + a model-precedence fixture (stage-set / defaults-set / neither) + a malformed-stdin fixture; capture exact stdout/stderr/exit bytes; define the parity contract (byte-identical vs rewritten vs structurally-equivalent) from observed reality. Then: enumerate EVERY distinct error byte-string (~22, not "12"); add the model-precedence + bare-mode-no-team fixtures (the `[build] effective_model` and `WARN bare_mode` stderr channels are uncovered today); rewrite the test helper to split stdout/stderr (`CombinedOutput` cannot byte-compare both); recast AC-2 as a deterministic predicate (the FO dispatch block AND every emitted fetch line target `spacedock dispatch`; the `context-budget`/`list-standing`/`spawn-standing` FO references may retain `claude-team`).
