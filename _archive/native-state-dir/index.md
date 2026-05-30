@@ -8,6 +8,7 @@ worktree:
 started: 2026-05-30T04:30:15Z
 completed: 2026-05-30T18:10:46Z
 verdict: PASSED
+archived: 2026-05-30T18:10:46Z
 ---
 
 # Implement Native State-Dir Support
