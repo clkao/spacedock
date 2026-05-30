@@ -147,6 +147,55 @@ func scanEntities(directory string, stderr io.Writer) []*entity {
 	return out
 }
 
+// worktreeMirrorPath computes the worktree-side path mirroring entityPath under
+// pipelineDir, preserving entity form: a flat {slug}.md maps to
+// {gitRoot}/{worktree}/{slug}.md and a {slug}/index.md maps to
+// {gitRoot}/{worktree}/{slug}/index.md. pyJoin matches os.path.join so an
+// absolute worktree value is honored as-is. Matches _worktree_mirror_path.
+func worktreeMirrorPath(entityPath, pipelineDir, gitRoot, worktree string) string {
+	rel, err := filepath.Rel(pipelineDir, entityPath)
+	if err != nil {
+		rel = filepath.Base(entityPath)
+	}
+	return pyJoin(gitRoot, worktree, rel)
+}
+
+// loadActiveEntityFields loads an entity's frontmatter, overlaying the
+// worktree-copy frontmatter when the entity is worktree-backed and the copy
+// exists. Pipeline-dir keys absent from the worktree copy are preserved; keys
+// present in the worktree copy win. Matches load_active_entity_fields.
+func loadActiveEntityFields(entityPath, gitRoot, pipelineDir string) map[string]string {
+	fields := parseFrontmatter(entityPath)
+	worktree := strings.TrimSpace(fields["worktree"])
+	if worktree == "" {
+		return fields
+	}
+	worktreeEntityPath := worktreeMirrorPath(entityPath, pipelineDir, gitRoot, worktree)
+	if !fileExists(worktreeEntityPath) {
+		return fields
+	}
+	active := parseFrontmatter(worktreeEntityPath)
+	for k, v := range active {
+		fields[k] = v
+	}
+	return fields
+}
+
+// scanEntitiesActive scans active entities, reading worktree-backed entities
+// from their worktree copy. Matches scan_entities_active. gitRoot is derived
+// from the entity directory the way the oracle derives it from pipeline_dir, so
+// callers need not thread it through.
+func scanEntitiesActive(directory string, stderr io.Writer) []*entity {
+	gitRoot := findGitRoot(directory)
+	var out []*entity
+	for _, pair := range discoverEntityFiles(directory, stderr) {
+		slug, path := pair[0], pair[1]
+		fields := loadActiveEntityFields(path, gitRoot, directory)
+		out = append(out, newEntity(fields, slug, path, "active"))
+	}
+	return out
+}
+
 // newEntity backfills default keys and captures the stored id, path, and scope,
 // mirroring the oracle's per-entity dict construction. The slug is written into
 // fields (the oracle's entity['slug'] = slug) so formatters/filters can read it.
@@ -182,10 +231,11 @@ func archiveEntities(entityDir string, stderr io.Writer) []*entity {
 	return ents
 }
 
-// activeAndArchivedEntities returns active + archived entities. Matches
-// active_and_archived_entities (single-root; no worktree overlay in this stage).
+// activeAndArchivedEntities returns active + archived entities, overlaying the
+// worktree copy on active worktree-backed entities. Matches
+// active_and_archived_entities (active via scan_entities_active, archived plain).
 func activeAndArchivedEntities(entityDir string, stderr io.Writer) []*entity {
-	return append(scanEntities(entityDir, stderr), archiveEntities(entityDir, stderr)...)
+	return append(scanEntitiesActive(entityDir, stderr), archiveEntities(entityDir, stderr)...)
 }
 
 // isRegularFile reports whether path is an existing regular file.

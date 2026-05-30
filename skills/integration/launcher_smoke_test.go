@@ -82,23 +82,26 @@ Think.
 Terminal.
 `
 
-// stagePilotWorkflow builds a split-root symlink-profile workflow in a fresh
-// git repo: README in the main repo, .spacedock-state/README.md symlinked to
-// ../README.md, and a folder-form entity in the state checkout. Returns the
-// state-checkout dir the launcher is pointed at, and the entity slug.
+// stagePilotWorkflow builds a symlink-profile split-root workflow in a fresh git
+// repo: README in the main repo carrying state: .spacedock-state, a folder-form
+// entity in the state checkout, and the compatibility symlink
+// .spacedock-state/README.md -> ../README.md. The launcher is pointed at the
+// state checkout (the symlink-compat operator model the production VendorRunner
+// default serves), and the symlinked README backfills the stage definition
+// there. Returns the state-checkout dir (what --workflow-dir points at) and the
+// entity slug.
 func stagePilotWorkflow(t *testing.T) (stateDir, slug string) {
 	t.Helper()
-	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte(pilotReadme), 0o644); err != nil {
+	defDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(defDir, "README.md"), []byte(pilotReadme), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	stateDir = filepath.Join(root, ".spacedock-state")
+	stateDir = filepath.Join(defDir, ".spacedock-state")
 	if err := os.MkdirAll(stateDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	// Symlink-compatibility profile: .spacedock-state/README.md -> ../README.md.
-	if err := os.Symlink(filepath.Join("..", "README.md"), filepath.Join(stateDir, "README.md")); err != nil {
-		t.Fatal(err)
+	if err := os.Symlink("../README.md", filepath.Join(stateDir, "README.md")); err != nil {
+		t.Fatalf("create compatibility symlink: %v", err)
 	}
 	slug = "pilot-entity"
 	entityPath := filepath.Join(stateDir, slug, "index.md")
@@ -119,12 +122,13 @@ A folder-form entity driven through the launcher.
 	if err := os.WriteFile(entityPath, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	gitInitFixture(t, root)
+	gitInitFixture(t, defDir)
 	return stateDir, slug
 }
 
 // runStatus runs `spacedock status --workflow-dir {stateDir} {args...}` and
-// returns combined output and exit code.
+// returns combined output and exit code. stateDir is the state checkout; its
+// symlinked README backfills the stage definition for the vendored runner.
 func runStatus(t *testing.T, stateDir string, args ...string) (string, int) {
 	t.Helper()
 	full := append([]string{"status", "--workflow-dir", stateDir}, args...)

@@ -123,7 +123,10 @@ func dispatch(args []string, dir string, e env, stdin io.Reader, stdout, stderr 
 		return errExit(stderr, "--boot is incompatible with --where")
 	}
 
-	roots := resolveRoots(pipelineDir, dir)
+	roots, err := resolveRoots(pipelineDir, dir)
+	if err != nil {
+		return errExit(stderr, err.Error())
+	}
 
 	// --new atomic create.
 	if newSlug != "" {
@@ -509,7 +512,11 @@ func resolveFromRootOrExit(rootPath, ref string, includeArchived bool, stdout, s
 			}
 			return 1
 		}
-		return resolveReferenceOrExit(resolveRoots(candidates[0], ""), innerRef, includeArchived, stdout, stderr)
+		qualifiedRoots, err := resolveRoots(candidates[0], "")
+		if err != nil {
+			return errExit(stderr, err.Error())
+		}
+		return resolveReferenceOrExit(qualifiedRoots, innerRef, includeArchived, stdout, stderr)
 	}
 
 	type match struct {
@@ -519,14 +526,19 @@ func resolveFromRootOrExit(rootPath, ref string, includeArchived bool, stdout, s
 	var matches []match
 	var hardErrors []string
 	for _, workflow := range workflows {
-		idStyle, err := workflowIDStyle(workflow)
+		wfRoots, err := resolveRoots(workflow, "")
 		if err != nil {
 			hardErrors = append(hardErrors, fmt.Sprintf("Error: %s: %s", workflow, err))
 			continue
 		}
-		res := resolveReferenceCandidates(workflow, workflow, ref, includeArchived, idStyle, stderr)
+		idStyle, err := workflowIDStyle(wfRoots.definitionDir)
+		if err != nil {
+			hardErrors = append(hardErrors, fmt.Sprintf("Error: %s: %s", workflow, err))
+			continue
+		}
+		res := resolveReferenceCandidates(wfRoots.definitionDir, wfRoots.entityDir, ref, includeArchived, idStyle, stderr)
 		if res.status == "ok" {
-			matches = append(matches, match{workflow, res.matches[0]})
+			matches = append(matches, match{wfRoots.entityDir, res.matches[0]})
 		} else if res.status != "unknown" {
 			for _, e := range res.errors {
 				hardErrors = append(hardErrors, fmt.Sprintf("%s: %s", workflow, e))

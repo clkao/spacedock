@@ -13,8 +13,9 @@ import (
 
 const Version = "0.1.0-dev"
 
-// Run is the process entry point. status is routed to the default vendored
-// runner; all other commands are handled directly.
+// Run is the process entry point. status is routed to the vendored Python
+// runner; all other commands are handled directly. The native Go runner stays
+// selectable through the injectable run() core.
 func Run(args []string, stdout io.Writer, stderr io.Writer) int {
 	return run(context.Background(), args, os.Environ(), cwd(), os.Stdin, stdout, stderr, &status.VendorRunner{})
 }
