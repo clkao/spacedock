@@ -209,6 +209,17 @@ Three-lens adversarial staff audit returned material-concerns (8 confirmed again
 
 Revision must run a **SPIKE**: run `spacedock status --boot` and `spacedock status --fields id,status` on a fixture, observe the non-determinism and the duplicate columns directly, and revise AC-1's scope + the table fix from observed output. Also: AC-4 needs a real positive assertion that the FO-internal read lines contain `--json` (the current superstring/presence test cannot detect the switch or a revert); the FO-contract edit targets `claude-first-officer-runtime.md` (the `## Event Loop` reads live there, not in shared-core); pin the `--next` field vocabulary (`status` vs `current`, and whether computed columns are projectable); resolve extra-cell truncation vs the round-trip parity rule.
 
+### Cycle 2 — validation gate REJECT (validator + parallel staff audit, 2026-05-30)
+
+Both the validator and an independent staff audit (detached read-only checkout) reject — NARROW. All four ACs' behavior is correct and reproduced; all gates green (267 pass); default output byte-identical to the oracle. Two MATERIAL defects, both test/schema quality, NOT behavior:
+
+- **AC-4 test under-asserts (both reviewers; reproduced by running).** `TestEventLoopReadsUseJSON` uses `strings.Contains` over the whole `## Event Loop` section, but `status --next --json` appears TWICE (step-3 dispatch + step-4 idle re-run). Reverting ONLY one to bare `status --next` still passes — breaking AC-4's own revert-detection promise. Fix: assert per-read-line or count occurrences (each scheduling read contains `--json`; zero bare reads).
+- **AC-1 `--validate --json` false-path missing + untested (audit only — validator missed it).** On an INVALID workflow, `--validate --json` never emits the design-promised `{"command":"validate","valid":"false"}` — `handlers.go:211-219` returns 1 after stderr errors BEFORE the `if-asJSON` block; no test covers `--validate`+`--json`. Mitigant: `--validate` is a singleton OUTSIDE the FO hot path (the FO uses text `status --validate`), so it is a schema-vs-impl gap on an untested branch, not a default-behavior regression. Fix: emit the false document under `if-asJSON` before the early return + test both `--validate --json` branches.
+
+Polish (fold in cheaply): `seq-archived.json` golden has no real archived row — add one archived entity to the seq-workflow fixture; the round-trip parity walk matches JSON values against the whole table row — column-scoped matching is stronger.
+
+Routed to implementation (fresh dispatch — the prior impl ensign is over context budget). No behavior change required.
+
 ## Stage Report: implementation
 
 - DONE: Implement --json (per-command envelopes per the ## Ideation design: status/next/archived/where/resolve/boot; ALL values JSON strings; fixed key order; compact + newline-terminated; SetEscapeHTML(false); --json opt-in, default output byte-identical to today), --fields (strict projection in JSON; TABLE DE-DUPE bug fix in resolveExtraFields so an explicit field naming a default no longer duplicates the column), and --quiet (single machine line on --set/--archive success; NEVER alters exit code or stderr).
