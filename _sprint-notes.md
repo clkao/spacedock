@@ -52,6 +52,23 @@ real complexity") for the binary post-bootstrap, and re-evaluate the frontmatter
 a library approach once the Python oracle is gone. (Not AGENTS.md itself = scaffolding → a
 tracked change; candidate to fold into a post-bootstrap cleanup, not mid-sprint.)
 
+## Parity-with-Python is a migration scaffold, not a long-term goal (captain, 2026-05-30)
+Byte/value parity with the Python oracle is the SAFE MIGRATION tactic (proves each native
+command is a faithful drop-in so Python can be removed with no behavior change). It is NOT a
+permanent design goal — enshrining Python's non-standard quirks (line-hack frontmatter parser,
+idiosyncratic error strings) in Go forever is wrong where a standard is better. Arc:
+- NOW (bootstrap): match Python byte/value-for-value (de-risks the swap). native-dispatch-helper
+  stays parity-focused mid-flight; its REAL byte-contract is the DISPATCH-SPEC output (the ensign
+  consumes exact bytes), not Python-quirk parsing.
+- POST-PYTHON (oracle retired): revisit parsing for STANDARD COMPLIANCE (real YAML via a library,
+  standard error idioms) with DELIBERATE, DOCUMENTED divergences from the retired Python where the
+  standard wins. Migration check: confirm live entities still parse (simple key:value, likely fine).
+- KEEP regardless: the byte-PRESERVATION contract (unknown fields + order survive --set/--archive)
+  — format durability, not a Python quirk.
+Same family as the dep-policy correction above → one post-bootstrap "parsing modernization"
+follow-up (file as an entity at bootstrap graduation; sprint-note for now since it is off the
+critical path).
+
 ## Debrief notes
 - external-tracker-checkpoint shipped PASSED but AC-6 was a prose self-oracle (the
   doc-only antipattern) — kept as the live example that motivated the principles.
