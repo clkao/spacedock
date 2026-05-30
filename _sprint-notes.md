@@ -87,6 +87,13 @@ post-bootstrap / release-time (none block the current sprint):
   would need to know which origin/branch each artifact targets). pr/mod flow is out of
   scope for THIS bootstrap workflow (README says so), so this is a post-bootstrap concern.
 
+## Roborev descoped from this sprint (captain, 2026-05-30)
+roborev-validation-hook (ng) is OUT of this sprint — it is a larger DEV-WORKFLOW
+improvement (incremental commit-review feeding the validation gate), not the core
+product build, and is sandbox-blocked (its daemon needs HOME relocation; claude-code is
+the only healthy review agent here). Left at backlog, deferred to a future
+dev-workflow-improvement effort; not dispatched.
+
 ## Debrief notes
 - external-tracker-checkpoint shipped PASSED but AC-6 was a prose self-oracle (the
   doc-only antipattern) — kept as the live example that motivated the principles.
