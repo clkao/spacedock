@@ -771,3 +771,61 @@ func TestIndResolveRealpathAsymmetry(t *testing.T) {
 		}
 	}
 }
+
+// toCRLF rewrites every LF in s as CRLF, producing a Windows-line-ending fixture.
+func toCRLF(s string) string {
+	return strings.ReplaceAll(s, "\n", "\r\n")
+}
+
+// TestIndCRLFParity locks the M1 trap: the oracle reads with Python text-mode
+// universal newlines (\r\n and \r both become \n), so a CRLF entity is listed
+// and a CRLF README's stages block is read; native must match. A CRLF entity
+// that native drops is removed from discovery, validation, AND the sequential-id
+// max (colliding-id risk); a CRLF README makes --next exit 1 ("no stages block")
+// where the oracle exits 0. Both an entity and the README are CRLF here, diffed
+// across read flags plus a --set round-trip (the oracle's universal-newline read
+// means the mutated file comes out LF; native must too).
+func TestIndCRLFParity(t *testing.T) {
+	env := indEnv(t)
+	mk := func(t *testing.T) string {
+		root := t.TempDir()
+		indWrite(t, filepath.Join(root, "README.md"), toCRLF("---\nentity-label: task\nid-style: sequential\nstages:\n  states:\n    - name: backlog\n      initial: true\n    - name: done\n      terminal: true\n---\n# WF\n"))
+		indWrite(t, filepath.Join(root, "001-crlf.md"), toCRLF("---\nid: \"001\"\ntitle: CRLF entity\nstatus: backlog\nscore: \"0.5\"\nsource: roadmap\n---\n# CRLF\nbody\n"))
+		return root
+	}
+
+	t.Run("read-flags", func(t *testing.T) {
+		root := mk(t)
+		cases := []struct {
+			name string
+			args []string
+		}{
+			{"default", []string{"--workflow-dir", root}},
+			{"next", []string{"--workflow-dir", root, "--next"}},
+			{"validate", []string{"--workflow-dir", root, "--validate"}},
+			{"next-id", []string{"--workflow-dir", root, "--next-id"}},
+			{"resolve", []string{"--workflow-dir", root, "--resolve", "001"}},
+		}
+		for _, c := range cases {
+			t.Run(c.name, func(t *testing.T) {
+				nOut, nErr, nCode := indRunNative(t, root, env, "", c.args...)
+				oOut, oErr, oCode := indRunOracle(t, root, env, "", c.args...)
+				indDiff(t, c.name, root, nOut, nErr, nCode, oOut, oErr, oCode)
+				// Lock the concrete symptoms the feedback named.
+				if c.name == "default" && !strings.Contains(nOut, "001-crlf") {
+					t.Errorf("native dropped the CRLF entity from the default table:\n%s", nOut)
+				}
+				if c.name == "next" && nCode != 0 {
+					t.Errorf("native --next exit=%d on CRLF README (want 0)\nstderr=%q", nCode, nErr)
+				}
+			})
+		}
+	})
+
+	t.Run("set-roundtrip-normalizes-to-lf", func(t *testing.T) {
+		src := mk(t)
+		// The oracle's universal-newline read normalizes the file to LF on --set;
+		// native must produce byte-identical output, so the mutated file has no CRLF.
+		indMutationCase(t, "crlf-set", src, env, "--workflow-dir", "@WD@", "--set", "001", "score=0.9")
+	})
+}

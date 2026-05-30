@@ -81,10 +81,11 @@ func runNew(roots roots, slug string, folderForm bool, idSeed, idActor string, i
 // stampID inserts or overwrites the top-level id: line in the frontmatter of
 // body, returning the new bytes. The id line is rewritten in place when present
 // (matching update_frontmatter's in-place rewrite) or inserted before the
-// closing --- when absent. The split/join on "\n" preserves the body's
-// EOF-newline state byte-for-byte.
+// closing --- when absent. Newlines are normalized to LF first (universal
+// newlines), matching the read path so a later --set sees the same bytes; the
+// split/join on "\n" then preserves the body's EOF-newline state byte-for-byte.
 func stampID(body []byte, id string) []byte {
-	lines := strings.Split(string(body), "\n")
+	lines := strings.Split(normalizeNewlines(string(body)), "\n")
 	fmStart, fmEnd := -1, -1
 	inFM := false
 	for i, line := range lines {

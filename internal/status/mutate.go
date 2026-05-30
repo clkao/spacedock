@@ -43,9 +43,11 @@ func updateFrontmatter(path string, updates []fieldUpdate) (*orderedMap, error) 
 	if err != nil {
 		return nil, err
 	}
-	// Exact analog of Python content.split('\n'): the trailing empty element of
-	// a newline-terminated file is preserved so '\n'.join restores it.
-	lines := strings.Split(string(data), "\n")
+	// Exact analog of Python content.split('\n') after the universal-newline
+	// read: normalize CRLF/CR to LF first (so the oracle's text-mode read is
+	// matched and a CRLF entity comes out LF), then split. The trailing empty
+	// element of a newline-terminated file is preserved so '\n'.join restores it.
+	lines := strings.Split(normalizeNewlines(string(data)), "\n")
 
 	fmStart, fmEnd := -1, -1
 	inFM := false

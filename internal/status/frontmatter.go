@@ -41,17 +41,30 @@ func contentHasOpeningFence(data []byte) bool {
 	return false
 }
 
+// normalizeNewlines translates CRLF and lone CR into LF, matching the oracle's
+// Python text-mode universal-newlines read (open(path, 'r')). Applied at every
+// content-read boundary so a `---\r` fence compares equal to `---` and a CRLF
+// README's stages block parses. `\r\n` is collapsed first so a CRLF pair never
+// yields two LFs.
+func normalizeNewlines(s string) string {
+	if !strings.ContainsRune(s, '\r') {
+		return s
+	}
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	return strings.ReplaceAll(s, "\r", "\n")
+}
+
 // splitLines splits on '\n' the way Python's `for line in f` iteration does
 // after rstrip('\n'): the trailing newline is removed from each line. A file
 // ending in '\n' yields no extra empty trailing element here (file iteration
 // stops at EOF), unlike strings.Split which would. We replicate file iteration:
 // split on '\n' and drop a single trailing empty element only when the input
-// ended with '\n'.
+// ended with '\n'. Newlines are normalized first (universal newlines).
 func splitLines(s string) []string {
 	if s == "" {
 		return nil
 	}
-	parts := strings.Split(s, "\n")
+	parts := strings.Split(normalizeNewlines(s), "\n")
 	// Python file iteration over a trailing-newline file does not yield a final
 	// empty line; strings.Split does. Drop that final empty element so the parse
 	// loops see the same lines the oracle does.
