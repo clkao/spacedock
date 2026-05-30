@@ -1,7 +1,7 @@
 ---
 id: jepnnnp1jr3zjzes2rz6ng6g
 title: Vendor status compatibility
-status: implementation
+status: validation
 score: "0.90"
 source: bootstrap roadmap
 worktree: /Users/clkao/git/spacedock-research/spacedock-v1/.worktrees/spacedock-ensign-vendor-status-compatibility
