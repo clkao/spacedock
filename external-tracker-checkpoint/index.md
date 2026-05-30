@@ -1,10 +1,10 @@
 ---
 id: p31ep68fer46hhms1pvp3b6f
 title: Check external tracker integration point
-status: ideation
+status: implementation
 score: "0.25"
 source: bootstrap roadmap
-worktree:
+worktree: /Users/clkao/git/spacedock-research/spacedock-v1/.worktrees/spacedock-ensign-external-tracker-checkpoint
 started: 2026-05-30T04:30:16Z
 ---
 
