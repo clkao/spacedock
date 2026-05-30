@@ -252,3 +252,22 @@ Validation ensign recommended PASSED (60-subtest independent parity harness), bu
 - **Flaky test.** The validator's `internal/status/zz_independent_parity_test.go` (`TestIndMutationSeq`, bare-timestamp-fill subtest) intermittently fails in the full suite (native-vs-oracle timestamp second-boundary). Make it deterministic; confirm with `-count=5`.
 
 Routed to a fresh implementation ensign (cycle 2) — the prior impl ensign was over context budget (reuse_ok=false, 142%). Re-validation will fresh-dispatch after the fix.
+
+## Stage Report: implementation (cycle 2)
+
+Targeted fixes for the Cycle-1 rejection. The native engine was otherwise VERIFIED-MATCHES, so no rewrite — only the named parity gaps. All 22 native_*_test.go funcs + the validator's zz_independent_parity_test.go stay green; added CRLF + exotic-score + slug-id + nil-stdin coverage. Production default unchanged (cli.go:19 still VendorRunner).
+
+- DONE: M1 (CRLF, material) — normalize `\r\n`/`\r` -> `\n` on READ to match the oracle's Python text-mode universal newlines.
+  Added `normalizeNewlines` applied in splitLines (covers frontmatter.go contentHasOpeningFence/parseFrontmatterContent + stages.go frontmatterLines/`stages:` detect via scanMods) and the two write-path splits (mutate.go updateFrontmatter, new.go stampID). New TestIndCRLFParity (CRLF entity + CRLF README) diffed native-vs-oracle: native now LISTS the CRLF entity and `--next`/--validate/--next-id/--resolve exit 0; a CRLF --set round-trips to LF byte-for-byte. Commit 0742711.
+- DONE: M2 (float sort, material-narrow) — match Python `float()` for the sort key (reject Go-only hex-floats like `0x1p4`).
+  Added `pythonFloat` in format.go: reject the `0x`/`0X` prefix (the sole reachable divergence on TrimSpace'd ASCII scores), delegate the rest to ParseFloat. New TestIndExoticScoreSort diffs a hex-float + non-numeric score's default/--next order vs the oracle (oracle treats 0x1p4 as non-numeric -> 0). Commit a56ec94.
+- DONE: P1 — guard `--new` against nil Stdin (no panic).
+  `io.ReadAll(nil)` panicked; guard substitutes an empty reader so it fails the fence guard with a clean exit 1, no seed written. TestNewGuards/nil-stdin-no-panic. Commit a56ec94.
+- DONE: slug `--new` id-stamp — for id-style: slug, do NOT stamp a redundant `id: <slug>`; leave id empty.
+  runNew skips stampID for slug style (seed = STDIN verbatim, still newline-normalized). TestIndNewSlugNoIDStamp diffs a --new slug seed's --resolve (id= empty) against a hand-authored slug entity vs the oracle; updated TestIndNewAtomicCreate/slug-flat to expect no id line. Commit a56ec94.
+- DONE: Make the flaky parity test deterministic — TestIndMutationSeq bare-timestamp-fill native-vs-oracle second-boundary.
+  indMutationCase now applies the existing indNormalize (timestamp -> <TS>, test-only) to file contents before diffing, each side against its own temp root; the <TS> placeholder still requires a well-formed stamp so a format regression is still caught. `go test ./internal/status -count=5` = 1035 passed; `go test ./... -race` clean; gofmt -l + go vet clean. Commit 67e5b82.
+
+### Summary
+
+Applied the five Cycle-1 rejection fixes as targeted changes, no rewrite. M1 was the material one: native split file content on `\n` only, leaving `\r` attached so `"---\r" != "---"` silently dropped CRLF entities (out of discovery, validation, and the sequential-id max) and made a CRLF README's `--next` exit 1; a single `normalizeNewlines` at every content-read boundary matches the oracle's universal-newline `open()`. M2 rejects Go-only hex-float scores (the one reachable ParseFloat-vs-float() divergence on TrimSpace'd ASCII). The nil-Stdin panic, the redundant slug-seed id-stamp, and the second-boundary file-diff flake are each fixed with the smallest correct change. All five gates green: `go test ./...`, `-race`, `-count=5` (1035, deterministic), gofmt -l clean, go vet clean. Production default runner is unchanged (VendorRunner); the native default-switch stays deferred to Stage 6.
