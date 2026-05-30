@@ -35,6 +35,23 @@ session (the sprint goal) has no such file. Corrected position:
   in the operating contract + a scan for other global/environment-reliance leaks. ALL
   in the shipped contract. One refit.
 
+## Go-binary dependency policy correction (captain, 2026-05-30)
+Zero-dep was a PYTHON artifact: the `claude-team`/`status` script shipped as source
+inside the skill and ran in the user's interpreter, so it could assume no `pip install`.
+The compiled Go binary links deps at build time (user installs nothing) — that rationale
+does NOT carry over. Correct policy for the binary: PREFER well-tested libraries for
+common functionality (frontmatter/YAML, etc.); do not reimplement common stuff. Hand-roll
+ONLY where a contract demands it:
+- (a) byte/value PARITY with the Python oracle — BOOTSTRAP-ONLY; dies when the oracle is
+  retired (native-dispatch-helper is forced to hand-roll now for exactly this).
+- (b) byte-PRESERVATION of unknown frontmatter fields through `--set`/`--archive` — DURABLE
+  (yaml.v3 Marshal normalizes; the MUTATOR likely stays custom; the READER can move to a
+  library/yaml.Node once parity no longer binds).
+FOLLOW-UP: revise AGENTS.md line 10 ("use the standard library unless a dependency removes
+real complexity") for the binary post-bootstrap, and re-evaluate the frontmatter READER for
+a library approach once the Python oracle is gone. (Not AGENTS.md itself = scaffolding → a
+tracked change; candidate to fold into a post-bootstrap cleanup, not mid-sprint.)
+
 ## Debrief notes
 - external-tracker-checkpoint shipped PASSED but AC-6 was a prose self-oracle (the
   doc-only antipattern) — kept as the live example that motivated the principles.
