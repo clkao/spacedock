@@ -3,6 +3,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -54,7 +55,7 @@ func gateHost(ops hostOps, host string, stderr io.Writer) (ok bool) {
 	}
 	// The manifest resolved, so doctor's no-plugin-found branch cannot fire here;
 	// a non-zero exit means a real mismatch and gateStderr holds the pinned remedy.
-	var out, gateStderr bytesSink
+	var out, gateStderr bytes.Buffer
 	code := contract.RunDoctor(manifestPath, host, devBranch, &out, &gateStderr)
 	if code != 0 {
 		io.WriteString(stderr, gateStderr.String())
@@ -114,10 +115,3 @@ func splitFrontDoorArgs(args []string) (passthrough []string, skipCheck bool) {
 	}
 	return passthrough, skipCheck
 }
-
-// bytesSink is a tiny io.Writer accumulating into a string, used to capture the
-// inner doctor verdict output so gateHost can re-emit only the remedy.
-type bytesSink struct{ b []byte }
-
-func (s *bytesSink) Write(p []byte) (int, error) { s.b = append(s.b, p...); return len(p), nil }
-func (s *bytesSink) String() string              { return string(s.b) }
