@@ -1,7 +1,7 @@
 ---
 id: tq66yjc7sqbhyc52eg8h2ecx
 title: Spacedock packaging and distribution
-status: implementation
+status: validation
 source: handoff self-hosting gap
 score: "0.35"
 worktree: /Users/clkao/git/spacedock-research/spacedock-v1/.worktrees/spacedock-ensign-spacedock-packaging
