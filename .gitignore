@@ -1,0 +1,4 @@
+# Python bytecode cache generated when the vendored claude-team helper imports
+# its sibling status library under SourceFileLoader.
+__pycache__/
+*.pyc

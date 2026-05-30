@@ -1,0 +1,1302 @@
+#!/usr/bin/env python3
+# ABOUTME: Team utility for Claude Code agent coordination.
+# ABOUTME: Subcommands: context-budget, build (structured dispatch assembly).
+
+import argparse
+import glob
+import importlib.machinery
+import importlib.util
+import json
+import os
+import re
+import shlex
+import sys
+from pathlib import Path
+
+# --- Shared functions imported from sibling `status` script ---
+# Borrowed surface: parse_frontmatter, parse_stages_block,
+#     load_active_entity_fields, find_git_root
+# These functions are tested via the sibling-import path in
+# tests/test_claude_team.py::test_status_sibling_import_*
+_here = Path(__file__).resolve().parent
+_status_path = str(_here / "status")
+_loader = importlib.machinery.SourceFileLoader("_status_lib", _status_path)
+_spec = importlib.util.spec_from_file_location("_status_lib", _status_path, loader=_loader)
+_status = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_status)
+
+parse_frontmatter = _status.parse_frontmatter
+parse_stages_block = _status.parse_stages_block
+parse_stages_with_defaults = _status.parse_stages_with_defaults
+parse_mod_metadata = _status.parse_mod_metadata
+load_active_entity_fields = _status.load_active_entity_fields
+find_git_root = _status.find_git_root
+
+
+SCHEMA_VERSION = 2
+BUILD_REQUIRED_FIELDS = ('schema_version', 'entity_path', 'workflow_dir', 'stage', 'checklist')
+NAME_PATTERN = re.compile(r'^[a-z0-9][a-z0-9-]*[a-z0-9]$')
+NAME_MAX_LEN = 200
+MODEL_ENUM = ('sonnet', 'opus', 'haiku')
+MODEL_ENUM_LIST = 'must be one of: sonnet, opus, haiku'
+TEAM_EVIDENCE_WINDOW_SECS = 30 * 60
+DISPATCH_FILE_DIR = '/tmp/spacedock-dispatch'
+
+
+def _recent_team_evidence():
+    """Return True if any ~/.claude/teams/*/config.json was modified within the window.
+
+    Ambient-mtime heuristic: Claude Code does not pass a session id to helpers,
+    so we cannot know whether THIS session called TeamCreate. A recent mtime on
+    any team config is the cheapest plausible proxy.
+    """
+    import time
+    home = os.path.expanduser('~')
+    teams_dir = os.path.join(home, '.claude', 'teams')
+    if not os.path.isdir(teams_dir):
+        return False
+    cutoff = time.time() - TEAM_EVIDENCE_WINDOW_SECS
+    try:
+        for entry in os.listdir(teams_dir):
+            cfg = os.path.join(teams_dir, entry, 'config.json')
+            if not os.path.isfile(cfg):
+                continue
+            try:
+                if os.path.getmtime(cfg) >= cutoff:
+                    return True
+            except OSError:
+                continue
+    except OSError:
+        return False
+    return False
+
+
+_HEADING_DECORATION_CHARS = str.maketrans('', '', '`*_~')
+
+
+def _heading_tokens(line):
+    """Return the content tokens of a `### `-prefixed heading, or ``None``.
+
+    Strips Markdown inline decoration (`` ` ``, `*`, `_`, `~`) and treats
+    `(` and `[` as token terminators so trailing annotations like
+    `*(captain-interactive)*` or `[terminal]` do not merge with the name.
+    """
+    stripped = line.strip()
+    if not stripped.startswith('### '):
+        return None
+    rest = stripped[4:].strip()
+    rest = rest.translate(_HEADING_DECORATION_CHARS)
+    for ch in '([':
+        rest = rest.replace(ch, ' ')
+    return rest.split()
+
+
+def _heading_first_token(line):
+    """Return the first content token of a `### ` heading, or ``None``."""
+    tokens = _heading_tokens(line)
+    if not tokens:
+        return None
+    return tokens[0]
+
+
+# RUNTIME-NEUTRAL
+def extract_stage_subsection(readme_path, stage_name):
+    r"""Extract the full ### {stage_name} subsection from a workflow README.
+
+    Heading match is permissive: any `###` line whose first content token
+    (after stripping `` ` ``, `*`, `_`, `~` and treating `(` / `[` as token
+    terminators) equals ``stage_name`` is treated as a match. This survives
+    common Markdown decorations captains use for inline metadata: backticks,
+    italic (`*` / `_`), bold (`**` / `__`), parentheticals, square-bracket
+    annotations, and trailing em-dash text.
+
+    If no permissive match is found but some `###` line in the README mentions
+    the stage name as a substring, raise ``ValueError`` with line number, the
+    raw heading text, and the parsing requirement — this surfaces the
+    captain's malformed heading instead of silently returning ``None``.
+
+    Returns ``None`` only when no `###` line mentions the stage name at all
+    (genuinely missing stage).
+    """
+    with open(readme_path, 'r') as f:
+        text = f.read()
+    lines = text.splitlines()
+    start = None
+    for i, line in enumerate(lines):
+        if _heading_first_token(line) == stage_name:
+            start = i
+            break
+    if start is None:
+        for i, line in enumerate(lines):
+            tokens = _heading_tokens(line)
+            if tokens and stage_name in tokens:
+                stripped = line.strip()
+                raise ValueError(
+                    f"stage heading at line {i + 1} mentions '{stage_name}' "
+                    f"but does not parse as a stage heading: {stripped!r}. "
+                    f"The stage name must be the first content token of the "
+                    f"heading after stripping Markdown decoration "
+                    f"(backticks, *, _, ~) and treating '(' and '[' as "
+                    f"token terminators."
+                )
+        return None
+    end = len(lines)
+    for i in range(start + 1, len(lines)):
+        stripped = lines[i].strip()
+        if stripped.startswith('### ') or stripped.startswith('## '):
+            end = i
+            break
+    while end > start and not lines[end - 1].strip():
+        end -= 1
+    return '\n'.join(lines[start:end])
+
+
+def _build_error(msg, code=1):
+    """Print error to stderr and return exit code."""
+    print(f'error: {msg}', file=sys.stderr)
+    return code
+
+
+def entity_slug(entity_path):
+    """Return an entity's slug using the status viewer's canonical rule.
+
+    Mirrors status `discover_entities`: a folder-form entity `{slug}/index.md`
+    takes its slug from the folder name; a flat `{slug}.md` takes its slug from
+    the filename stem. This keeps the dispatch helper and the status viewer in
+    agreement on what an entity's slug is, so folder-form entities get
+    human-meaningful, per-entity-unique worker names, branches, and dispatch
+    files instead of all colliding on `index`.
+    """
+    basename = os.path.basename(entity_path)
+    if basename == 'index.md':
+        return os.path.basename(os.path.dirname(entity_path))
+    return os.path.splitext(basename)[0]
+
+
+def workflow_is_split_root(workflow_dir):
+    """Return True when the workflow README declares a `state:` checkout.
+
+    A split-root workflow keeps its README in the main repo and its runtime
+    entities in a separate `state:` checkout. The entity body and stage reports
+    are written and committed to that shared state checkout, never to a worktree
+    copy of the main repo (which does not even contain the state files). Returns
+    False when the README is unreadable or carries no `state:` field.
+    """
+    readme_path = os.path.join(workflow_dir, 'README.md')
+    try:
+        fm = parse_frontmatter(readme_path)
+    except (OSError, ValueError):
+        return False
+    return bool(str(fm.get('state', '')).strip())
+
+
+def cmd_build(args):
+    """Assemble a structured dispatch JSON from entity, workflow, and FO-supplied fragments."""
+    workflow_dir = args.workflow_dir
+
+    # Read stdin
+    try:
+        raw = sys.stdin.read()
+    except Exception as e:
+        return _build_error(f'failed to read stdin: {e}')
+
+    try:
+        inp = json.loads(raw)
+    except json.JSONDecodeError as e:
+        return _build_error(f'invalid JSON on stdin: {e}')
+
+    if not isinstance(inp, dict):
+        return _build_error('stdin must be a JSON object')
+
+    # Rule 1: Required fields present
+    for field in BUILD_REQUIRED_FIELDS:
+        if field not in inp or inp[field] is None:
+            return _build_error(f"missing required field '{field}'")
+
+    # Rule 2: Schema version supported (CLEAN-BREAK: v1 rejected)
+    sv = inp['schema_version']
+    if sv != SCHEMA_VERSION:
+        return _build_error(
+            f'unsupported input schema_version {sv}, schema_version: {SCHEMA_VERSION} required',
+            code=2,
+        )
+
+    entity_path = inp['entity_path']
+    stage = inp['stage']
+    checklist = inp['checklist']
+    team_name = inp.get('team_name')
+    feedback_context = inp.get('feedback_context')
+    scope_notes = inp.get('scope_notes')
+    bare_mode = inp.get('bare_mode', False)
+    is_feedback_reflow = inp.get('is_feedback_reflow', False)
+
+    # FO bootstrap discipline: when dispatching bare_mode AND no recent
+    # TeamCreate evidence exists on disk, warn (stderr). This converts a silent
+    # TeamCreate-skip into a visible signal. Stays advisory (exit 0) — see #201.
+    if bare_mode and not _recent_team_evidence():
+        print(
+            'WARN: bare_mode dispatch with no recent TeamCreate evidence '
+            '(no ~/.claude/teams/*/config.json modified in the last 30 minutes). '
+            'If you intend teams mode, run ToolSearch select:TeamCreate and TeamCreate first. '
+            'If bare is intentional, this warning can be ignored.',
+            file=sys.stderr,
+        )
+
+    # Rule 12: entity_path must be project-root, not worktree-absolute.
+    # The helper derives the worktree read target internally; passing a worktree
+    # path doubles the .worktrees/ prefix in the emitted prompt.
+    if '/.worktrees/' in entity_path or entity_path.startswith('.worktrees/'):
+        return _build_error(
+            f"entity_path must be a project-root absolute path; got worktree path '{entity_path}'. "
+            f"Pass the project-root location (e.g. '/repo/docs/plans/{{slug}}.md'), not the worktree copy. "
+            f"The helper derives the worktree read target internally."
+        )
+
+    # Rule 9: Checklist non-empty
+    if not isinstance(checklist, list) or len(checklist) == 0:
+        return _build_error('checklist must not be empty')
+
+    # Rule 10: Entity file readable
+    if not os.path.isfile(entity_path):
+        return _build_error(f"entity file not readable at '{entity_path}'")
+
+    # Rule 11: Workflow README readable
+    readme_path = os.path.join(workflow_dir, 'README.md')
+    if not os.path.isfile(readme_path):
+        return _build_error(f"workflow README not found at '{readme_path}'")
+
+    # Parse workflow stages + defaults
+    stages, stage_defaults = parse_stages_with_defaults(readme_path)
+    if stages is None:
+        return _build_error(f"no stages block found in {readme_path}")
+
+    stage_by_name = {s['name']: s for s in stages}
+
+    # Rule 3: Stage exists in workflow
+    if stage not in stage_by_name:
+        return _build_error(f"stage '{stage}' not found in {readme_path}")
+
+    stage_meta = stage_by_name[stage]
+
+    # Resolve effective_model with precedence: stage > defaults > null.
+    # Validate any declared value against the Agent-schema enum loudly.
+    stage_model_raw = stage_meta.get('model')
+    defaults_model_raw = stage_defaults.get('model') if stage_defaults else None
+
+    stage_idx = next(
+        (i for i, s in enumerate(stages) if s['name'] == stage), 0
+    )
+    if stage_model_raw is not None and stage_model_raw not in MODEL_ENUM:
+        return _build_error(
+            f"invalid model for stages.states[{stage_idx}].model: "
+            f"'{stage_model_raw}' — {MODEL_ENUM_LIST}"
+        )
+    if defaults_model_raw is not None and defaults_model_raw not in MODEL_ENUM:
+        return _build_error(
+            f"invalid model for stages.defaults.model: "
+            f"'{defaults_model_raw}' — {MODEL_ENUM_LIST}"
+        )
+
+    if stage_model_raw is not None:
+        effective_model = stage_model_raw
+        model_source = 'stage'
+    elif defaults_model_raw is not None:
+        effective_model = defaults_model_raw
+        model_source = 'defaults'
+    else:
+        effective_model = None
+        model_source = 'null'
+
+    if effective_model is not None:
+        print(
+            f'[build] effective_model={effective_model} (from {model_source}) '
+            f'\u2192 Agent model={effective_model}',
+            file=sys.stderr,
+        )
+
+    # Rule 4: Stickiness — route on the entity's stamped `worktree:` field, not
+    # the next stage's declared mode. Once an entity has a worktree, every
+    # non-terminal advancement dispatches into that same worktree regardless of
+    # the stage's declared `worktree: true|false`. The stage `worktree:` field
+    # gates worktree *creation* (FO-side, before the build call), not per-stage
+    # routing. See first-officer-shared-core.md Reuse conditions #3.
+    entity_fields = parse_frontmatter(entity_path)
+    entity_title = entity_fields.get('title', '')
+    entity_worktree = entity_fields.get('worktree', '').strip()
+
+    if entity_worktree:
+        git_root = find_git_root(workflow_dir)
+        worktree_path = os.path.join(git_root, entity_worktree)
+        if not os.path.isdir(worktree_path):
+            return _build_error(f"worktree path '{worktree_path}' does not exist")
+    elif stage_meta.get('worktree', False):
+        return _build_error(f"worktree stage '{stage}' but entity has no worktree path")
+    else:
+        worktree_path = None
+
+    # Split-root: the workflow README declares a `state:` checkout, so runtime
+    # entities live in a separate state repo that a main-repo worktree does not
+    # contain. Under split root, a worktree stage isolates CODE only — the entity
+    # body and stage reports are read, written, and committed at the state-checkout
+    # entity path (the path the FO passed, unchanged), never a worktree copy.
+    split_root = workflow_is_split_root(workflow_dir)
+
+    # Rule 5: Feedback context required for feedback reflow
+    if is_feedback_reflow and not feedback_context:
+        return _build_error(f"dispatching to feedback target stage '{stage}' but feedback_context is missing")
+
+    # Rule 8: Team name non-empty in team mode
+    if not bare_mode and not team_name:
+        return _build_error('team mode requires team_name')
+
+    # Rule 6: Derive subagent_type from stage agent field
+    subagent_type = stage_meta.get('agent', 'spacedock:ensign')
+
+    # Derive worker_key and name. The slug follows the status viewer's canonical
+    # entity-discovery rule (status `discover_entities`): for a folder-form entity
+    # `{slug}/index.md`, the slug is the folder name; for a flat `{slug}.md`, it is
+    # the filename stem. A bare splitext would yield `index` for every folder-form
+    # entity, colliding worker names, branches, and dispatch files across entities.
+    worker_key = subagent_type.replace(':', '-')
+    slug = entity_slug(entity_path)
+    derived_name = f'{worker_key}-{slug}-{stage}'
+
+    # Rule 7: Name length and safety
+    if len(derived_name) > NAME_MAX_LEN:
+        return _build_error(f"derived name '{derived_name}' exceeds {NAME_MAX_LEN} characters")
+    if not NAME_PATTERN.match(derived_name):
+        return _build_error(
+            f"derived name '{derived_name}' contains invalid characters: "
+            f"stage name '{stage}' must match {NAME_PATTERN.pattern} (kebab-case "
+            f"lowercase letters, digits, and hyphens only). "
+            f"Run `status --validate` against the workflow to surface the same "
+            f"stage-name error upstream of dispatch."
+        )
+
+    # Extract stage subsection from README
+    try:
+        stage_subsection = extract_stage_subsection(readme_path, stage)
+    except ValueError as e:
+        return _build_error(str(e))
+    if stage_subsection is None:
+        return _build_error(f"stage '{stage}' heading not found in {readme_path}")
+
+    # --- Prompt Assembly (9 components) ---
+    prompt_parts = []
+
+    # 0. Operating-contract first-action directive
+    prompt_parts.append(
+        '## First action\n'
+        '\n'
+        'Before anything else, invoke your operating contract:\n'
+        '\n'
+        '    Skill(skill="spacedock:ensign")\n'
+        '\n'
+        'This loads the shared ensign discipline (stage-report format, BashOutput '
+        'polling, worktree ownership, completion signal protocol). The call is safe '
+        'to call more than once; if the agent-definition preload ever starts '
+        'working, calling it again is a no-op (the skill content is re-loaded but '
+        'has no behavioral effect). Do not paraphrase; call the tool.\n'
+    )
+
+    # 1. Header
+    prompt_parts.append(f'You are working on: {entity_title}\n\nStage: {stage}\n')
+
+    # 2. Stage definition — replaced by literal fetch command. The ensign reads
+    # this section's content on first action via `claude-team show-stage-def`.
+    fetch_commands = []
+    fetch_commands.append(
+        f'claude-team show-stage-def --workflow-dir {shlex.quote(workflow_dir)} '
+        f'--stage {shlex.quote(stage)}'
+    )
+
+    # 3. Worktree instructions (conditional)
+    if worktree_path:
+        branch = f'{worker_key}/{slug}'
+        if split_root:
+            prompt_parts.append(
+                f'Your working directory for CODE is {worktree_path}\n'
+                f'All CODE reads and writes MUST use paths under {worktree_path}.\n'
+                f'Your git branch for CODE is {branch}. All CODE commits MUST be on '
+                f'this branch in the worktree. Do NOT switch branches or commit '
+                f'code to main.\n'
+                f'This workflow is split-root: the entity body and your stage report '
+                f'are NOT in the worktree. Write and commit them to the shared state '
+                f'checkout at the entity path below. Commit state path-scoped — '
+                f'`git -C {{state_checkout}} add {{entity_path}} && '
+                f'git -C {{state_checkout}} commit -m "..." -- {{entity_path}}` — '
+                f'never a bare `git add -A` or bare `git commit` in the state '
+                f'checkout (a bare commit cross-attributes a concurrent writer\'s '
+                f'staged entity). Retry on index.lock contention after a short wait.\n'
+            )
+        else:
+            prompt_parts.append(
+                f'Your working directory is {worktree_path}\n'
+                f'All file reads and writes MUST use paths under {worktree_path}.\n'
+                f'Your git branch is {branch}. All commits MUST be on this branch. '
+                f'Do NOT switch branches or commit to main.\n'
+            )
+
+    # 4. Entity read instruction. Under split root the entity lives in the state
+    # checkout, not the worktree, so point at the FO-passed entity_path unchanged.
+    if worktree_path and not split_root:
+        entity_rel = os.path.relpath(entity_path, git_root)
+        worktree_entity_path = os.path.join(worktree_path, entity_rel)
+        prompt_parts.append(
+            f'Read the entity file at {worktree_entity_path} for the full spec. '
+            f'It contains:\n'
+        )
+    else:
+        prompt_parts.append(
+            f'Read the entity file at {entity_path} for the current spec.\n'
+        )
+
+    # 6. Feedback context (conditional)
+    if feedback_context:
+        prompt_parts.append(f'### Feedback from prior review\n\n{feedback_context}\n')
+
+    # 7. Scope notes (conditional)
+    if scope_notes:
+        prompt_parts.append(f'{scope_notes}\n')
+
+    # 8. Completion checklist + Summary slot. The Stage Report appending-
+    # instructions block previously emitted here is now sourced from the
+    # `## Stage Report Protocol` section of ensign-shared-core.md, which the
+    # Skill(skill="spacedock:ensign") load brings into the ensign's context.
+    checklist_text = '\n'.join(checklist)
+    prompt_parts.append(
+        '### Completion checklist\n\n'
+        f'{checklist_text}\n\n'
+        '### Summary\n'
+        '{brief description of what was accomplished}\n'
+    )
+
+    # 9. Standing teammates fetch line — emitted only when at least one
+    # declared standing teammate exists for this workflow. Bare-mode and
+    # zero-standing dispatches omit the line entirely; no `show-standing`
+    # call ever runs in a context where it would have nothing to render.
+    standing_teammates = enumerate_declared_standing_teammates(workflow_dir, team_name)
+    if standing_teammates:
+        fetch_commands.append(
+            f'claude-team show-standing --workflow-dir {shlex.quote(workflow_dir)}'
+        )
+
+    # Emit the `### Fetch commands` block. The block references content the
+    # ensign loads on first action via Bash; the shared-core `## Fetch-on-Demand
+    # Bootstrap` section (loaded via Skill(skill="spacedock:ensign")) tells the
+    # ensign how to consume this heading.
+    fetch_lines = ['### Fetch commands', '']
+    for cmd in fetch_commands:
+        fetch_lines.append(f'    {cmd}')
+    prompt_parts.append('\n'.join(fetch_lines))
+
+    # 10. Completion signal (conditional, team mode only). The plain-text /
+    # no-JSON / idle-notification prose previously appended here is now
+    # sourced from claude-ensign-runtime.md `## Completion Signal`, which the
+    # Skill(skill="spacedock:ensign") load brings into the ensign's context.
+    # The FO-forwarding warning is retained because its audience is the FO at
+    # Agent-forwarding time, not the ensign.
+    if not bare_mode and team_name:
+        # Under split root the completion signal points at the state-checkout
+        # entity path, not a worktree copy (which does not exist there).
+        entity_file_ref = worktree_entity_path if (worktree_path and not split_root) else entity_path
+        prompt_parts.append(
+            '\n\n### Completion Signal\n\n'
+            'When you finish (after all commits and stage report writes are done), '
+            'your last action MUST be:\n\n'
+            f'    SendMessage(to="team-lead", message="Done: {entity_title} completed '
+            f'{stage}. Report written to {entity_file_ref}.")\n\n'
+            '**If you are the first officer forwarding this prompt to Agent():** copy '
+            'the entire block above into `Agent(prompt=...)` character-for-character. '
+            'Do NOT paraphrase `SendMessage(to="team-lead", ...)` as "SendMessage with '
+            'to=\'team-lead\'" or any other English rewrite — the parenthesis-equals '
+            'syntax is the literal call the ensign must emit, not a description of one.'
+        )
+
+    dispatch_body = '\n'.join(prompt_parts)
+
+    # v2 file-pointer: write the full dispatch body to a stable path and emit
+    # a tiny prompt that the ensign Reads on first action. The path is
+    # deterministic per (entity, stage); same-name re-dispatches overwrite
+    # idempotently. See docs/plans/dispatch-prompt-as-file-pointer.md.
+    dispatch_file_path = os.path.join(DISPATCH_FILE_DIR, f'{derived_name}.md')
+    try:
+        os.makedirs(DISPATCH_FILE_DIR, exist_ok=True)
+        with open(dispatch_file_path, 'w', encoding='utf-8') as fh:
+            fh.write(dispatch_body)
+    except OSError as e:
+        print(
+            f'dispatch_file_write_failed: {dispatch_file_path}: {e}',
+            file=sys.stderr,
+        )
+        return 1
+
+    prompt = (
+        f'Skill(skill="spacedock:ensign"); then Read {dispatch_file_path} '
+        f'and treat its content as your assignment.'
+    )
+
+    # Build output
+    output = {
+        'schema_version': SCHEMA_VERSION,
+        'subagent_type': subagent_type,
+        'description': f'{entity_title}: {stage}',
+        'fetch_commands': list(fetch_commands),
+        'dispatch_file_path': dispatch_file_path,
+        'prompt': prompt,
+        'model': effective_model,
+    }
+
+    if not bare_mode:
+        output['name'] = derived_name
+        if team_name:
+            output['team_name'] = team_name
+
+    print(json.dumps(output, indent=2))
+    return 0
+
+
+DEFAULT_CONTEXT_LIMIT = 200000
+EXTENDED_CONTEXT_LIMIT = 1000000
+THRESHOLD_PCT = 60
+
+NATIVE_1M_MODELS = frozenset({
+    "claude-opus-4-7",
+})
+
+
+def find_subagent_jsonl(name: str) -> str | None:
+    """Find the most recently modified subagent jsonl matching the given name.
+
+    Looks up the team config containing a member named `name`, reads its
+    `leadSessionId`, and globs only that session's subagents directory:
+    ~/.claude/projects/*/{leadSessionId}/subagents/agent-*.meta.json. On a
+    populated machine this narrows the haystack from thousands of files
+    (every project's subagents) to dozens (one session's subagents).
+
+    Falls back to the broad scan if no team config is found, no
+    leadSessionId is set, or the narrowed scan returns nothing — the broad
+    scan stays correct, just slow. A warning is emitted to stderr in the
+    fallback case.
+
+    Scans agent-*.meta.json for agentType matching name.
+    Returns the sibling .jsonl path, or None.
+    """
+    home = os.path.expanduser("~")
+    broad_patterns = [
+        os.path.join(home, ".claude", "projects", "*", "subagents", "agent-*.meta.json"),
+        os.path.join(home, ".claude", "projects", "*", "*", "subagents", "agent-*.meta.json"),
+    ]
+
+    narrowed = _narrowed_subagent_patterns(home, name)
+    if narrowed is not None:
+        matches = _scan_subagent_meta(narrowed, name)
+        if not matches:
+            print(
+                f"warning: narrowed subagent scan for {name!r} found nothing; "
+                f"falling back to broad ~/.claude/projects scan",
+                file=sys.stderr,
+            )
+            matches = _scan_subagent_meta(broad_patterns, name)
+    else:
+        matches = _scan_subagent_meta(broad_patterns, name)
+
+    if not matches:
+        return None
+
+    matches.sort(key=lambda x: x[0], reverse=True)
+    return matches[0][1]
+
+
+def _narrowed_subagent_patterns(home: str, name: str) -> list[str] | None:
+    """Return narrowed glob patterns for a subagent jsonl scoped to one team session.
+
+    Returns None when no team config containing `name` declares a leadSessionId.
+    """
+    teams_pattern = os.path.join(home, ".claude", "teams", "*", "config.json")
+    for config_path in glob.glob(teams_pattern):
+        try:
+            with open(config_path, "r") as f:
+                config = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            continue
+        member_names = {m.get("name") for m in config.get("members", []) if isinstance(m, dict)}
+        if name not in member_names:
+            continue
+        lead_session_id = config.get("leadSessionId")
+        if not lead_session_id:
+            continue
+        return [
+            os.path.join(
+                home, ".claude", "projects", "*", lead_session_id, "subagents",
+                "agent-*.meta.json",
+            ),
+        ]
+    return None
+
+
+def _scan_subagent_meta(patterns: list[str], name: str) -> list[tuple[float, str]]:
+    matches: list[tuple[float, str]] = []
+    for pattern in patterns:
+        for meta_path in glob.glob(pattern):
+            try:
+                with open(meta_path, "r") as f:
+                    meta = json.load(f)
+                if meta.get("agentType") == name:
+                    mtime = os.path.getmtime(meta_path)
+                    jsonl_path = meta_path.replace(".meta.json", ".jsonl")
+                    if os.path.isfile(jsonl_path):
+                        matches.append((mtime, jsonl_path))
+            except (json.JSONDecodeError, OSError):
+                continue
+    return matches
+
+
+def extract_resident_tokens(jsonl_path: str) -> int | None:
+    """Extract resident tokens by scanning backward for the first non-zero usage.
+
+    An ensign that dies mid-turn (context overflow) leaves a trailing assistant
+    entry with all-zero usage fields. Scanning backward from end-of-file for the
+    first assistant entry with a non-zero usage sum yields the true peak resident
+    tokens for both live ensigns (last turn) and dead ensigns (last real turn).
+
+    Returns input_tokens + cache_creation_input_tokens + cache_read_input_tokens,
+    or None if no assistant entry with non-zero usage is found.
+    """
+    with open(jsonl_path, "r") as f:
+        lines = f.readlines()
+
+    for line in reversed(lines):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if entry.get("type") != "assistant":
+            continue
+        msg = entry.get("message", {})
+        if not isinstance(msg, dict):
+            continue
+        usage = msg.get("usage")
+        if not isinstance(usage, dict):
+            continue
+        resident = (
+            usage.get("input_tokens", 0)
+            + usage.get("cache_creation_input_tokens", 0)
+            + usage.get("cache_read_input_tokens", 0)
+        )
+        if resident > 0:
+            return resident
+
+    return None
+
+
+def extract_runtime_models(jsonl_path: str) -> set[str]:
+    """Extract distinct model strings from assistant entries in the jsonl."""
+    models = set()
+    with open(jsonl_path, "r") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if entry.get("type") != "assistant":
+                continue
+            msg = entry.get("message", {})
+            if not isinstance(msg, dict):
+                continue
+            model = msg.get("model")
+            if model:
+                models.add(model)
+    return models
+
+
+def render_standing_teammates_section(standing_teammates):
+    """Assemble the `### Standing teammates available in your team` markdown.
+
+    Takes the output of `enumerate_declared_standing_teammates` and renders
+    the exact markdown block `cmd_build` previously inlined and `cmd_show_standing`
+    now exposes as a subcommand. Returns an empty string when the input list is
+    empty (degenerate case — no declared standing teammates).
+    """
+    if not standing_teammates:
+        return ""
+    lines = [
+        '### Standing teammates available in your team',
+        '',
+        'These standing teammates are available in your team; you MAY route to them via '
+        'SendMessage. Best-effort, non-blocking, 2-minute timeout; proceed with '
+        'un-polished/un-reviewed content if no reply.',
+        '',
+    ]
+    for name, description, mod_path in standing_teammates:
+        desc = description or 'standing teammate'
+        usage_body = _parse_routing_usage_body(mod_path) if mod_path else None
+        if usage_body:
+            lines.append(f'- **{name}** ({desc})')
+            for body_line in usage_body.split('\n'):
+                if body_line:
+                    lines.append(f'  {body_line}')
+                else:
+                    lines.append('')
+        else:
+            lines.append(
+                f'- **{name}** ({desc}): SendMessage with the relevant input '
+                f'shape; reply format per the mod.'
+            )
+    lines.append('')
+    lines.append(
+        'Full routing contract: see '
+        '`skills/first-officer/references/first-officer-shared-core.md` '
+        '`## Standing Teammates`.'
+    )
+    return '\n'.join(lines)
+
+
+# RUNTIME-NEUTRAL
+def enumerate_declared_standing_teammates(workflow_dir: str, team_name) -> list[tuple[str, str, str]]:
+    """Return [(name, description, mod_path)] for declared standing teammates.
+
+    Scans `{workflow_dir}/_mods/*.md` for mod files with `standing: true`
+    in frontmatter (parsed via parse_mod_metadata). Returns all declared
+    standing teammates from mod metadata, regardless of whether they are
+    currently alive in the team. This supports lazy-spawn: teammates may
+    not yet be spawned at dispatch time.
+
+    Degenerate cases return an empty list:
+    - `team_name` is None or empty (bare mode)
+    - no `_mods/` directory exists under `workflow_dir`
+    - no `standing: true` mods found
+
+    The name comes from the mod's `## Hook: startup` section
+    (authoritative — this is the same name `claude-team spawn-standing`
+    hands to Agent() at spawn time). The description comes from the mod
+    frontmatter's `description` field. The mod_path lets callers re-read
+    the same mod for per-teammate payload extras (e.g., `## Routing
+    Usage`) without re-globbing.
+    """
+    if not team_name:
+        return []
+
+    mods_dir = os.path.join(workflow_dir, "_mods")
+    if not os.path.isdir(mods_dir):
+        return []
+
+    declared = []
+    for mod_path in sorted(glob.glob(os.path.join(mods_dir, "*.md"))):
+        try:
+            meta = parse_mod_metadata(mod_path)
+        except (ValueError, OSError):
+            continue
+        if not meta["standing"]:
+            continue
+        hook_config = _parse_hook_startup_spawn_config(mod_path)
+        declared_name = hook_config.get("name") or meta["name"]
+        if not declared_name:
+            continue
+        description = meta["frontmatter"].get("description", "")
+        declared.append((declared_name, description, mod_path))
+    return declared
+
+
+def member_exists(team: str, name: str) -> bool:
+    """Return True iff member {name} is in team {team}'s config.json members list.
+
+    Sibling of lookup_model, not an extension. lookup_model globs ALL team
+    configs to answer "what model does agent X run as anywhere" — appropriate
+    for reuse-model comparison. The standing-spawn check is team-scoped: two
+    parallel teams in the same captain session may each spawn their own
+    comm-officer, so this helper opens exactly one config file.
+    """
+    home = os.path.expanduser("~")
+    config_path = os.path.join(home, ".claude", "teams", team, "config.json")
+    if not os.path.isfile(config_path):
+        return False
+    try:
+        with open(config_path, "r") as f:
+            config = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return False
+    for member in config.get("members", []):
+        if member.get("name") == name:
+            return True
+    return False
+
+
+# RUNTIME-NEUTRAL
+def _parse_routing_usage_body(mod_path: str) -> str | None:
+    """Extract the body of a mod's `## Routing Usage` section, or None.
+
+    Returns the text between the `## Routing Usage` heading and the next
+    `## ` heading (or EOF), with surrounding blank lines stripped. Returns
+    None when the section is missing, empty, or contains only whitespace —
+    callers render the fallback one-liner in those cases.
+    """
+    try:
+        with open(mod_path, "r") as f:
+            content = f.read()
+    except OSError:
+        return None
+    lines = content.split("\n")
+
+    start = None
+    for i, line in enumerate(lines):
+        if line.strip() == "## Routing Usage":
+            start = i
+            break
+    if start is None:
+        return None
+
+    end = len(lines)
+    for i in range(start + 1, len(lines)):
+        if lines[i].startswith("## "):
+            end = i
+            break
+
+    body_lines = lines[start + 1:end]
+    while body_lines and not body_lines[0].strip():
+        body_lines.pop(0)
+    while body_lines and not body_lines[-1].strip():
+        body_lines.pop()
+    if not body_lines:
+        return None
+    return "\n".join(body_lines)
+
+
+def _parse_hook_startup_spawn_config(mod_path: str) -> dict:
+    """Extract subagent_type / name / model from a mod's `## Hook: startup` section.
+
+    The `## Hook: startup` section in a standing-teammate mod declares
+    spawn config as markdown bullets of the form `- key: value`. The pilot
+    mod (docs/plans/_mods/comm-officer.md) uses backtick-wrapped inline
+    code for each field (e.g. `` - `subagent_type: general-purpose` ``) so
+    we strip backticks from values when detected.
+
+    Returns a dict with keys `subagent_type`, `name`, `model`. Missing keys
+    are absent from the dict (the caller validates required fields).
+    """
+    with open(mod_path, "r") as f:
+        content = f.read()
+    lines = content.split("\n")
+
+    hook_start = None
+    for i, line in enumerate(lines):
+        if line.strip() == "## Hook: startup":
+            hook_start = i
+            break
+    if hook_start is None:
+        return {}
+
+    hook_end = len(lines)
+    for i in range(hook_start + 1, len(lines)):
+        if lines[i].startswith("## "):
+            hook_end = i
+            break
+
+    config = {}
+    for line in lines[hook_start + 1:hook_end]:
+        stripped = line.strip()
+        if not stripped.startswith("- "):
+            continue
+        item = stripped[2:].strip()
+        # Strip surrounding backticks if the whole bullet is wrapped as inline code
+        if item.startswith("`") and item.endswith("`") and len(item) >= 2:
+            item = item[1:-1]
+        if ":" not in item:
+            continue
+        key, _, value = item.partition(":")
+        key = key.strip()
+        value = value.strip()
+        # Strip trailing inline comments introduced by a backtick pair
+        if value.startswith("`") and value.endswith("`") and len(value) >= 2:
+            value = value[1:-1]
+        if key in ("subagent_type", "name", "model"):
+            config[key] = value
+
+    return config
+
+
+def cmd_spawn_standing(args: argparse.Namespace) -> int:
+    """Emit an Agent() spec JSON for a standing-teammate mod, or report already-alive.
+
+    Reads a mod file at --mod, validates `standing: true` in frontmatter,
+    extracts spawn config from `## Hook: startup`, and checks the target
+    team's config.json for an existing member with the declared name.
+
+    - If the member already exists in the team config, emit
+      `{"status": "already-alive", "name": "..."}` on stdout (exit 0).
+    - Otherwise emit an Agent() call spec JSON shaped like `claude-team build`
+      output: subagent_type, name, team_name, model, prompt.
+
+    Fails loudly (non-zero exit, stderr) on: missing mod file, missing
+    `standing: true`, missing `## Agent Prompt` section, model value outside
+    the sonnet/opus/haiku enum, or a convention-violating trailing heading
+    after `## Agent Prompt` (caught by parse_mod_metadata).
+    """
+    mod_path = args.mod
+    team_name = args.team
+
+    if team_name in (None, '', 'none', 'None'):
+        print(
+            f"error: spawn-standing requires a real team name; got {team_name!r}. "
+            f"Call TeamCreate first and pass the returned team_name via --team.",
+            file=sys.stderr,
+        )
+        return 1
+
+    if not os.path.isfile(mod_path):
+        print(f"error: mod file not found: {mod_path}", file=sys.stderr)
+        return 1
+
+    try:
+        meta = parse_mod_metadata(mod_path)
+    except ValueError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+
+    if not meta["standing"]:
+        print(
+            f"error: mod {mod_path} is missing 'standing: true' in frontmatter — "
+            f"not a standing-teammate mod",
+            file=sys.stderr,
+        )
+        return 1
+
+    if meta["agent_prompt"] is None:
+        print(
+            f"error: mod {mod_path} has no '## Agent Prompt' section — "
+            f"required for standing-teammate spawn",
+            file=sys.stderr,
+        )
+        return 1
+
+    hook_config = _parse_hook_startup_spawn_config(mod_path)
+
+    subagent_type = hook_config.get("subagent_type") or meta["frontmatter"].get("subagent_type", "")
+    declared_name = hook_config.get("name") or meta["name"]
+    model = hook_config.get("model", "")
+
+    if not subagent_type:
+        print(
+            f"error: mod {mod_path} has no 'subagent_type' in '## Hook: startup' "
+            f"or frontmatter",
+            file=sys.stderr,
+        )
+        return 1
+    if not declared_name:
+        print(
+            f"error: mod {mod_path} has no 'name' in '## Hook: startup' or frontmatter",
+            file=sys.stderr,
+        )
+        return 1
+    if not model:
+        print(
+            f"error: mod {mod_path} has no 'model' in '## Hook: startup' — "
+            f"{MODEL_ENUM_LIST}",
+            file=sys.stderr,
+        )
+        return 1
+    if model not in MODEL_ENUM:
+        print(
+            f"error: invalid model '{model}' in '## Hook: startup' of {mod_path} — "
+            f"{MODEL_ENUM_LIST}",
+            file=sys.stderr,
+        )
+        return 1
+
+    if member_exists(team_name, declared_name):
+        print(json.dumps({"status": "already-alive", "name": declared_name}))
+        return 0
+
+    spec = {
+        "subagent_type": subagent_type,
+        "name": declared_name,
+        "team_name": team_name,
+        "model": model,
+        "prompt": meta["agent_prompt"],
+    }
+    print(json.dumps(spec, indent=2))
+    return 0
+
+
+# RUNTIME-NEUTRAL
+def cmd_show_stage_def(args: argparse.Namespace) -> int:
+    """Emit the README's ### {stage} subsection on stdout.
+
+    Thin CLI wrapper over `extract_stage_subsection`. Exit 0 with stdout on
+    success; exit non-zero with the same parser-diagnostic message
+    `extract_stage_subsection` raises today when the heading is malformed.
+    """
+    workflow_dir = args.workflow_dir
+    stage = args.stage
+
+    if not os.path.isdir(workflow_dir):
+        print(f"error: workflow directory not found: {workflow_dir}", file=sys.stderr)
+        return 1
+    readme_path = os.path.join(workflow_dir, 'README.md')
+    if not os.path.isfile(readme_path):
+        print(f"error: workflow README not found at '{readme_path}'", file=sys.stderr)
+        return 1
+
+    try:
+        subsection = extract_stage_subsection(readme_path, stage)
+    except ValueError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+    if subsection is None:
+        print(f"error: stage '{stage}' heading not found in {readme_path}", file=sys.stderr)
+        return 1
+    print(subsection)
+    return 0
+
+
+def cmd_show_standing(args: argparse.Namespace) -> int:
+    """Emit the rendered `### Standing teammates available in your team` markdown.
+
+    Composes runtime-neutral helpers (`enumerate_declared_standing_teammates`,
+    `render_standing_teammates_section`); the rendered output body itself uses
+    Claude-specific SendMessage routing language. Exit 0 on success including
+    the degenerate case where no standing teammates are declared (empty stdout).
+    """
+    workflow_dir = args.workflow_dir
+    if not os.path.isdir(workflow_dir):
+        print(f"error: workflow directory not found: {workflow_dir}", file=sys.stderr)
+        return 1
+    # Pass a truthy sentinel for team_name; the filesystem scan is team-agnostic,
+    # and the bare-mode short-circuit gate lives in cmd_build upstream of this call.
+    standing_teammates = enumerate_declared_standing_teammates(workflow_dir, '_show_standing_')
+    rendered = render_standing_teammates_section(standing_teammates)
+    if rendered:
+        print(rendered)
+    return 0
+
+
+def cmd_list_standing(args: argparse.Namespace) -> int:
+    """Emit absolute paths of `standing: true` mods under {workflow_dir}/_mods/*.md.
+
+    Used at FO boot (before team members exist) to enumerate which standing
+    mods to hand to `spawn-standing`. This is NOT the same predicate as
+    `enumerate_declared_standing_teammates`, which returns tuples of
+    (name, description, mod_path) for dispatch-prompt assembly. Keep the
+    two call paths distinct.
+
+    Output format: one absolute mod path per line, sorted alphabetically
+    by filename. Paths are whitespace-free by `_mods/*.md` naming
+    convention (kebab-case) — if that ever changes, switch to `-0` NUL
+    delimiting or `--json`.
+
+    Exit 0 on success, including zero matches (empty stdout). Exit
+    non-zero only when the workflow directory cannot be resolved.
+    """
+    workflow_dir = args.workflow_dir
+    if not os.path.isdir(workflow_dir):
+        print(
+            f"error: workflow directory not found: {workflow_dir}",
+            file=sys.stderr,
+        )
+        return 1
+
+    mods_dir = os.path.join(workflow_dir, "_mods")
+    if not os.path.isdir(mods_dir):
+        return 0
+
+    standing_paths = []
+    for mod_path in sorted(glob.glob(os.path.join(mods_dir, "*.md"))):
+        try:
+            meta = parse_mod_metadata(mod_path)
+        except (ValueError, OSError) as e:
+            print(f"error: unreadable mod {mod_path}: {e}", file=sys.stderr)
+            return 1
+        if meta["standing"]:
+            standing_paths.append(os.path.abspath(mod_path))
+
+    for path in standing_paths:
+        print(path)
+    return 0
+
+
+def lookup_model(name: str) -> str | None:
+    """Find the model for a team member by name.
+
+    Scans ~/.claude/teams/*/config.json for a member whose name matches.
+    Returns the model string, or None.
+    """
+    home = os.path.expanduser("~")
+    pattern = os.path.join(home, ".claude", "teams", "*", "config.json")
+
+    for config_path in glob.glob(pattern):
+        try:
+            with open(config_path, "r") as f:
+                config = json.load(f)
+            for member in config.get("members", []):
+                if member.get("name") == name:
+                    return member.get("model")
+        except (json.JSONDecodeError, OSError):
+            continue
+
+    return None
+
+
+def context_limit_for_model(model: str) -> int:
+    """Infer the context window size from the model name.
+
+    Claude Code encodes opt-in extended-context variants with a bracket suffix
+    like `[1m]` (e.g. `claude-opus-4-6[1m]`). Models whose base name appears in
+    NATIVE_1M_MODELS default to 1M regardless of the bracket — this list only
+    contains model strings we have empirically verified to be 1M-native on
+    production Claude Code, not predictions about unreleased models. Everything
+    else defaults to 200k, the standard Claude context window and safe fallback
+    for unknown models.
+    """
+    if "[1m]" in model:
+        return EXTENDED_CONTEXT_LIMIT
+    base = model.split("[", 1)[0]
+    if base in NATIVE_1M_MODELS:
+        return EXTENDED_CONTEXT_LIMIT
+    return DEFAULT_CONTEXT_LIMIT
+
+
+def cmd_context_budget(args: argparse.Namespace) -> int:
+    name = args.name
+
+    jsonl_path = find_subagent_jsonl(name)
+    if jsonl_path is None:
+        print(f"Error: no subagent jsonl found for '{name}'", file=sys.stderr)
+        return 1
+
+    resident_tokens = extract_resident_tokens(jsonl_path)
+    if resident_tokens is None:
+        print(f"Error: no assistant entries with usage in {jsonl_path}", file=sys.stderr)
+        return 1
+
+    config_model = lookup_model(name)
+    if config_model is None:
+        print(f"Error: no team config found for member '{name}'", file=sys.stderr)
+        return 1
+
+    runtime_models = extract_runtime_models(jsonl_path)
+    warnings = {}
+
+    if len(runtime_models) > 1:
+        model = min(runtime_models, key=context_limit_for_model)
+        warnings["mixed_models_warning"] = (
+            f"multiple models seen in jsonl: {sorted(runtime_models)} — using smallest context window"
+        )
+    elif len(runtime_models) == 1:
+        model = next(iter(runtime_models))
+    else:
+        model = config_model
+        warnings["config_fallback_warning"] = (
+            "no model field in jsonl assistant entries — using config-declared model (provisional)"
+        )
+
+    context_limit = context_limit_for_model(model)
+    config_limit = context_limit_for_model(config_model)
+
+    if runtime_models and config_limit != context_limit:
+        warnings["config_drift_warning"] = (
+            f"team config requested {config_model} but runtime is {model}"
+        )
+
+    usage_pct = round(resident_tokens / context_limit * 100, 1)
+    reuse_ok = usage_pct <= THRESHOLD_PCT
+
+    result = {
+        "name": name,
+        "resident_tokens": resident_tokens,
+        "model": model,
+        "context_limit": context_limit,
+        "usage_pct": usage_pct,
+        "threshold_pct": THRESHOLD_PCT,
+        "reuse_ok": reuse_ok,
+    }
+    if runtime_models and config_limit != context_limit:
+        result["config_declared_model"] = config_model
+    result.update(warnings)
+
+    print(json.dumps(result, indent=2))
+    return 0
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Claude Code team utilities")
+    subparsers = parser.add_subparsers(dest="command")
+
+    budget_parser = subparsers.add_parser("context-budget", help="Check agent context budget")
+    budget_parser.add_argument("--name", required=True, help="Agent name to look up")
+
+    build_parser = subparsers.add_parser(
+        "build",
+        help="Assemble structured dispatch JSON",
+        description=(
+            "Assemble structured dispatch JSON from stdin.\n"
+            "\n"
+            "entity_path must be a project-root absolute path\n"
+            "(e.g. /repo/docs/plans/slug.md), not a worktree-absolute path;\n"
+            "the helper derives the worktree read target internally."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    build_parser.add_argument("--workflow-dir", required=True, help="Absolute path to workflow directory")
+
+    spawn_parser = subparsers.add_parser(
+        "spawn-standing",
+        help="Emit Agent() spec JSON for a standing-teammate mod, or report already-alive",
+    )
+    spawn_parser.add_argument("--mod", required=True, help="Path to the standing-teammate mod file")
+    spawn_parser.add_argument("--team", required=True, help="Target team name")
+
+    list_standing_parser = subparsers.add_parser(
+        "list-standing",
+        help="List absolute paths of standing-teammate mod files (one per line)",
+    )
+    list_standing_parser.add_argument(
+        "--workflow-dir", required=True, help="Absolute path to workflow directory"
+    )
+
+    show_stage_def_parser = subparsers.add_parser(
+        "show-stage-def",
+        help="Emit a workflow README's ### {stage} subsection on stdout",
+    )
+    show_stage_def_parser.add_argument(
+        "--workflow-dir", required=True, help="Absolute path to workflow directory"
+    )
+    show_stage_def_parser.add_argument(
+        "--stage", required=True, help="Stage name (e.g. ideation)"
+    )
+
+    show_standing_parser = subparsers.add_parser(
+        "show-standing",
+        help="Emit the rendered '### Standing teammates available in your team' markdown",
+    )
+    show_standing_parser.add_argument(
+        "--workflow-dir", required=True, help="Absolute path to workflow directory"
+    )
+
+    args = parser.parse_args()
+
+    if args.command is None:
+        parser.print_help(sys.stderr)
+        sys.exit(1)
+
+    if args.command == "context-budget":
+        sys.exit(cmd_context_budget(args))
+    elif args.command == "build":
+        sys.exit(cmd_build(args))
+    elif args.command == "spawn-standing":
+        sys.exit(cmd_spawn_standing(args))
+    elif args.command == "list-standing":
+        sys.exit(cmd_list_standing(args))
+    elif args.command == "show-stage-def":
+        sys.exit(cmd_show_stage_def(args))
+    elif args.command == "show-standing":
+        sys.exit(cmd_show_standing(args))
+
+
+if __name__ == "__main__":
+    main()
