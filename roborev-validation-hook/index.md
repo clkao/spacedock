@@ -1,10 +1,11 @@
 ---
 id: ng20gc9xdakkhk35e82385gm
 title: Incremental commit-review hook for the validation stage (roborev-style)
-status: backlog
+status: ideation
 source: session 1 debrief — validation flywheel
 score: "0.20"
 worktree:
+started: 2026-05-30T22:41:34Z
 ---
 
 Wire an incremental, per-commit code review onto the worktree code branch during/after implementation, feeding the validation gate (shift-left). Division of labor: the incremental reviewer covers code-quality / structure / subtle-bug hunting; the validation ensign keeps its unique job — behavioral parity against the oracle. Inspired by roborev's post-commit + session-reuse model.
