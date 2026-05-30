@@ -356,8 +356,13 @@ func indMutationCase(t *testing.T, name, src string, env []string, args ...strin
 				t.Errorf("[%s] file %s present in oracle, missing in native", name, rel)
 				continue
 			}
-			if nContent != oContent {
-				t.Errorf("[%s] file %s differs:\n--- native ---\n%q\n--- oracle ---\n%q", name, rel, nContent, oContent)
+			// Normalize before diffing: a bare-timestamp --set auto-fills now() on
+			// each side independently, so the written `started:`/`completed:` stamps
+			// straddle a wall-clock second boundary and diverge intermittently. The
+			// timestamp normalization (test-only, never in product) makes the diff
+			// stable; each side is normalized against its own temp root.
+			if indNormalize(nContent, nDir) != indNormalize(oContent, oDir) {
+				t.Errorf("[%s] file %s differs:\n--- native ---\n%q\n--- oracle ---\n%q", name, rel, indNormalize(nContent, nDir), indNormalize(oContent, oDir))
 			}
 		}
 		for rel := range nFiles {
