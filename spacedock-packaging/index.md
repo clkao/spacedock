@@ -1,7 +1,7 @@
 ---
 id: tq66yjc7sqbhyc52eg8h2ecx
 title: Spacedock packaging and distribution
-status: validation
+status: implementation
 source: handoff self-hosting gap
 score: "0.35"
 worktree: /Users/clkao/git/spacedock-research/spacedock-v1/.worktrees/spacedock-ensign-spacedock-packaging
@@ -278,3 +278,15 @@ Implemented the v1 distribution model's compatibility spine on the spacedock-v1 
 ### Summary
 
 Recommendation: PASSED. Independently reproduced all five doctor verdicts (exit codes + pinned remedy substrings) and the contract token without trusting the impl report; the contract-compare + doctor path (the riskiest path) was validated first. The 3-point gate reproduces behaviorally end-to-end: a real isolated `claude` install with a mismatching `requires-contract` makes `spacedock claude` fail fast with the pinned remedy and NO host launch (full production `ResolveManifest` path, not the seam), the `--skip-contract-check` bootstrap bypasses correctly, the isolated install (AC-4) and the FO step-0 abort fixture (AC-2) both pass with real processes. AC-5a/AC-5b are green, the FO step-0 edit is confined to `## Startup` with no sibling-scope overlap, and the captain-scoped `~/git/spacedock` deferral held (the real cross-repo manifest correctly carries no `requires-contract` yet — by design). 389 tests green with raw captured exit codes, `-race`/`gofmt`/`vet` clean, and default status/dispatch output is unregressed (byte-identical bar the random NEXT_ID and the intended `(contract 1)` token). One pre-existing, out-of-scope test-infra flake was root-caused: the `internal/dispatch` parity tests write the dispatch body to a shared non-hermetic `/tmp/spacedock-dispatch/` and collide across concurrent test processes (the parallel audit); it is not introduced by this branch, not in any AC, and the 389 gate is green when run hermetically — logged for follow-up, not a blocker.
+
+## Feedback Cycle — validation gate REJECT (staff audit, session 3 resume)
+
+The validation ensign recommended PASSED, but the parallel staff audit (own detached read-only checkout) REJECTED with two material, RUN-confirmed holes the validator missed. Routing both to implementation (feedback-to). Captain-confirmed direction in **bold**.
+
+1. **Front-door gate hole (serious).** A host reporting an `installPath` to a directory LACKING `.claude-plugin/plugin.json` makes `spacedock claude` exit 0 and LAUNCH into a session with an unresolvable plugin. Root cause: `host_exec.go` `ResolveManifest` returns a non-empty path without checking the file exists; `doctor.go` `RunDoctor` maps missing-file → non-fatal no-plugin-found at exit 0; `frontdoor.go` `gateHost` only special-cases `manifestPath == ""`. **FIX: `gateHost` must reject the `NoPluginFound` VERDICT regardless of how the path arrived (inspect the verdict, not the exit code), OR `ResolveManifest` verifies file existence.** Add a regression test — `frontdoor_test.go`'s `fakeHost` currently only sets `""` or an existing fixture path, so the non-empty-but-missing path was never exercised.
+
+2. **Codex resolver non-functional.** `ResolveManifest` shells `codex plugin list --json`, which real codex 0.132.0 REJECTS (exit 2, "unexpected argument --json"), so `spacedock codex` + `spacedock doctor --host codex` always exit 1. **Captain decision: FIX FOR REAL (not honest-stub) — use codex's supported listing (`codex plugin list`, no `--json`) + RUN-verify against the installed codex 0.132.0.** Codex is now reachable via safehouse `--enable all-agents`.
+
+Polish (non-blocking, address only if cheap): corrupt-JSON manifest → bare `error:` (6th outcome, loud, acceptable); `TestDispatchBlockUsesNativeBuild` comment mislabels AC-2 (it is the AC-5b oracle).
+
+Re-validate after fixes with a fresh parallel staff audit on its own detached read-only checkout (high-stakes: front-door safety + a new resolver path).
