@@ -1,4 +1,4 @@
-// ABOUTME: AC-5 launcher smoke — a pilot split-root (symlink-profile) workflow
+// ABOUTME: AC-5 launcher smoke — a pilot split-root (no-symlink) workflow
 // ABOUTME: lists, --sets, and --archives a folder-form entity through `spacedock status`.
 package integration
 
@@ -43,8 +43,8 @@ func spacedockBinary(t *testing.T) string {
 	return launcherBin
 }
 
-// pilotReadme is a folder-form-entity workflow README with the symlink-profile
-// state field. The single non-initial worktree-free stage keeps --set simple.
+// pilotReadme is a folder-form-entity workflow README with a split-root state
+// field. The single non-initial worktree-free stage keeps --set simple.
 const pilotReadme = `---
 entity-type: task
 entity-label: task
@@ -82,26 +82,23 @@ Think.
 Terminal.
 `
 
-// stagePilotWorkflow builds a symlink-profile split-root workflow in a fresh git
-// repo: README in the main repo carrying state: .spacedock-state, a folder-form
-// entity in the state checkout, and the compatibility symlink
-// .spacedock-state/README.md -> ../README.md. The launcher is pointed at the
-// state checkout (the symlink-compat operator model the production VendorRunner
-// default serves), and the symlinked README backfills the stage definition
-// there. Returns the state-checkout dir (what --workflow-dir points at) and the
-// entity slug.
-func stagePilotWorkflow(t *testing.T) (stateDir, slug string) {
+// stagePilotWorkflow builds a split-root workflow in a fresh git repo: README in
+// the definition dir carrying state: .spacedock-state, and a folder-form entity
+// in the state checkout with NO .spacedock-state/README.md. The launcher is
+// pointed at the definition dir (the native operator model the production
+// NativeRunner default serves): the native runner reads the stage definition
+// from the definition README and entities from the state checkout, composing the
+// two roots itself with no symlink. Returns the definition dir (what
+// --workflow-dir points at), the state checkout, and the entity slug.
+func stagePilotWorkflow(t *testing.T) (defDir, stateDir, slug string) {
 	t.Helper()
-	defDir := t.TempDir()
+	defDir = t.TempDir()
 	if err := os.WriteFile(filepath.Join(defDir, "README.md"), []byte(pilotReadme), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	stateDir = filepath.Join(defDir, ".spacedock-state")
 	if err := os.MkdirAll(stateDir, 0o755); err != nil {
 		t.Fatal(err)
-	}
-	if err := os.Symlink("../README.md", filepath.Join(stateDir, "README.md")); err != nil {
-		t.Fatalf("create compatibility symlink: %v", err)
 	}
 	slug = "pilot-entity"
 	entityPath := filepath.Join(stateDir, slug, "index.md")
@@ -123,15 +120,16 @@ A folder-form entity driven through the launcher.
 		t.Fatal(err)
 	}
 	gitInitFixture(t, defDir)
-	return stateDir, slug
+	return defDir, stateDir, slug
 }
 
-// runStatus runs `spacedock status --workflow-dir {stateDir} {args...}` and
-// returns combined output and exit code. stateDir is the state checkout; its
-// symlinked README backfills the stage definition for the vendored runner.
-func runStatus(t *testing.T, stateDir string, args ...string) (string, int) {
+// runStatus runs `spacedock status --workflow-dir {defDir} {args...}` and
+// returns combined output and exit code. defDir is the definition dir; the
+// native runner reads its README for the stage definition and composes the
+// state checkout for entities.
+func runStatus(t *testing.T, defDir string, args ...string) (string, int) {
 	t.Helper()
-	full := append([]string{"status", "--workflow-dir", stateDir}, args...)
+	full := append([]string{"status", "--workflow-dir", defDir}, args...)
 	cmd := exec.Command(spacedockBinary(t), full...)
 	cmd.Env = append(os.Environ(), "HOME="+t.TempDir())
 	out, err := cmd.CombinedOutput()
@@ -148,12 +146,13 @@ func runStatus(t *testing.T, stateDir string, args ...string) (string, int) {
 
 // TestLauncherListSetArchive locks AC-5: list renders the entity row, --set
 // narrates field: old -> new, and --archive moves the entity under _archive in
-// the state checkout — all through the real launcher binary.
+// the state checkout — all through the real launcher binary pointed at the
+// definition dir, with no .spacedock-state/README.md symlink.
 func TestLauncherListSetArchive(t *testing.T) {
-	stateDir, slug := stagePilotWorkflow(t)
+	defDir, stateDir, slug := stagePilotWorkflow(t)
 
 	// List: the entity row must render.
-	list, code := runStatus(t, stateDir)
+	list, code := runStatus(t, defDir)
 	if code != 0 {
 		t.Fatalf("list exit %d:\n%s", code, list)
 	}
@@ -162,7 +161,7 @@ func TestLauncherListSetArchive(t *testing.T) {
 	}
 
 	// --set: status backlog -> ideation, narrated on stdout.
-	setOut, code := runStatus(t, stateDir, "--set", slug, "status=ideation")
+	setOut, code := runStatus(t, defDir, "--set", slug, "status=ideation")
 	if code != 0 {
 		t.Fatalf("--set exit %d:\n%s", code, setOut)
 	}
@@ -171,7 +170,7 @@ func TestLauncherListSetArchive(t *testing.T) {
 	}
 
 	// --archive: the entity moves under _archive in the state checkout.
-	archiveOut, code := runStatus(t, stateDir, "--archive", slug)
+	archiveOut, code := runStatus(t, defDir, "--archive", slug)
 	if code != 0 {
 		t.Fatalf("--archive exit %d:\n%s", code, archiveOut)
 	}
