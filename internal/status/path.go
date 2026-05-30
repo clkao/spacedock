@@ -5,6 +5,7 @@ package status
 import (
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // realpathOf resolves symlinks the way os.path.realpath does: it returns the
@@ -50,6 +51,24 @@ func reversed(s []string) []string {
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
+}
+
+// pyDirname returns the directory portion of p the way os.path.dirname does:
+// everything up to (not including) the final separator, with no cleaning of
+// "." segments. dirname("./_archive") == ".", dirname("/abs/_archive") ==
+// "/abs". A path with no separator yields "".
+func pyDirname(p string) string {
+	sep := string(filepath.Separator)
+	idx := strings.LastIndex(p, sep)
+	if idx < 0 {
+		return ""
+	}
+	head := p[:idx]
+	// os.path.dirname keeps a lone root separator (e.g. "/x" -> "/").
+	if head == "" {
+		return sep
+	}
+	return head
 }
 
 // findGitRoot walks up from startDir to the directory containing a .git entry

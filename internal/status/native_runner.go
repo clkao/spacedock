@@ -123,7 +123,7 @@ func dispatch(args []string, dir string, e env, stdin io.Reader, stdout, stderr 
 		return errExit(stderr, "--boot is incompatible with --where")
 	}
 
-	roots := resolveRoots(pipelineDir)
+	roots := resolveRoots(pipelineDir, dir)
 
 	// --new atomic create.
 	if newSlug != "" {
@@ -289,7 +289,7 @@ func dispatch(args []string, dir string, e env, stdin io.Reader, stdout, stderr 
 		if rc != 0 {
 			return rc
 		}
-		return runArchive(roots.entityDir, resolved.slug, contains(args, "--force"), stdout, stderr)
+		return runArchive(roots.entityDir, roots.entityDirSpelling, resolved.slug, contains(args, "--force"), stdout, stderr)
 	}
 
 	if setResult != nil {
@@ -508,7 +508,7 @@ func resolveFromRootOrExit(rootPath, ref string, includeArchived bool, stdout, s
 			}
 			return 1
 		}
-		return resolveReferenceOrExit(resolveRoots(candidates[0]), innerRef, includeArchived, stdout, stderr)
+		return resolveReferenceOrExit(resolveRoots(candidates[0], ""), innerRef, includeArchived, stdout, stderr)
 	}
 
 	type match struct {

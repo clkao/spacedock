@@ -148,8 +148,10 @@ func atomicWrite(path string, data []byte) error {
 // runArchive archives an entity (flat or folder form), stamping archived: before
 // the move and printing `archived: {dest}`. Enforces the source-missing,
 // already-archived, mod-block, and merge-hook guards. Matches run_archive.
-// entityDir is the active entity root (pipeline_dir in the oracle).
-func runArchive(entityDir, slug string, force bool, stdout, stderr io.Writer) int {
+// entityDir is the absolute entity root for I/O; spellingDir is the as-passed
+// spelling used for the printed dest (so a relative --workflow-dir renders a
+// relative `archived:` path, matching the oracle's literal os.path.join).
+func runArchive(entityDir, spellingDir, slug string, force bool, stdout, stderr io.Writer) int {
 	flatPath := filepath.Join(entityDir, slug+".md")
 	folderRoot := filepath.Join(entityDir, slug)
 	folderIndex := filepath.Join(folderRoot, "index.md")
@@ -202,15 +204,17 @@ func runArchive(entityDir, slug string, force bool, stdout, stderr io.Writer) in
 	}
 
 	archiveDir := filepath.Join(entityDir, "_archive")
-	var destPath string
+	var destPath, destSpelling string
 	if isFolder {
 		destPath = filepath.Join(archiveDir, slug)
+		destSpelling = pyJoin(spellingDir, "_archive", slug)
 		if fileExists(destPath) {
 			fmt.Fprintf(stderr, "Error: already archived: %s/\n", slug)
 			return 1
 		}
 	} else {
 		destPath = filepath.Join(archiveDir, slug+".md")
+		destSpelling = pyJoin(spellingDir, "_archive", slug+".md")
 		if fileExists(destPath) {
 			fmt.Fprintf(stderr, "Error: already archived: %s.md\n", slug)
 			return 1
@@ -237,8 +241,31 @@ func runArchive(entityDir, slug string, force bool, stdout, stderr io.Writer) in
 		fmt.Fprintf(stderr, "Error: %s\n", moveErr)
 		return 1
 	}
-	fmt.Fprintf(stdout, "archived: %s\n", destPath)
+	fmt.Fprintf(stdout, "archived: %s\n", destSpelling)
 	return 0
+}
+
+// pyJoin concatenates path components the way Python's os.path.join does: it
+// joins with the OS separator without cleaning a leading "." (so
+// pyJoin(".", "_archive", "x.md") == "./_archive/x.md", unlike filepath.Join
+// which would collapse it to "_archive/x.md"). An absolute later component
+// resets the accumulated path, matching os.path.join.
+func pyJoin(parts ...string) string {
+	sep := string(filepath.Separator)
+	result := ""
+	for _, p := range parts {
+		switch {
+		case result == "":
+			result = p
+		case filepath.IsAbs(p):
+			result = p
+		case strings.HasSuffix(result, sep):
+			result += p
+		default:
+			result += sep + p
+		}
+	}
+	return result
 }
 
 // scanMods scans entityDir/_mods/*.md for `## Hook:` headings, returning

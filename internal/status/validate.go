@@ -41,8 +41,10 @@ func scopeOf(e *entity) string {
 }
 
 // findEntityFormConflicts returns conflict errors for slugs present as both flat
-// and folder entities in directory. Matches find_entity_form_conflicts.
-func findEntityFormConflicts(directory, scope string) []string {
+// and folder entities in directory. directory is the absolute path scanned;
+// dirSpelling is the as-passed spelling used in the printed flat_path/folder_path
+// and workflow= fields. Matches find_entity_form_conflicts.
+func findEntityFormConflicts(directory, dirSpelling, scope string) []string {
 	info, err := os.Stat(directory)
 	if err != nil || !info.IsDir() {
 		return nil
@@ -81,14 +83,14 @@ func findEntityFormConflicts(directory, scope string) []string {
 	}
 	sort.Strings(conflicts)
 
-	workflowField := directory
+	workflowField := dirSpelling
 	if scope == "archived" {
-		workflowField = filepath.Dir(directory)
+		workflowField = pyDirname(dirSpelling)
 	}
 	var errs []string
 	for _, slug := range conflicts {
-		folderPath := filepath.Join(directory, slug, "index.md")
-		flatPath := filepath.Join(directory, slug+".md")
+		folderPath := pyJoin(dirSpelling, slug, "index.md")
+		flatPath := pyJoin(dirSpelling, slug+".md")
 		errs = append(errs, fmt.Sprintf(
 			"Error: flat/folder conflict: workflow=%s scope=%s slug=%s flat_path=%s folder_path=%s",
 			workflowField, scope, slug, flatPath, folderPath))
@@ -132,12 +134,14 @@ func validateWorkflowStageNames(definitionDir string) []string {
 }
 
 // validateWorkflow returns validation error lines for active + archived
-// entities. Matches validate_workflow. definitionDir is the README root and
-// entityDir the entity root (equal in this stage).
+// entities. Matches validate_workflow. definitionDir/entityDir are the absolute
+// README and entity roots; the workflow= evidence field uses the absolute
+// entityDir (the FO always passes an absolute --workflow-dir for enumerate ops,
+// so absolute == the oracle's literal here).
 func validateWorkflow(definitionDir, entityDir, idStyle string, stderr io.Writer) []string {
 	var errs []string
-	errs = append(errs, findEntityFormConflicts(entityDir, "active")...)
-	errs = append(errs, findEntityFormConflicts(filepath.Join(entityDir, "_archive"), "archived")...)
+	errs = append(errs, findEntityFormConflicts(entityDir, entityDir, "active")...)
+	errs = append(errs, findEntityFormConflicts(filepath.Join(entityDir, "_archive"), pyJoin(entityDir, "_archive"), "archived")...)
 	errs = append(errs, validateWorkflowStageNames(definitionDir)...)
 
 	entities := activeAndArchivedEntities(entityDir, stderr)
