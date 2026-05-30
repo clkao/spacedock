@@ -99,6 +99,31 @@ part of pr-mod (the PR workflow outside the local spacedock workflow), where the
 re-dispatches to address review feedback and/or finalize merge. Model #2 ties into the
 two-origin / pr-mod follow-up above. FO lean (spike decides): #2.
 
+## Packaging validation — HELD (resume next session, captain wants a deeper dive)
+spacedock-packaging is at status=validation, branch spacedock-ensign/spacedock-packaging
+(worktree .worktrees/spacedock-ensign-spacedock-packaging). The staff audit (watdl8niq)
+REJECTED with TWO material issues, both RUN-confirmed; the validation ensign was still
+running at session end (dies at teardown — its findings only add). The core was confirmed
+sound (compare math, 5 verdicts exit 0/1/1/1/0, safe front-door paths block, 389 green,
+cross-repo deferral held). Resume by routing these two fixes (then re-validate → merge):
+1. FRONT-DOOR GATE HOLE (serious): a host reporting an installPath to a dir LACKING
+   .claude-plugin/plugin.json makes `spacedock claude` exit 0 and LAUNCH into a session with
+   an unresolvable plugin. Root cause: host_exec.go ResolveManifest returns a non-empty path
+   without checking the file exists; doctor.go RunDoctor maps missing-file → non-fatal
+   no-plugin-found at exit 0; frontdoor.go gateHost only special-cases manifestPath=="" .
+   FIX: gateHost must reject the NoPluginFound VERDICT regardless of how the path arrived
+   (inspect the verdict, not the exit code), OR ResolveManifest verifies file existence.
+   Uncovered by frontdoor_test.go (fakeHost only sets "" or an existing fixture path).
+2. CODEX RESOLVER non-functional: ResolveManifest shells `codex plugin list --json`, which
+   real codex 0.132.0 REJECTS (exit 2, "unexpected argument --json"). So `spacedock codex` +
+   `spacedock doctor --host codex` always exit 1 (loud, not a silent hole). The cycle-2 spike
+   marked codex commands [SYNTAX]-only; this shipped unverified. FIX: use codex's supported
+   listing (no --json) + [RUN]-verify against installed codex, OR honestly scope codex
+   resolution as not-yet-functional (Codex is already version-gate+prose-only for launch).
+Polish (non-blocking): corrupt-JSON manifest → bare `error:` (6th outcome, loud, fine);
+TestDispatchBlockUsesNativeBuild comment mislabels AC-2 (it is the AC-5b oracle).
+Also: a detached audit checkout .worktrees/audit-spacedock-packaging is removable.
+
 ## Debrief notes
 - external-tracker-checkpoint shipped PASSED but AC-6 was a prose self-oracle (the
   doc-only antipattern) — kept as the live example that motivated the principles.
