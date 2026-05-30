@@ -228,7 +228,7 @@ func TestEventLoopReadsUseJSON(t *testing.T) {
 	}
 }
 
-// TestDispatchBlockUsesNativeBuild locks AC-2: the FO runtime adapter's
+// TestDispatchBlockUsesNativeBuild locks AC-5b: the FO runtime adapter's
 // MANDATORY dispatch block invokes the native `spacedock dispatch build`, with
 // zero `claude-team` token left in that block. The assertion is scoped to the
 // `## Dispatch Adapter` section (where the executable dispatch command lives) so

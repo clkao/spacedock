@@ -25,12 +25,23 @@ type pluginListEntry struct {
 	InstallPath string `json:"installPath"`
 }
 
-// ResolveManifest shells `<host> plugin list --json`, finds the spacedock@
-// spacedock entry, and returns its manifest path. The Claude manifest lives at
-// <installPath>/.claude-plugin/plugin.json; the Codex one at
-// <installPath>/.codex-plugin/plugin.json. Returns "" (no error) when the host
-// reports no matching install or no installPath.
-func (execHost) ResolveManifest(host string) (string, error) {
+// ResolveManifest returns the installed spacedock@spacedock plugin manifest path
+// for host, or "" (no error) when no plugin is installed. The two hosts resolve
+// differently: Claude reports an installPath in `claude plugin list --json`;
+// Codex 0.132.0 has no --json (it rejects the flag, exit 2) and its text listing
+// carries no install path, so the Codex path confirms the install via the text
+// listing and resolves the manifest under the deterministic Codex plugin cache.
+func (e execHost) ResolveManifest(host string) (string, error) {
+	if host == "codex" {
+		return e.resolveCodexManifest()
+	}
+	return e.resolveClaudeManifest(host)
+}
+
+// resolveClaudeManifest shells `claude plugin list --json`, finds the spacedock@
+// spacedock entry, and returns <installPath>/.claude-plugin/plugin.json. Returns
+// "" (no error) when the host reports no matching install or no installPath.
+func (execHost) resolveClaudeManifest(host string) (string, error) {
 	out, err := exec.Command(host, "plugin", "list", "--json").Output()
 	if err != nil {
 		return "", fmt.Errorf("%s plugin list --json: %w", host, err)
@@ -48,6 +59,83 @@ func (execHost) ResolveManifest(host string) (string, error) {
 		}
 	}
 	return "", nil
+}
+
+// resolveCodexManifest confirms spacedock@spacedock is installed via the text
+// `codex plugin list` (no --json — 0.132.0 rejects it) and resolves the manifest
+// under the Codex plugin cache. Codex installs land at
+// <CODEX_HOME>/plugins/cache/<marketplace>/<plugin>/<version>/.codex-plugin/plugin.json;
+// the listing carries no install path, so the cache layout is the resolver.
+// Returns "" (no error) when the plugin is not installed or no cached manifest
+// exists for it yet.
+func (execHost) resolveCodexManifest() (string, error) {
+	out, err := exec.Command("codex", "plugin", "list").CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("codex plugin list: %w (%s)", err, strings.TrimSpace(string(out)))
+	}
+	if !codexEntryInstalled(string(out), "spacedock@spacedock") {
+		return "", nil
+	}
+	cacheRoot := filepath.Join(codexHome(), "plugins", "cache", "spacedock", "spacedock")
+	versionDir, err := latestVersionDir(cacheRoot)
+	if err != nil || versionDir == "" {
+		return "", nil
+	}
+	manifest := filepath.Join(versionDir, manifestSubpath("codex"))
+	if _, statErr := os.Stat(manifest); statErr != nil {
+		return "", nil
+	}
+	return manifest, nil
+}
+
+// codexEntryInstalled reports whether the `codex plugin list` text output marks
+// the given plugin id as installed. The listing renders one indented line per
+// plugin as `<id> (installed[, enabled]) | (not installed)`; an installed entry
+// carries the literal `<id> (installed`.
+func codexEntryInstalled(listing, id string) bool {
+	for _, line := range strings.Split(listing, "\n") {
+		if strings.Contains(line, id+" (installed") {
+			return true
+		}
+	}
+	return false
+}
+
+// codexHome returns the Codex config/cache root: $CODEX_HOME when set, else
+// ~/.codex (matching the Codex CLI's own resolution).
+func codexHome() string {
+	if h := os.Getenv("CODEX_HOME"); h != "" {
+		return h
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ".codex"
+	}
+	return filepath.Join(home, ".codex")
+}
+
+// latestVersionDir returns the lexically-greatest immediate subdirectory of root
+// (the installed plugin's version dir). Returns "" (no error) when root is absent
+// or has no subdirectories. Codex installs a single version, but a stale cache
+// may hold several; the greatest name is the most recent install.
+func latestVersionDir(root string) (string, error) {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		return "", err
+	}
+	latest := ""
+	for _, e := range entries {
+		if e.IsDir() && e.Name() > latest {
+			latest = e.Name()
+		}
+	}
+	if latest == "" {
+		return "", nil
+	}
+	return filepath.Join(root, latest), nil
 }
 
 // manifestSubpath returns the per-host manifest location under an install root.

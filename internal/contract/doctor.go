@@ -35,28 +35,39 @@ func readRequiresContract(manifestPath string) (string, error) {
 	return m.RequiresContract, nil
 }
 
+// ManifestVerdict resolves the compatibility verdict for the manifest at
+// manifestPath against this binary's CONTRACT_VERSION, for the named host and
+// (pre-release) dev branch. A missing manifest file yields NoPluginFound; an
+// unparseable manifest JSON yields a MalformedRange-shaped Result naming the
+// parse error. The front door inspects the verdict directly (a non-empty path
+// to a missing file is NoPluginFound, NOT compatible); RunDoctor maps the same
+// verdict to an exit code and stream.
+func ManifestVerdict(manifestPath, host, branch string) Result {
+	raw, err := readRequiresContract(manifestPath)
+	if errors.Is(err, errNoManifest) {
+		return Result{Verdict: NoPluginFound, Message: noPluginMessage(host)}
+	}
+	if err != nil {
+		return Result{Verdict: MalformedRange, Message: fmt.Sprintf("error: %s", err)}
+	}
+	return compareWithManifest(CONTRACT_VERSION, raw, host, branch, manifestPath)
+}
+
 // RunDoctor reports the compatibility verdict for the manifest at manifestPath
 // against this binary's CONTRACT_VERSION, for the named host and (pre-release)
 // dev branch. A compatible verdict and a no-plugin-found report exit 0 (the
 // report is non-fatal-by-default); every mismatch (too-old-binary,
 // too-old-plugin, malformed-range) exits 1 with the pinned remedy on stderr.
 func RunDoctor(manifestPath, host, branch string, stdout, stderr io.Writer) int {
-	raw, err := readRequiresContract(manifestPath)
-	if errors.Is(err, errNoManifest) {
-		fmt.Fprintln(stdout, noPluginMessage(host))
-		return 0
-	}
-	if err != nil {
-		fmt.Fprintf(stderr, "error: %s\n", err)
-		return 1
-	}
-
-	res := compareWithManifest(CONTRACT_VERSION, raw, host, branch, manifestPath)
+	res := ManifestVerdict(manifestPath, host, branch)
 	switch res.Verdict {
 	case Compatible:
 		fmt.Fprintln(stdout, res.Message)
 		fmt.Fprintln(stdout, "Note: hosts emit a load-time warning for the 'requires-contract' field; "+
 			"this is expected — the host ignores the field and spacedock reads it itself.")
+		return 0
+	case NoPluginFound:
+		fmt.Fprintln(stdout, res.Message)
 		return 0
 	default:
 		fmt.Fprintln(stderr, res.Message)

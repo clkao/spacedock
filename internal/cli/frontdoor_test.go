@@ -113,6 +113,29 @@ func TestClaudeFrontDoorUnresolvableManifestFailsFast(t *testing.T) {
 	}
 }
 
+// TestClaudeFrontDoorNonEmptyMissingManifestFailsFast: a host that reports a
+// non-empty installPath to a directory LACKING the plugin manifest must NOT
+// launch. The resolver returned a path, but the file does not exist — the gate
+// must reject the no-plugin-found verdict by inspecting the verdict, not the
+// doctor exit code (which is 0 for a non-fatal no-plugin report).
+func TestClaudeFrontDoorNonEmptyMissingManifestFailsFast(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "no-such-dir", ".claude-plugin", "plugin.json")
+	fake := &fakeHost{manifest: missing} // non-empty path, but the file is absent
+	var stdout, stderr bytes.Buffer
+
+	code := runClaude(context.Background(), nil, fake, &stdout, &stderr)
+
+	if code == 0 {
+		t.Fatalf("exit = 0, want non-zero when resolved manifest path is missing")
+	}
+	if fake.launchedArg != nil {
+		t.Fatalf("launch seam invoked with a missing manifest: %v", fake.launchedArg)
+	}
+	if !strings.Contains(stderr.String(), "spacedock doctor") && !strings.Contains(stderr.String(), "spacedock init") {
+		t.Fatalf("stderr missing actionable remedy pointer: %q", stderr.String())
+	}
+}
+
 // TestClaudeFrontDoorSkipContractCheckBootstrap: the --skip-contract-check
 // override launches without resolving the manifest (bootstrap case where the
 // plugin is being installed for the first time).

@@ -3,7 +3,6 @@
 package cli
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -34,11 +33,13 @@ type hostOps interface {
 var devBranch = ""
 
 // gateHost resolves the installed manifest for host and compares it against
-// CONTRACT_VERSION. It returns the verdict result and a launch-permitted bool.
-// An unresolvable manifest (no plugin found, or a host-CLI error) is NOT
-// compatible — the front door's fail-fast job — so launch is denied with an
-// actionable message. The doctor path treats no-plugin-found as a non-fatal
-// report; that policy lives in RunDoctor, not here.
+// CONTRACT_VERSION. It returns whether launch is permitted. Only a Compatible
+// verdict permits launch; everything else (a host-CLI error, no installed
+// plugin, a resolved-but-missing manifest, a mismatch, or a malformed range) is
+// NOT compatible — the front door's fail-fast job — so launch is denied with an
+// actionable message. The gate inspects the VERDICT, not a doctor exit code:
+// RunDoctor maps no-plugin-found to exit 0 (a non-fatal report), so a non-empty
+// installPath to a missing manifest would otherwise slip through as "compatible".
 func gateHost(ops hostOps, host string, stderr io.Writer) (ok bool) {
 	manifestPath, err := ops.ResolveManifest(host)
 	if err != nil {
@@ -53,15 +54,19 @@ func gateHost(ops hostOps, host string, stderr io.Writer) (ok bool) {
 				"Run `spacedock init --host %s` (or `spacedock claude --skip-contract-check` to bootstrap).\n", host, host)
 		return false
 	}
-	// The manifest resolved, so doctor's no-plugin-found branch cannot fire here;
-	// a non-zero exit means a real mismatch and gateStderr holds the pinned remedy.
-	var out, gateStderr bytes.Buffer
-	code := contract.RunDoctor(manifestPath, host, devBranch, &out, &gateStderr)
-	if code != 0 {
-		io.WriteString(stderr, gateStderr.String())
+	res := contract.ManifestVerdict(manifestPath, host, devBranch)
+	if res.Verdict == contract.Compatible {
+		return true
+	}
+	if res.Verdict == contract.NoPluginFound {
+		fmt.Fprintf(stderr,
+			"Spacedock: the installed %s plugin reported a manifest path that does not exist (%s). "+
+				"Run `spacedock init --host %s` (or `spacedock claude --skip-contract-check` to bootstrap).\n",
+			host, manifestPath, host)
 		return false
 	}
-	return true
+	fmt.Fprintln(stderr, res.Message)
+	return false
 }
 
 // runClaude is the `spacedock claude` front door: version-gate (fail fast), then
