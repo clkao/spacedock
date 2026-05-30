@@ -12,16 +12,31 @@ import (
 // stageNameRe is the dispatch-name regex stage names must match.
 var stageNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*[a-z0-9]$`)
 
-// stage is a resolved workflow stage with defaults applied. Optional carried
+// Stage is a resolved workflow stage with defaults applied. Optional carried
 // fields (feedback-to, agent, fresh, model) are kept verbatim when present.
-type stage struct {
-	name        string
-	worktree    bool
+type Stage struct {
+	Name        string
+	Worktree    bool
 	concurrency int
 	gate        bool
 	terminal    bool
 	initial     bool
 	optional    map[string]string
+}
+
+// Model returns the stage's declared model, with ok=false when the stage
+// carries no model field — mirroring the Python oracle's stage_meta.get('model')
+// returning None for an absent key (distinct from an empty-string value).
+func (s Stage) Model() (string, bool) {
+	v, ok := s.optional["model"]
+	return v, ok
+}
+
+// Agent returns the stage's declared agent (subagent_type), with ok=false when
+// the stage carries no agent field — mirroring stage_meta.get('agent').
+func (s Stage) Agent() (string, bool) {
+	v, ok := s.optional["agent"]
+	return v, ok
 }
 
 // frontmatterLines returns the raw lines between the first two `---` fences of
@@ -57,15 +72,15 @@ func indentOf(line string) int {
 // parseStagesBlock parses the stages: block from README frontmatter, returning
 // ordered stages with resolved defaults, or nil when there is no stages: block
 // or no states entries. Matches parse_stages_block.
-func parseStagesBlock(path string) []stage {
-	stages, _ := parseStagesWithDefaults(path)
+func parseStagesBlock(path string) []Stage {
+	stages, _ := ParseStagesWithDefaults(path)
 	return stages
 }
 
-// parseStagesWithDefaults returns the ordered stages and the raw stages.defaults
+// ParseStagesWithDefaults returns the ordered stages and the raw stages.defaults
 // map. Matches parse_stages_block + parse_stages_with_defaults (the oracle
 // re-parses for the defaults map; we collect both in one pass).
-func parseStagesWithDefaults(path string) ([]stage, map[string]string) {
+func ParseStagesWithDefaults(path string) ([]Stage, map[string]string) {
 	lines := frontmatterLines(path)
 
 	stagesStart := -1
@@ -155,11 +170,11 @@ func parseStagesWithDefaults(path string) ([]stage, map[string]string) {
 	defaultWorktree := strings.EqualFold(getOr(defaults, "worktree", "false"), "true")
 	defaultConcurrency := atoiOr(getOr(defaults, "concurrency", "2"), 2)
 
-	result := make([]stage, 0, len(states))
+	result := make([]Stage, 0, len(states))
 	for _, st := range states {
-		s := stage{
-			name:        st["name"],
-			worktree:    strings.EqualFold(getOr(st, "worktree", boolStr(defaultWorktree)), "true"),
+		s := Stage{
+			Name:        st["name"],
+			Worktree:    strings.EqualFold(getOr(st, "worktree", boolStr(defaultWorktree)), "true"),
 			concurrency: atoiOr(getOr(st, "concurrency", strconv.Itoa(defaultConcurrency)), defaultConcurrency),
 			gate:        strings.EqualFold(getOr(st, "gate", "false"), "true"),
 			terminal:    strings.EqualFold(getOr(st, "terminal", "false"), "true"),

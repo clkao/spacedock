@@ -180,7 +180,7 @@ func runArchive(entityDir, spellingDir, slug string, force, quiet, asJSON bool, 
 		return 1
 	}
 
-	fields := parseFrontmatter(sourcePath)
+	fields := ParseFrontmatter(sourcePath)
 	modBlock := strings.TrimSpace(fields["mod-block"])
 	pr := strings.TrimSpace(fields["pr"])
 	if modBlock != "" {

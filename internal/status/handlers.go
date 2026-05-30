@@ -58,7 +58,7 @@ func runSet(roots roots, set *setUpdate, args []string, whereFilters []whereFilt
 	// Single-root stage: no worktree overlay, entity path is the main path.
 	entityPath := mainEntityPath
 
-	currentFields := parseFrontmatter(entityPath)
+	currentFields := ParseFrontmatter(entityPath)
 	modBlock := strings.TrimSpace(currentFields["mod-block"])
 	currentPR := strings.TrimSpace(currentFields["pr"])
 	currentVerdict := strings.TrimSpace(currentFields["verdict"])
@@ -70,14 +70,14 @@ func runSet(roots roots, set *setUpdate, args []string, whereFilters []whereFilt
 	}
 
 	readme := filepath.Join(roots.definitionDir, "README.md")
-	var stages []stage
+	var stages []Stage
 	if fileExists(readme) {
 		stages = parseStagesBlock(readme)
 	}
 	terminalNames := map[string]bool{}
 	for _, s := range stages {
 		if s.terminal {
-			terminalNames[s.name] = true
+			terminalNames[s.Name] = true
 		}
 	}
 
@@ -179,7 +179,7 @@ func runRead(roots roots, args []string, e env, whereFilters []whereFilter,
 	stdout, stderr io.Writer) int {
 
 	readme := filepath.Join(roots.definitionDir, "README.md")
-	var stages []stage
+	var stages []Stage
 	if fileExists(readme) {
 		stages = parseStagesBlock(readme)
 	}
@@ -191,7 +191,7 @@ func runRead(roots roots, args []string, e env, whereFilters []whereFilter,
 		return errExit(stderr, "README.md has no stages block. --boot requires stage metadata.")
 	}
 
-	gitRoot := findGitRoot(roots.entityDir)
+	gitRoot := FindGitRoot(roots.entityDir)
 	idStyle, err := workflowIDStyle(roots.definitionDir)
 	if err != nil {
 		return errExit(stderr, err.Error())
@@ -368,7 +368,7 @@ func discoverWorkflows(root string) []string {
 		}
 		readmePath := filepath.Join(dir, "README.md")
 		if isRegularFile(readmePath) {
-			fields := parseFrontmatter(readmePath)
+			fields := ParseFrontmatter(readmePath)
 			if strings.HasPrefix(fields["commissioned-by"], "spacedock@") {
 				resolved := realpathOf(dir)
 				if !resultSet[resolved] {

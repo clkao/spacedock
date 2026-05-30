@@ -228,6 +228,49 @@ func TestEventLoopReadsUseJSON(t *testing.T) {
 	}
 }
 
+// TestDispatchBlockUsesNativeBuild locks AC-2: the FO runtime adapter's
+// MANDATORY dispatch block invokes the native `spacedock dispatch build`, with
+// zero `claude-team` token left in that block. The assertion is scoped to the
+// `## Dispatch Adapter` section (where the executable dispatch command lives) so
+// the sibling-owned `context-budget` / `list-standing` / `spawn-standing`
+// references in other sections legitimately retain `claude-team`. The emitted
+// fetch line (`spacedock dispatch show-stage-def`) is verified separately by the
+// AC-1 dispatch-body parity, which observes the bytes a real build run emits.
+func TestDispatchBlockUsesNativeBuild(t *testing.T) {
+	files := vendoredSkillFiles(t)
+	runtime := files["first-officer/references/claude-first-officer-runtime.md"]
+
+	section := sectionAfter(runtime, "## Dispatch Adapter")
+	if section == "" {
+		t.Fatalf("claude-first-officer-runtime.md has no `## Dispatch Adapter` section")
+	}
+
+	// (a) The executable dispatch command pipes to the native build.
+	wantCmd := "echo '<json>' | spacedock dispatch build --workflow-dir {workflow_dir}"
+	if !strings.Contains(section, wantCmd) {
+		t.Errorf("Dispatch Adapter section does not pipe to the native build command:\nwant contains: %q", wantCmd)
+	}
+
+	// (a, negative) The block must NOT invoke the vendored Python helper path.
+	if strings.Contains(section, "skills/commission/bin/claude-team build") {
+		t.Errorf("Dispatch Adapter section still invokes the vendored Python claude-team build path")
+	}
+
+	// (b) The fenced executable command block carries no `claude-team` token at
+	// all. Walk the lines inside ``` fences; the surrounding prose may still name
+	// the operation, but no runnable command line may shell out to claude-team.
+	inFence := false
+	for _, line := range strings.Split(section, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "```") {
+			inFence = !inFence
+			continue
+		}
+		if inFence && strings.Contains(line, "claude-team") {
+			t.Errorf("Dispatch Adapter fenced command references claude-team: %q", strings.TrimSpace(line))
+		}
+	}
+}
+
 // sectionAfter returns the body of the markdown section beginning at the line
 // equal to heading, up to (but excluding) the next top-level `## ` heading, or
 // "" when the heading is absent. Used to scope an assertion to one section.

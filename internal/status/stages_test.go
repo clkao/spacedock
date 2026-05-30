@@ -40,7 +40,7 @@ stages:
 # Workflow
 `
 	path := writeTemp(t, readme)
-	stages, defaults := parseStagesWithDefaults(path)
+	stages, defaults := ParseStagesWithDefaults(path)
 	if len(stages) != 4 {
 		t.Fatalf("got %d stages, want 4", len(stages))
 	}
@@ -50,13 +50,13 @@ stages:
 	}
 
 	backlog := stages[0]
-	if backlog.name != "backlog" || !backlog.initial || !backlog.gate {
+	if backlog.Name != "backlog" || !backlog.initial || !backlog.gate {
 		t.Fatalf("backlog = %+v", backlog)
 	}
 	if backlog.concurrency != 1 {
 		t.Fatalf("backlog concurrency = %d, want 1 (from defaults)", backlog.concurrency)
 	}
-	if backlog.worktree {
+	if backlog.Worktree {
 		t.Fatalf("backlog worktree should default false")
 	}
 
@@ -66,7 +66,7 @@ stages:
 	}
 
 	impl := stages[2]
-	if !impl.worktree {
+	if !impl.Worktree {
 		t.Fatalf("implementation worktree should be true")
 	}
 
@@ -94,10 +94,10 @@ stages:
 	if stages[0].concurrency != 2 {
 		t.Fatalf("alpha concurrency = %d, want 2 (built-in default)", stages[0].concurrency)
 	}
-	if stages[0].worktree {
+	if stages[0].Worktree {
 		t.Fatalf("alpha worktree should default false")
 	}
-	if !stages[1].worktree {
+	if !stages[1].Worktree {
 		t.Fatalf("beta worktree should be true")
 	}
 }

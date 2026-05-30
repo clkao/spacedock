@@ -76,10 +76,10 @@ type prResult struct {
 // checkPRStates returns (status, results) for entities with a non-empty pr and
 // non-terminal status. Matches check_pr_states. status is "none",
 // "gh not available", or "ok".
-func checkPRStates(entities []*entity, stages []stage, e env) (string, []prResult) {
-	stageByName := map[string]stage{}
+func checkPRStates(entities []*entity, stages []Stage, e env) (string, []prResult) {
+	stageByName := map[string]Stage{}
 	for _, s := range stages {
-		stageByName[s.name] = s
+		stageByName[s.Name] = s
 	}
 	var prEntities []*entity
 	for _, ent := range entities {
@@ -179,7 +179,7 @@ type bootData struct {
 // gatherBoot runs every boot probe once and returns the result. NEXT_ID is
 // minted here (timestamp-dependent for sd-b32); on a minting error it returns
 // the error after the caller has emitted the stderr diagnostic.
-func gatherBoot(entities []*entity, stages []stage, definitionDir, entityDir, gitRoot, idStyle string, e env, stderr io.Writer) (*bootData, error) {
+func gatherBoot(entities []*entity, stages []Stage, definitionDir, entityDir, gitRoot, idStyle string, e env, stderr io.Writer) (*bootData, error) {
 	d := &bootData{idStyle: idStyle, hooks: scanMods(entityDir)}
 
 	if idStyle == "slug" {
@@ -201,7 +201,7 @@ func gatherBoot(entities []*entity, stages []stage, definitionDir, entityDir, gi
 }
 
 // printBoot writes all boot sections in order. Matches print_boot.
-func printBoot(w io.Writer, entities []*entity, stages []stage, definitionDir, entityDir, gitRoot, idStyle string, e env, stderr io.Writer) error {
+func printBoot(w io.Writer, entities []*entity, stages []Stage, definitionDir, entityDir, gitRoot, idStyle string, e env, stderr io.Writer) error {
 	d, err := gatherBoot(entities, stages, definitionDir, entityDir, gitRoot, idStyle, e, stderr)
 	if err != nil {
 		return err

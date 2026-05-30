@@ -68,9 +68,9 @@ Use the Agent tool to spawn each worker. **Use Agent() for initial dispatch** �
 
 **No pre-dispatch filesystem probe.** Do NOT run any filesystem check against `~/.claude/teams/{team_name}/` before `Agent()` in the normal dispatch path. The on-disk check is a guaranteed false positive under registry-desync (anthropics/claude-code#36806 leaves on-disk state intact even when the in-memory team slot is invalidated). Trust the in-memory handle returned by `TeamCreate` and let `Agent()` surface any registry-desync error. On such an error, follow the TeamCreate failure recovery ladder (Team Creation section) and Degraded Mode semantics below — do NOT reintroduce a pre-dispatch probe.
 
-**MANDATORY — Dispatch assembly via `claude-team build`:**
+**MANDATORY — Dispatch assembly via `spacedock dispatch build`:**
 
-Do NOT assemble `Agent()` prompts manually. Do NOT construct the `prompt` string yourself. Do NOT invent `name` values. ALWAYS pipe input through `claude-team build` and forward its output to `Agent()` verbatim. The key fields that MUST come from helper output are `subagent_type`, `name`, `team_name`, `model`, and `prompt` (which contains the completion signal). Manual assembly is a protocol violation except in the documented break-glass fallback below.
+Do NOT assemble `Agent()` prompts manually. Do NOT construct the `prompt` string yourself. Do NOT invent `name` values. ALWAYS pipe input through `spacedock dispatch build` and forward its output to `Agent()` verbatim. The key fields that MUST come from helper output are `subagent_type`, `name`, `team_name`, `model`, and `prompt` (which contains the completion signal). Manual assembly is a protocol violation except in the documented break-glass fallback below.
 
 The only permitted path for initial `Agent()` dispatch is:
 
@@ -92,7 +92,7 @@ The only permitted path for initial `Agent()` dispatch is:
    `bare_mode` must reflect the current dispatch context — read it from live team state, never infer it from the stage. Set `is_feedback_reflow` to true only when routing a rejection back to its `feedback-to` target stage.
 2. **REQUIRED — Pipe the JSON to the helper** (do NOT skip this step):
    ```
-   echo '<json>' | {project_root}/skills/commission/bin/claude-team build --workflow-dir {workflow_dir}
+   echo '<json>' | spacedock dispatch build --workflow-dir {workflow_dir}
    ```
 3. **REQUIRED — On exit 0, parse the stdout JSON and call `Agent()` with the emitted fields verbatim.** The `name`, `description`, `prompt`, and `model` fields MUST come from helper output unchanged. The `description` field is REQUIRED by the Agent tool — do not omit it. The `prompt` is a file-pointer (`Skill(...) ; then Read /tmp/spacedock-dispatch/{name}.md and treat its content as your assignment.`); the ensign Reads the file on first action and treats the body (including the SendMessage completion-signal section) as the inline assignment. Do not strip or rewrite the prompt. Forward `output.model` as the `Agent()` `model=` parameter when present; when null, OMIT the `model=` argument entirely (do NOT pass `model=None` — default-inheritance only applies when the argument is absent):
    ```
@@ -109,9 +109,9 @@ The only permitted path for initial `Agent()` dispatch is:
 
 In bare mode, dispatch blocks until the subagent completes — concurrent dispatch is not possible. Dispatch one entity at a time and process completions inline.
 
-**Reuse dispatch (SendMessage advancement):** `claude-team build` serves only initial `Agent()` dispatch. When advancing a reused ensign via `SendMessage(to="{ensign_name}")`, assemble the advancement message directly — the helper is not involved in the reuse path.
+**Reuse dispatch (SendMessage advancement):** `spacedock dispatch build` serves only initial `Agent()` dispatch. When advancing a reused ensign via `SendMessage(to="{ensign_name}")`, assemble the advancement message directly — the helper is not involved in the reuse path.
 
-**Break-Glass Manual Dispatch (fallback ONLY when `claude-team build` exits non-zero or is unavailable):** Do NOT use this template while the helper is working. Report the helper failure to the captain before proceeding. Use this minimal template as a degraded fallback:
+**Break-Glass Manual Dispatch (fallback ONLY when `spacedock dispatch build` exits non-zero or is unavailable):** Do NOT use this template while the helper is working. Report the helper failure to the captain before proceeding. Use this minimal template as a degraded fallback:
 ```
 Agent(
     subagent_type="{dispatch_agent_id}",
@@ -121,7 +121,7 @@ Agent(
     prompt="## First action\n\nBefore anything else, invoke your operating contract:\n\n    Skill(skill=\"spacedock:ensign\")\n\nThis loads the shared ensign discipline (stage-report format, BashOutput polling, worktree ownership, completion signal protocol). Do not paraphrase; call the tool.\n\nYou are working on: {entity title}\n\nStage: {stage}\n\n### Stage definition:\n\n{copy stage subsection from README verbatim}\n\nRead the entity file at {entity_file_path}.\n\n### Completion checklist\n\n{numbered checklist}\n\n### Summary\n{brief description of what was accomplished}\n\n### Stage report\n\nAppend a Stage Report section at the end of the entity file (per the shared-core Stage Report Protocol). Use the title `Stage Report: {stage}`. Account for every checklist item above with a `- DONE:` / `- SKIPPED:` / `- FAILED:` entry. Use the checklist item text verbatim when possible.\n\n### Completion Signal\n\nSendMessage(to=\"team-lead\", message=\"Done: {entity title} completed {stage}. Report written to {entity_file_path}.\")"
 )
 ```
-The break-glass template is intentionally minimal — it inlines the stage definition verbatim rather than referencing a `claude-team show-stage-def` fetch command (the helper is precisely what just failed, so the ensign cannot rely on it). The template therefore omits: worktree instructions, feedback context, scope notes, and the standing-teammates routing block. It also omits the FO-forwarding warning prose and the per-stage operational prose the production helper emits (plain-text-only / no-JSON / idle-notification narration). The `model=` slot is conditional — include it only when the stage (or `stages.defaults`) declares a model from `sonnet | opus | haiku`; omit the entire `model=` argument otherwise. Use only when the helper is unavailable.
+The break-glass template is intentionally minimal — it inlines the stage definition verbatim rather than referencing a `spacedock dispatch show-stage-def` fetch command (the helper is precisely what just failed, so the ensign cannot rely on it). The template therefore omits: worktree instructions, feedback context, scope notes, and the standing-teammates routing block. It also omits the FO-forwarding warning prose and the per-stage operational prose the production helper emits (plain-text-only / no-JSON / idle-notification narration). The `model=` slot is conditional — include it only when the stage (or `stages.defaults`) declares a model from `sonnet | opus | haiku`; omit the entire `model=` argument otherwise. Use only when the helper is unavailable.
 
 ## Degraded Mode
 
@@ -139,7 +139,7 @@ Any one of the following trips Degraded Mode:
 
 Once Degraded Mode is active, the following invariants hold for the remainder of the session:
 
-- No `team_name` parameter on any subsequent `Agent()` dispatch. The input JSON sets `team_name: null` and `bare_mode: true`; `claude-team build` emits a bare-mode Agent call with `name` and `team_name` absent.
+- No `team_name` parameter on any subsequent `Agent()` dispatch. The input JSON sets `team_name: null` and `bare_mode: true`; `spacedock dispatch build` emits a bare-mode Agent call with `name` and `team_name` absent.
 - Every stage dispatches fresh and blocks until completion. No concurrent dispatch; one entity through one stage at a time.
 - No SendMessage reuse of prior agent names. Stage advancement is always a fresh `Agent()` dispatch seeded from entity frontmatter. `SendMessage(to="{ensign_name}")` against any pre-degrade name is forbidden.
 

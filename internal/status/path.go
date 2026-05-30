@@ -71,9 +71,9 @@ func pyDirname(p string) string {
 	return head
 }
 
-// findGitRoot walks up from startDir to the directory containing a .git entry
+// FindGitRoot walks up from startDir to the directory containing a .git entry
 // (dir or file), returning startDir when none is found. Matches find_git_root.
-func findGitRoot(startDir string) string {
+func FindGitRoot(startDir string) string {
 	d, err := filepath.Abs(startDir)
 	if err != nil {
 		d = startDir

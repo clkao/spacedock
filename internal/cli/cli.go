@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 
+	"github.com/clkao/spacedock-v1/internal/dispatch"
 	"github.com/clkao/spacedock-v1/internal/status"
 )
 
@@ -39,6 +40,8 @@ func run(ctx context.Context, args []string, env []string, dir string, stdin io.
 		return 0
 	case "status":
 		return runStatus(ctx, args[1:], env, dir, stdin, stdout, stderr, runner)
+	case "dispatch":
+		return dispatch.Run(args[1:], stdin, stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "unknown command: %s\n", args[0])
 		printUsage(stderr)
@@ -82,9 +85,12 @@ func printUsage(w io.Writer) {
 
 Usage:
   spacedock status [args...]
+  spacedock dispatch build --workflow-dir DIR
+  spacedock dispatch show-stage-def --workflow-dir DIR --stage STAGE
   spacedock --version
   spacedock --help
 
 status forwards its arguments to the workflow status command.
+dispatch assembles ensign dispatch artifacts (build, show-stage-def).
 `)
 }
