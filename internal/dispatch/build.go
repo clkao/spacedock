@@ -3,7 +3,6 @@
 package dispatch
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -66,18 +65,23 @@ func runBuild(workflowDir string, stdin io.Reader, stdout, stderr io.Writer) int
 		return buildError(stderr, 1, "failed to read stdin: %s", err)
 	}
 
+	// Classify the top-level value the way the oracle does (json.loads then
+	// isinstance(inp, dict)): invalid JSON → "invalid JSON on stdin"; a valid
+	// non-object top-level (null, array, scalar) → "stdin must be a JSON object".
+	// A bare-map decode cannot tell these apart — decoding JSON null into a map
+	// succeeds with a nil map, masking the non-object case as a missing field.
+	var top interface{}
+	if err := json.Unmarshal(raw, &top); err != nil {
+		return buildError(stderr, 1, "invalid JSON on stdin: %s", err)
+	}
+	if _, ok := top.(map[string]interface{}); !ok {
+		return buildError(stderr, 1, "stdin must be a JSON object")
+	}
+
 	// Distinguish present-but-null from absent (the required-field rule fires for
-	// both), so decode first into a raw-message map, then read typed values.
+	// both), so decode into a raw-message map for typed field access.
 	var fields map[string]json.RawMessage
-	dec := json.NewDecoder(bytes.NewReader(raw))
-	if err := dec.Decode(&fields); err != nil {
-		// A valid JSON non-object (array, string, number) decodes into the map
-		// with an error; a syntax error also lands here. Disambiguate: re-decode
-		// as a generic value to tell "not an object" from "invalid JSON".
-		var any interface{}
-		if json.Unmarshal(raw, &any) == nil {
-			return buildError(stderr, 1, "stdin must be a JSON object")
-		}
+	if err := json.Unmarshal(raw, &fields); err != nil {
 		return buildError(stderr, 1, "invalid JSON on stdin: %s", err)
 	}
 
@@ -201,7 +205,11 @@ func runBuild(workflowDir string, stdin io.Reader, stdout, stderr io.Writer) int
 	var worktreePath, gitRoot string
 	if entityWorktree != "" {
 		gitRoot = status.FindGitRoot(workflowDir)
-		worktreePath = filepath.Join(gitRoot, entityWorktree)
+		// os.path.join (pyJoin) lets an absolute worktree value win, matching the
+		// oracle (claude-team:329). filepath.Join would graft an absolute value
+		// under gitRoot and double the path, missing the existing worktree dir —
+		// the FO stamps absolute worktree: values on live entities.
+		worktreePath = pyJoin(gitRoot, entityWorktree)
 		if info, err := os.Stat(worktreePath); err != nil || !info.IsDir() {
 			return buildError(stderr, 1, "worktree path '%s' does not exist", worktreePath)
 		}

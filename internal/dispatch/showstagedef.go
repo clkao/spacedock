@@ -125,21 +125,48 @@ func containsToken(tokens []string, token string) bool {
 	return false
 }
 
-// splitTextLines splits text into lines the way Python's str.splitlines() does
-// for the line set this parser needs: split on \n after normalizing CRLF/CR to
-// \n, with no trailing empty element when the text ends in a newline. (The
-// oracle reads in text mode with universal newlines, then calls splitlines().)
+// lineBoundary reports whether r is one of the boundaries Python str.splitlines()
+// breaks on: LF, CR (and CRLF, handled by the scanner), VT, FF, FS, GS, RS, NEL
+// (U+0085), LS (U+2028), PS (U+2029). The oracle reads the README in universal-
+// newline text mode then calls splitlines(); the CR-family translation is
+// subsumed here since splitlines() itself breaks on CR/CRLF, so a direct
+// splitlines() gives the identical result.
+func lineBoundary(r rune) bool {
+	switch r {
+	case '\n', '\r', '\v', '\f', '\x1c', '\x1d', '\x1e', '\u0085', '\u2028', '\u2029':
+		return true
+	}
+	return false
+}
+
+// splitTextLines splits text into lines exactly as Python's str.splitlines()
+// does: a boundary terminates the current line (CRLF counts as one boundary),
+// and the trailing line is dropped when the text ends in a boundary (no empty
+// final element). An empty input yields no lines.
 func splitTextLines(text string) []string {
 	if text == "" {
 		return nil
 	}
-	text = strings.ReplaceAll(text, "\r\n", "\n")
-	text = strings.ReplaceAll(text, "\r", "\n")
-	parts := strings.Split(text, "\n")
-	if len(parts) > 0 && parts[len(parts)-1] == "" {
-		parts = parts[:len(parts)-1]
+	var lines []string
+	var cur []rune
+	runes := []rune(text)
+	for i := 0; i < len(runes); i++ {
+		r := runes[i]
+		if !lineBoundary(r) {
+			cur = append(cur, r)
+			continue
+		}
+		lines = append(lines, string(cur))
+		cur = nil
+		// CRLF is a single boundary: consume the following LF after a CR.
+		if r == '\r' && i+1 < len(runes) && runes[i+1] == '\n' {
+			i++
+		}
 	}
-	return parts
+	if len(cur) > 0 {
+		lines = append(lines, string(cur))
+	}
+	return lines
 }
 
 // runShowStageDef emits the README's ### {stage} subsection on stdout. Exit 0

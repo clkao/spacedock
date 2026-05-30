@@ -21,17 +21,24 @@ func isJSONNull(v json.RawMessage) bool {
 	return string(bytes.TrimSpace(v)) == "null"
 }
 
-// isSchemaVersion reports whether the raw value is exactly the JSON number 2 —
-// the oracle's `sv != SCHEMA_VERSION` after json.loads, where a string "2" or a
-// float 2.0 are distinct values that fail the check.
+// isSchemaVersion reports whether the raw value equals schema version 2 the way
+// the oracle's `sv != SCHEMA_VERSION` does after json.loads: a numeric
+// comparison. JSON 2 and 2.0 both accept (Python `2.0 != 2` is False); a string
+// "2", a bool, or null reject (Python `"2" != 2` is True). Only a JSON number
+// whose value is exactly 2 is accepted.
 func isSchemaVersion(v json.RawMessage) bool {
-	var n json.Number
+	var val interface{}
 	dec := json.NewDecoder(bytes.NewReader(v))
 	dec.UseNumber()
-	if err := dec.Decode(&n); err != nil {
+	if err := dec.Decode(&val); err != nil {
 		return false
 	}
-	return n.String() == "2"
+	n, ok := val.(json.Number)
+	if !ok {
+		return false
+	}
+	f, err := n.Float64()
+	return err == nil && f == 2
 }
 
 // renderSchemaVersion renders the parsed schema_version the way Python's f-string
