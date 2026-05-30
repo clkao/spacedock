@@ -1,14 +1,17 @@
 // ABOUTME: Root-resolution seam — resolveRoots(workflowDir) splits the README
-// ABOUTME: (definition) root from the entity root; both equal workflowDir for now.
+// ABOUTME: (definition) root from the entity root via the README's `state:` field.
 package status
 
-import "path/filepath"
+import (
+	"fmt"
+	"path/filepath"
+	"strings"
+)
 
-// roots carries the two directory roles the status units consume. In this stage
-// definitionDir == entityDir == workflowDir (single-root), matching the oracle's
-// os.path.join(workflow_dir, 'README.md') and same-directory entity scan. The
-// split is threaded now so native-state-dir (Stage 6) becomes a one-function
-// change to resolveRoots rather than a call-site-wide retrofit.
+// roots carries the two directory roles the status units consume. In single-root
+// mode definitionDir == entityDir == workflowDir, matching the oracle's
+// os.path.join(workflow_dir, 'README.md') and same-directory entity scan. A
+// `state:` field in the README diverges entityDir to definitionDir/<state>.
 //
 // The oracle relies on the process cwd to resolve a relative --workflow-dir; an
 // in-process runner cannot chdir safely, so each role carries two spellings: the
@@ -29,20 +32,49 @@ type roots struct {
 
 // resolveRoots returns the definition and entity roots for a workflow dir,
 // resolving relative spellings against baseDir for I/O while preserving the
-// literal spelling for output. Both roles equal workflowDir in this stage;
-// Stage 6 makes definitionDir the README dir and entityDir the state: path with
-// no other call-site change.
-func resolveRoots(workflowDir, baseDir string) roots {
+// literal spelling for output. The definition dir always holds the README; the
+// entity dir is definitionDir/<state> when the README frontmatter carries a
+// non-empty `state:` field, else the definition dir itself. An absolute `state:`
+// value, or one that escapes the definition dir via `..`, is rejected with an
+// error rather than silently followed — the v0 contract is a child checkout.
+func resolveRoots(workflowDir, baseDir string) (roots, error) {
 	abs := workflowDir
 	if workflowDir == "" {
 		abs = baseDir
 	} else if !filepath.IsAbs(workflowDir) && baseDir != "" {
 		abs = filepath.Join(baseDir, workflowDir)
 	}
-	return roots{
+
+	r := roots{
 		definitionDir:         abs,
 		entityDir:             abs,
 		definitionDirSpelling: workflowDir,
 		entityDirSpelling:     workflowDir,
 	}
+
+	stateValue := strings.TrimSpace(parseFrontmatter(filepath.Join(abs, "README.md"))["state"])
+	if stateValue == "" {
+		return r, nil
+	}
+	if filepath.IsAbs(stateValue) {
+		return roots{}, fmt.Errorf("state: must be a path relative to the workflow README directory, not absolute: %s", stateValue)
+	}
+	cleaned := filepath.Clean(stateValue)
+	if cleaned == ".." || strings.HasPrefix(cleaned, ".."+string(filepath.Separator)) {
+		return roots{}, fmt.Errorf("state: must not escape the workflow README directory: %s", stateValue)
+	}
+
+	r.entityDir = filepath.Join(abs, cleaned)
+	r.entityDirSpelling = pyJoin(spellingOr(workflowDir, abs), stateValue)
+	return r, nil
+}
+
+// spellingOr returns the as-passed spelling when non-empty, else the absolute
+// fallback, so a state-checkout dest still renders coherently when the workflow
+// dir was derived from baseDir rather than passed explicitly.
+func spellingOr(spelling, fallback string) string {
+	if spelling != "" {
+		return spelling
+	}
+	return fallback
 }

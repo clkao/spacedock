@@ -82,22 +82,20 @@ Think.
 Terminal.
 `
 
-// stagePilotWorkflow builds a split-root symlink-profile workflow in a fresh
-// git repo: README in the main repo, .spacedock-state/README.md symlinked to
-// ../README.md, and a folder-form entity in the state checkout. Returns the
-// state-checkout dir the launcher is pointed at, and the entity slug.
-func stagePilotWorkflow(t *testing.T) (stateDir, slug string) {
+// stagePilotWorkflow builds a native split-root workflow in a fresh git repo:
+// README in the main repo carrying state: .spacedock-state, and a folder-form
+// entity in the state checkout. The launcher is pointed at the definition dir
+// (the native operator model the production NativeRunner enables); no
+// .spacedock-state/README.md symlink is required. Returns the definition dir,
+// the state-checkout dir, and the entity slug.
+func stagePilotWorkflow(t *testing.T) (defDir, stateDir, slug string) {
 	t.Helper()
-	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte(pilotReadme), 0o644); err != nil {
+	defDir = t.TempDir()
+	if err := os.WriteFile(filepath.Join(defDir, "README.md"), []byte(pilotReadme), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	stateDir = filepath.Join(root, ".spacedock-state")
+	stateDir = filepath.Join(defDir, ".spacedock-state")
 	if err := os.MkdirAll(stateDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	// Symlink-compatibility profile: .spacedock-state/README.md -> ../README.md.
-	if err := os.Symlink(filepath.Join("..", "README.md"), filepath.Join(stateDir, "README.md")); err != nil {
 		t.Fatal(err)
 	}
 	slug = "pilot-entity"
@@ -119,15 +117,16 @@ A folder-form entity driven through the launcher.
 	if err := os.WriteFile(entityPath, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	gitInitFixture(t, root)
-	return stateDir, slug
+	gitInitFixture(t, defDir)
+	return defDir, stateDir, slug
 }
 
-// runStatus runs `spacedock status --workflow-dir {stateDir} {args...}` and
-// returns combined output and exit code.
-func runStatus(t *testing.T, stateDir string, args ...string) (string, int) {
+// runStatus runs `spacedock status --workflow-dir {defDir} {args...}` and
+// returns combined output and exit code. defDir is the definition dir (holds
+// README.md); the native runner resolves entities under its state: checkout.
+func runStatus(t *testing.T, defDir string, args ...string) (string, int) {
 	t.Helper()
-	full := append([]string{"status", "--workflow-dir", stateDir}, args...)
+	full := append([]string{"status", "--workflow-dir", defDir}, args...)
 	cmd := exec.Command(spacedockBinary(t), full...)
 	cmd.Env = append(os.Environ(), "HOME="+t.TempDir())
 	out, err := cmd.CombinedOutput()
@@ -146,10 +145,10 @@ func runStatus(t *testing.T, stateDir string, args ...string) (string, int) {
 // narrates field: old -> new, and --archive moves the entity under _archive in
 // the state checkout — all through the real launcher binary.
 func TestLauncherListSetArchive(t *testing.T) {
-	stateDir, slug := stagePilotWorkflow(t)
+	defDir, stateDir, slug := stagePilotWorkflow(t)
 
 	// List: the entity row must render.
-	list, code := runStatus(t, stateDir)
+	list, code := runStatus(t, defDir)
 	if code != 0 {
 		t.Fatalf("list exit %d:\n%s", code, list)
 	}
@@ -158,7 +157,7 @@ func TestLauncherListSetArchive(t *testing.T) {
 	}
 
 	// --set: status backlog -> ideation, narrated on stdout.
-	setOut, code := runStatus(t, stateDir, "--set", slug, "status=ideation")
+	setOut, code := runStatus(t, defDir, "--set", slug, "status=ideation")
 	if code != 0 {
 		t.Fatalf("--set exit %d:\n%s", code, setOut)
 	}
@@ -167,7 +166,7 @@ func TestLauncherListSetArchive(t *testing.T) {
 	}
 
 	// --archive: the entity moves under _archive in the state checkout.
-	archiveOut, code := runStatus(t, stateDir, "--archive", slug)
+	archiveOut, code := runStatus(t, defDir, "--archive", slug)
 	if code != 0 {
 		t.Fatalf("--archive exit %d:\n%s", code, archiveOut)
 	}

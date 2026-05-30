@@ -249,10 +249,13 @@ func runRead(roots roots, args []string, e env, whereFilters []whereFilter,
 }
 
 // discoverIgnoreDirs is the baseline prune set for --discover. Matches
-// DISCOVER_IGNORE_DIRS.
+// DISCOVER_IGNORE_DIRS, extended with .spacedock-state so a state checkout is
+// never walked into and re-surfaced as a second workflow (the native split-root
+// state dir holds no own README; a stray symlinked one would otherwise match).
 var discoverIgnoreDirs = map[string]bool{
 	".git": true, ".worktrees": true, "node_modules": true, "vendor": true,
 	"dist": true, "build": true, "__pycache__": true, "tests": true,
+	".spacedock-state": true,
 }
 
 // readGitignoreDirBasenames returns basenames of directory-pattern entries in
@@ -298,6 +301,13 @@ func discoverWorkflows(root string) []string {
 	seenReal := map[string]bool{}
 	var results []string
 	resultSet := map[string]bool{}
+	// prunedStateDirs holds the realpath of each discovered workflow's state
+	// checkout (its `state:` target). A state checkout is the mutable-entity
+	// source of a workflow already counted via its main README; it must never be
+	// reported as a separate workflow even if a stray README symlink lingers
+	// inside it. This complements the .spacedock-state basename prune for
+	// workflows that name their state dir something else.
+	prunedStateDirs := map[string]bool{}
 
 	var walk func(dir string)
 	walk = func(dir string) {
@@ -306,6 +316,9 @@ func discoverWorkflows(root string) []string {
 			return
 		}
 		seenReal[realDir] = true
+		if prunedStateDirs[realDir] {
+			return
+		}
 
 		entries, err := os.ReadDir(dir)
 		if err != nil {
@@ -320,6 +333,12 @@ func discoverWorkflows(root string) []string {
 					resultSet[resolved] = true
 					results = append(results, resolved)
 				}
+				if stateValue := strings.TrimSpace(fields["state"]); stateValue != "" {
+					if cleaned := filepath.Clean(stateValue); !filepath.IsAbs(stateValue) &&
+						cleaned != ".." && !strings.HasPrefix(cleaned, ".."+string(filepath.Separator)) {
+						prunedStateDirs[realpathOf(filepath.Join(dir, cleaned))] = true
+					}
+				}
 			}
 		}
 		for _, ent := range entries {
@@ -329,6 +348,9 @@ func discoverWorkflows(root string) []string {
 				continue
 			}
 			if ignore[ent.Name()] {
+				continue
+			}
+			if prunedStateDirs[realpathOf(filepath.Join(dir, ent.Name()))] {
 				continue
 			}
 			walk(filepath.Join(dir, ent.Name()))
