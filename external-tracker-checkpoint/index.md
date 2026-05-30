@@ -227,3 +227,22 @@ Process note for the FO: the dispatch's `### Fetch commands` block calls
 (exit 127); I ran it via its full path under `skills/commission/bin/` and it does
 expose `show-stage-def`. Non-blocking — the inline checklist + entity file were a
 complete spec — but the dispatch assumes `claude-team` is on PATH.
+
+## Stage Report: implementation
+
+- DONE: Add a direct AC-3 test: a folder-form fixture entity (index.md) carrying issue/source plus a reports/ subdir (or appended body) is discovered as exactly ONE entity and its issue/source frontmatter survives intact after a report append. Fold into the existing internal/status test suite — do NOT create a tracker-shaped package.
+  `TestNativeFolderEntityReportAppendPreservesTracker` in `internal/status/native_mutation_test.go` (worktree commit ef566ca): builds a `070-tracker/index.md` + `070-tracker/reports/ideation.md` folder entity carrying `issue: kata:task-xyz789` / `source: kata`, appends a `## Stage Report` body section, then asserts the default status read matches the oracle byte-for-byte, the slug appears in exactly one data row (`strings.Count == 1`, not misdetected via the reports/ subdir), and `source: kata` / `issue: kata:task-xyz789` survive the append. Folded into the existing suite via `stageFixtureWith`; no tracker-shaped package added.
+- DONE: go test ./... and go test ./... -race, gofmt -l, go vet all clean with REAL captured exit codes.
+  `go test ./...` exit 0 (internal/status ok 11.9s, internal/cli ok, skills/integration ok); `go test ./... -race` exit 0 (internal/status ok 13.0s); `gofmt -l .` exit 0 (no files listed); `go vet ./...` exit 0 (no output). Test is load-bearing — flipping the asserted `issue:` value to a wrong string fails with the actual preserved frontmatter shown.
+
+### Summary
+
+AC-1/AC-2/AC-4 already had direct reproduced evidence in merged sibling suites
+(`TestNativeUnknownFieldPreservation` for `--set`/`--archive` byte-for-byte;
+`set-unrelated-keeps-unknown` in `zz_independent_parity_test.go` as the independent
+oracle); AC-5/AC-6 are static and satisfied in this body. The only gap was AC-3's
+specific combination — a folder-form entity carrying `issue`/`source` with an
+internal `reports/` subdir, after a stage-report body append, discovered as exactly
+one entity with frontmatter intact. Added one test for exactly that, folded into the
+existing `internal/status` suite (no tracker package), proved against the live
+oracle. All four gates clean with captured exit codes.
