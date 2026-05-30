@@ -1,11 +1,13 @@
 ---
 id: jsacmxpkcwp3vg2t60yjdc4y
 title: Agent-facing output modes — JSON, field projection, quiet (token-frugal)
-status: implementation
+status: done
 source: session 1 debrief — rtk-inspired
 score: "0.38"
-worktree: /Users/clkao/git/spacedock-research/spacedock-v1/.worktrees/spacedock-ensign-agent-output-modes
+worktree: 
 started: 2026-05-30T19:17:39Z
+completed: 2026-05-30T21:11:18Z
+verdict: PASSED
 ---
 
 Give `spacedock status` agent-facing output modes so first officers and ensigns parse state cheaply and robustly instead of scraping a padded table. Inspired by rtk (Rust Token Killer): the agent surface should be token-frugal and structured. FLYWHEEL: the FO reads status on every boot / dispatchable check / gate across a long autonomous sprint, so per-read cost compounds.
