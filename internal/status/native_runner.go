@@ -92,6 +92,8 @@ func dispatch(args []string, dir string, e env, stdin io.Reader, stdout, stderr 
 	showNextID := contains(args, "--next-id")
 	showBoot := contains(args, "--boot")
 	showValidate := contains(args, "--validate")
+	asJSON := contains(args, "--json")
+	quiet := contains(args, "--quiet")
 	hasFieldsFlag := explicitFields != nil || allFieldsFlag
 
 	// --new accepts --id-seed/--id-actor too, so only gate them when neither
@@ -178,6 +180,10 @@ func dispatch(args []string, dir string, e env, stdin io.Reader, stdout, stderr 
 		if err != nil {
 			return errExit(stderr, err.Error())
 		}
+		if asJSON {
+			emitJSON(stdout, singletonJSON("next-id", "id", id))
+			return 0
+		}
 		fmt.Fprintln(stdout, id)
 		return 0
 	}
@@ -212,9 +218,9 @@ func dispatch(args []string, dir string, e env, stdin io.Reader, stdout, stderr 
 			return errExit(stderr, "--resolve cannot be combined with "+strings.Join(incompatible, ", "))
 		}
 		if rootPath != "" {
-			return resolveFromRootOrExit(rootPath, resolveRef, includeArchive, stdout, stderr)
+			return resolveFromRootOrExit(rootPath, resolveRef, includeArchive, asJSON, stdout, stderr)
 		}
-		return resolveReferenceOrExit(roots, resolveRef, includeArchive, stdout, stderr)
+		return resolveReferenceOrExit(roots, resolveRef, includeArchive, asJSON, stdout, stderr)
 	}
 
 	if shortIDRef != "" {
@@ -252,7 +258,7 @@ func dispatch(args []string, dir string, e env, stdin io.Reader, stdout, stderr 
 		if len(incompatible) > 0 {
 			return errExit(stderr, "--short-id cannot be combined with "+strings.Join(incompatible, ", "))
 		}
-		return printShortIDOrExit(roots, shortIDRef, stdout, stderr)
+		return printShortIDOrExit(roots, shortIDRef, asJSON, stdout, stderr)
 	}
 
 	if rootPath != "" {
@@ -293,15 +299,15 @@ func dispatch(args []string, dir string, e env, stdin io.Reader, stdout, stderr 
 		if rc != 0 {
 			return rc
 		}
-		return runArchive(roots.entityDir, roots.entityDirSpelling, resolved.slug, contains(args, "--force"), stdout, stderr)
+		return runArchive(roots.entityDir, roots.entityDirSpelling, resolved.slug, contains(args, "--force"), quiet, asJSON, stdout, stderr)
 	}
 
 	if setResult != nil {
-		return runSet(roots, setResult, args, whereFilters, includeArchive, showNext, showBoot, showNextID, showValidate, hasFieldsFlag, stdout, stderr)
+		return runSet(roots, setResult, args, whereFilters, includeArchive, showNext, showBoot, showNextID, showValidate, hasFieldsFlag, quiet, asJSON, stdout, stderr)
 	}
 
 	// Read paths (table / next / boot / validate).
-	return runRead(roots, args, e, whereFilters, includeArchive, showNext, showBoot, showNextID, showValidate, explicitFields, allFieldsFlag, archiveSlug != "", setResult != nil, resolveRef != "", stdout, stderr)
+	return runRead(roots, args, e, whereFilters, includeArchive, showNext, showBoot, showNextID, showValidate, explicitFields, allFieldsFlag, asJSON, quiet, archiveSlug != "", setResult != nil, resolveRef != "", stdout, stderr)
 }
 
 // failOnValidationErrors prints validation errors to stderr and returns 1 when
@@ -329,7 +335,7 @@ func contains(s []string, v string) bool {
 
 // resolveReferenceOrExit resolves a ref in one workflow and prints the resolve
 // line, or fails. Matches resolve_reference_or_exit.
-func resolveReferenceOrExit(roots roots, ref string, includeArchived bool, stdout, stderr io.Writer) int {
+func resolveReferenceOrExit(roots roots, ref string, includeArchived, asJSON bool, stdout, stderr io.Writer) int {
 	idStyle, err := workflowIDStyle(roots.definitionDir)
 	if err != nil {
 		return errExit(stderr, err.Error())
@@ -344,13 +350,17 @@ func resolveReferenceOrExit(roots roots, ref string, includeArchived bool, stdou
 		}
 		return 1
 	}
+	if asJSON {
+		emitJSON(stdout, resolveJSON(roots.entityDir, res.matches[0]))
+		return 0
+	}
 	fmt.Fprintln(stdout, formatResolveLine(roots.entityDir, res.matches[0]))
 	return 0
 }
 
 // printShortIDOrExit resolves REF across active+archived and prints its short
 // display id. Matches print_short_id_or_exit.
-func printShortIDOrExit(roots roots, ref string, stdout, stderr io.Writer) int {
+func printShortIDOrExit(roots roots, ref string, asJSON bool, stdout, stderr io.Writer) int {
 	idStyle, err := workflowIDStyle(roots.definitionDir)
 	if err != nil {
 		return errExit(stderr, err.Error())
@@ -366,20 +376,26 @@ func printShortIDOrExit(roots roots, ref string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	entity := res.matches[0]
+	var shortID string
 	switch idStyle {
 	case "slug":
-		fmt.Fprintln(stdout, entity.slug)
+		shortID = entity.slug
 	case "sd-b32":
 		all := activeAndArchivedEntities(roots.entityDir, stderr)
 		display := computeSDB32DisplayIDs(all)
 		if d, ok := display[entity.storedID]; ok {
-			fmt.Fprintln(stdout, d)
+			shortID = d
 		} else {
-			fmt.Fprintln(stdout, entity.storedID)
+			shortID = entity.storedID
 		}
 	default:
-		fmt.Fprintln(stdout, entity.storedID)
+		shortID = entity.storedID
 	}
+	if asJSON {
+		emitJSON(stdout, singletonJSON("short-id", "id", shortID))
+		return 0
+	}
+	fmt.Fprintln(stdout, shortID)
 	return 0
 }
 
@@ -478,7 +494,7 @@ func runGit(dir string, args ...string) (string, error) {
 
 // resolveFromRootOrExit is the multi-workflow --root resolver. Matches
 // resolve_from_root_or_exit.
-func resolveFromRootOrExit(rootPath, ref string, includeArchived bool, stdout, stderr io.Writer) int {
+func resolveFromRootOrExit(rootPath, ref string, includeArchived, asJSON bool, stdout, stderr io.Writer) int {
 	info, err := os.Stat(rootPath)
 	if err != nil || !info.IsDir() {
 		return errExit(stderr, "--root path does not exist: "+rootPath)
@@ -516,7 +532,7 @@ func resolveFromRootOrExit(rootPath, ref string, includeArchived bool, stdout, s
 		if err != nil {
 			return errExit(stderr, err.Error())
 		}
-		return resolveReferenceOrExit(qualifiedRoots, innerRef, includeArchived, stdout, stderr)
+		return resolveReferenceOrExit(qualifiedRoots, innerRef, includeArchived, asJSON, stdout, stderr)
 	}
 
 	type match struct {
@@ -547,6 +563,10 @@ func resolveFromRootOrExit(rootPath, ref string, includeArchived bool, stdout, s
 	}
 
 	if len(matches) == 1 && len(hardErrors) == 0 {
+		if asJSON {
+			emitJSON(stdout, resolveJSON(matches[0].workflow, matches[0].entity))
+			return 0
+		}
 		fmt.Fprintln(stdout, formatResolveLine(matches[0].workflow, matches[0].entity))
 		return 0
 	}

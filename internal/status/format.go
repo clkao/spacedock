@@ -97,8 +97,9 @@ func padRight(s string, w int) string {
 }
 
 // printStatusTable writes the default table, optionally with extra columns.
-// Matches print_status_table.
-func printStatusTable(w io.Writer, entities []*entity, stages []stage, extras []string) {
+// Matches print_status_table. suppressHeader drops the header + separator rows
+// for --quiet, emitting data rows only.
+func printStatusTable(w io.Writer, entities []*entity, stages []stage, extras []string, suppressHeader bool) {
 	sorted := sortDefault(entities, stages)
 
 	if len(extras) == 0 {
@@ -106,8 +107,10 @@ func printStatusTable(w io.Writer, entities []*entity, stages []stage, extras []
 			return padRight(a, 6) + " " + padRight(b, 30) + " " + padRight(c, 20) + " " +
 				padRight(d, 30) + " " + padRight(e, 8) + " " + f
 		}
-		fmt.Fprintln(w, row("ID", "SLUG", "STATUS", "TITLE", "SCORE", "SOURCE"))
-		fmt.Fprintln(w, row("--", "----", "------", "-----", "-----", "------"))
+		if !suppressHeader {
+			fmt.Fprintln(w, row("ID", "SLUG", "STATUS", "TITLE", "SCORE", "SOURCE"))
+			fmt.Fprintln(w, row("--", "----", "------", "-----", "-----", "------"))
+		}
 		for _, e := range sorted {
 			fmt.Fprintln(w, row(e.fields["id"], e.fields["slug"], e.fields["status"],
 				e.fields["title"], e.fields["score"], e.fields["source"]))
@@ -121,8 +124,10 @@ func printStatusTable(w io.Writer, entities []*entity, stages []stage, extras []
 	}
 	headerExtras := upperAll(extras)
 	sepExtras := dashSeps(headerExtras)
-	fmt.Fprintln(w, base("ID", "SLUG", "STATUS", "TITLE", "SCORE", "SOURCE")+" "+joinExtras(headerExtras))
-	fmt.Fprintln(w, base("--", "----", "------", "-----", "-----", "------")+" "+joinExtras(sepExtras))
+	if !suppressHeader {
+		fmt.Fprintln(w, base("ID", "SLUG", "STATUS", "TITLE", "SCORE", "SOURCE")+" "+joinExtras(headerExtras))
+		fmt.Fprintln(w, base("--", "----", "------", "-----", "-----", "------")+" "+joinExtras(sepExtras))
+	}
 	for _, e := range sorted {
 		cells := make([]string, len(extras))
 		for i, name := range extras {
@@ -197,8 +202,9 @@ func computeDispatchable(entities []*entity, stages []stage) []dispatchable {
 }
 
 // printNextTable writes the --next table, optionally with extras. Matches
-// print_next_table.
-func printNextTable(w io.Writer, entities []*entity, stages []stage, extras []string) {
+// print_next_table. suppressHeader drops the header + separator rows for
+// --quiet, emitting data rows only.
+func printNextTable(w io.Writer, entities []*entity, stages []stage, extras []string, suppressHeader bool) {
 	disp := computeDispatchable(entities, stages)
 
 	if len(extras) == 0 {
@@ -206,8 +212,10 @@ func printNextTable(w io.Writer, entities []*entity, stages []stage, extras []st
 			return padRight(a, 6) + " " + padRight(b, 30) + " " + padRight(c, 20) + " " +
 				padRight(d, 20) + " " + e
 		}
-		fmt.Fprintln(w, row("ID", "SLUG", "CURRENT", "NEXT", "WORKTREE"))
-		fmt.Fprintln(w, row("--", "----", "-------", "----", "--------"))
+		if !suppressHeader {
+			fmt.Fprintln(w, row("ID", "SLUG", "CURRENT", "NEXT", "WORKTREE"))
+			fmt.Fprintln(w, row("--", "----", "-------", "----", "--------"))
+		}
 		for _, d := range disp {
 			fmt.Fprintln(w, row(d.e.fields["id"], d.e.fields["slug"], d.e.fields["status"], d.next, d.nextWorktree))
 		}
@@ -220,8 +228,10 @@ func printNextTable(w io.Writer, entities []*entity, stages []stage, extras []st
 	}
 	headerExtras := upperAll(extras)
 	sepExtras := dashSeps(headerExtras)
-	fmt.Fprintln(w, base("ID", "SLUG", "CURRENT", "NEXT", "WORKTREE")+" "+joinExtras(headerExtras))
-	fmt.Fprintln(w, base("--", "----", "-------", "----", "--------")+" "+joinExtras(sepExtras))
+	if !suppressHeader {
+		fmt.Fprintln(w, base("ID", "SLUG", "CURRENT", "NEXT", "WORKTREE")+" "+joinExtras(headerExtras))
+		fmt.Fprintln(w, base("--", "----", "-------", "----", "--------")+" "+joinExtras(sepExtras))
+	}
 	for _, d := range disp {
 		cells := make([]string, len(extras))
 		for i, name := range extras {

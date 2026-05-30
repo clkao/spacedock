@@ -167,6 +167,42 @@ func TestSplitRootContractClause(t *testing.T) {
 	}
 }
 
+// TestEventLoopReadsUseJSON locks AC-4 (the contract switch): the FO runtime's
+// own `## Event Loop` scheduling reads consume `--json`, not the padded table.
+// The assertion is scoped to the `## Event Loop` section via sectionAfter and
+// requires each scheduling read in its `--json` form, so it fails both if the
+// switch was never made AND if a later edit reverts a line to the bare read —
+// the weakness the prior presence-of-substring check could not detect.
+func TestEventLoopReadsUseJSON(t *testing.T) {
+	files := vendoredSkillFiles(t)
+	runtime := files["first-officer/references/claude-first-officer-runtime.md"]
+
+	section := sectionAfter(runtime, "## Event Loop")
+	if section == "" {
+		t.Fatalf("claude-first-officer-runtime.md has no `## Event Loop` section")
+	}
+
+	// Each FO-internal scheduling read must appear in its --json form within the
+	// Event Loop. These are the reads the FO parses; the captain-facing table
+	// path lives elsewhere and is unaffected.
+	wantReads := []string{
+		`status --where "pr !=" --json`,
+		`status --where "mod-block !=" --json`,
+		`status --next --json`,
+	}
+	for _, read := range wantReads {
+		if !strings.Contains(section, read) {
+			t.Errorf("Event Loop section missing JSON-mode scheduling read %q", read)
+		}
+	}
+
+	// The mod-block clear is a mutation, not a parsed read, and must NOT have been
+	// rewritten to --json (guards against an over-broad sweep).
+	if strings.Contains(section, "status --set {slug} mod-block= --json") {
+		t.Errorf("Event Loop mod-block clear was wrongly rewritten to --json")
+	}
+}
+
 // sectionAfter returns the body of the markdown section beginning at the line
 // equal to heading, up to (but excluding) the next top-level `## ` heading, or
 // "" when the heading is absent. Used to scope an assertion to one section.
