@@ -1,10 +1,11 @@
 ---
 id: hxs93wd0bjwhc3vsjwx1seew
 title: Harden the deliverable contract — behavioral-oracle gate guard, four principles, portable TDD, ergonomics
-status: backlog
+status: ideation
 source: sprint — FO/captain (deliverable-principles + TDD/template study)
 score: "0.34"
 worktree:
+started: 2026-05-30T22:25:57Z
 ---
 
 Encode the hard-won deliverable principles into the SHIPPED spacedock contract so future dev work cannot drift into the doc-only / grep-proof antipatterns, and so the discipline travels with the published plugin rather than depending on any one user's environment. Design inputs (both in `docs/dev/_proposals/`): `encoding-deliverable-principles.md` (the four principles + the code guard, with exact before/after wording) and `tdd-and-template-adoption.md` (template comparison + ergonomics) — **with that study's "rely on global CLAUDE.md" TDD conclusion SUPERSEDED** (see AC-3 / Notes).
