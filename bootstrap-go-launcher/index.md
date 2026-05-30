@@ -178,3 +178,26 @@ Process note for the FO: the dispatch's `### Fetch commands` block calls
 `show-stage-def`. The assignment was fully self-contained (inline checklist + this
 entity file as the spec), so the fetch failure was non-blocking, but the dispatch
 shape references a subcommand the current binary does not provide.
+
+## Stage Report: validation
+
+- DONE: Independently reproduce each AC-1..AC-7 'Verified by' clause from the worktree branch checkout (run `go test ./...`, `-race`, `gofmt -l ./cmd ./internal`, `go build ./...`, and smoke the COMPILED binary for the AC-4/AC-5 exit-2 codes). Confirm every AC has reproduced evidence; flag any that do not.
+  Worktree on `spacedock-ensign/bootstrap-go-launcher` @ b10ac27, clean tree. `go test ./...` & `-race` → 3 passed in 2 packages (raw `-v`: TestHelp/TestVersion/TestUnknownCommand all PASS; `cmd/spacedock` = no test files). `gofmt -l ./cmd ./internal` empty (exit 0); `go build ./...` and `go vet ./...` exit 0. Compiled binary smokes (true exit codes, no `go run`): AC-2 bare/`--help`/`help`/`-h` → usage on stdout, empty stderr, exit 0; AC-3 `--version`/`version` → `spacedock 0.1.0-dev` on stdout, exit 0; AC-4 `bogus` → `unknown command: bogus`+usage on stderr, exit **2**; AC-5 `status` → `spacedock status: not implemented yet` on stderr, exit **2**. AC-1: `main.go` = 11-line `main()` calling `cli.Run(os.Args[1:], os.Stdout, os.Stderr)` + `os.Exit`; logic in `internal/cli/cli.go`. AC-5 absence: `internal/status` dir absent, no `package status` anywhere (AGENTS.md lists it as future). AC-6: all 5 AGENTS.md sections present, Expected Commands cites go test/-race/gofmt, `skills/README.md` present. Every AC reproduced.
+- DONE: Judge that the tests prove the INTENDED behavior at the right level (exit codes asserted via cli.Run / compiled binary, not `go run`; status is a real placeholder, not a stub hiding logic) — reject if a test passes while encoding the wrong target.
+  Exit codes are asserted at the right level: `TestUnknownCommand` checks `cli.Run` returns 2 directly, and I confirmed exit 2 against the compiled binary — neither path relies on `go run` (which masks exit 2 as shell exit 1). `status` is a genuine placeholder: the `case "status"` arm only prints the not-implemented message and returns 2; no `internal/status/` package and no `package status` source exists, so it cannot be a stub hiding logic. TestHelp/TestVersion assert real stdout/stderr/exit targets via `bytes.Buffer`, not mocks. One narrowness flag (non-blocking): AC-2's cited `TestHelp` only exercises `--help`; the `help`/`-h`/bare variants have no Go test, but I independently verified all four against the compiled binary and the AC-2 property holds.
+- DONE: Give a PASSED or REJECTED recommendation backed by the reproduced evidence; if REJECTED, name the concrete gap to route back to implementation.
+  Recommendation: **PASSED**. All 7 ACs independently reproduced from the worktree checkout; no gap warrants routing back to implementation.
+
+### Summary
+
+Independent validation: PASSED. Reproduced all 7 ACs from the worktree branch
+checkout without trusting prior stage reports — `go test ./...` and `-race` give
+3 passing tests across 2 packages, gofmt/build/vet are clean, and the AC-4/AC-5
+exit-2 codes were confirmed against the COMPILED binary (true exit 2, sidestepping
+the documented `go run` masking). Exit-code assertions are at the correct level
+(`cli.Run` return value / compiled binary, never `go run`), and `status` is a real
+placeholder with no hidden logic or `internal/status/` package. The only nuance is
+that AC-2's cited `TestHelp` covers only `--help`; I verified the `help`/`-h`/bare
+variants directly against the binary, so the AC-2 property still holds — narrower
+test coverage than the stated property, not a defect. No code changes; worktree
+stayed clean throughout. This stage report is the only edit, in the state checkout.
