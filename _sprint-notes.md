@@ -69,6 +69,24 @@ Same family as the dep-policy correction above → one post-bootstrap "parsing m
 follow-up (file as an entity at bootstrap graduation; sprint-note for now since it is off the
 critical path).
 
+## Two-origin / distribution-remotes follow-up (captain, 2026-05-30)
+Surfaced when scoping spacedock-packaging to the spacedock-v1 side. Three coupled items,
+post-bootstrap / release-time (none block the current sprint):
+- **Push `next` to the marketplace repo.** Add a remote to `~/git/spacedock` and push a
+  `next` branch (the marketplace's declared repo is `clkao/spacedock`; the local clone's
+  remotes are forks). This is the prerequisite for spacedock-packaging's DEFERRED half:
+  the `~/git/spacedock` authoritative `.codex-plugin/plugin.json` `requires-contract` edit
+  + cross-repo drift test + the `@next` live pre-release install verification.
+- **State repo gets its own origin as a separate ORPHAN branch.** `docs/dev/.spacedock-state`
+  is a separate local git repo today with no remote. Give it a remote — an orphan branch
+  (state history is independent of code history) — so the live workflow state is persisted
+  /shareable distinctly from the code.
+- **Iron out the two origins.** The code repo (spacedock-v1 origin) and the state repo
+  (orphan-branch origin) are two separate remotes/histories. Coordinating them is a
+  follow-up — ESPECIALLY the future pr-merge mod (which pushes branches + opens PRs and
+  would need to know which origin/branch each artifact targets). pr/mod flow is out of
+  scope for THIS bootstrap workflow (README says so), so this is a post-bootstrap concern.
+
 ## Debrief notes
 - external-tracker-checkpoint shipped PASSED but AC-6 was a prose self-oracle (the
   doc-only antipattern) — kept as the live example that motivated the principles.
