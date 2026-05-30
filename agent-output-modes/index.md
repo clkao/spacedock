@@ -1,7 +1,7 @@
 ---
 id: jsacmxpkcwp3vg2t60yjdc4y
 title: Agent-facing output modes — JSON, field projection, quiet (token-frugal)
-status: validation
+status: implementation
 source: session 1 debrief — rtk-inspired
 score: "0.38"
 worktree: /Users/clkao/git/spacedock-research/spacedock-v1/.worktrees/spacedock-ensign-agent-output-modes
