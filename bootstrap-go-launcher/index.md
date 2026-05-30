@@ -150,3 +150,31 @@ notable sharp edge is that `go run` masks the CLI's exit-2 as shell exit 1, so
 exit-code claims must be asserted against `cli.Run`'s return value or the compiled
 binary, which the unit tests already do. No product code was touched; only the
 entity file in the state checkout was edited.
+
+## Stage Report: implementation
+
+- DONE: Confirm all 7 ACs against the worktree checkout: run `go test ./...`, `go test ./... -race`, `gofmt -l ./cmd ./internal`, and the help/version/unknown/status smoke commands; record the ACTUAL output as evidence in the stage report.
+  `go test ./...` and `go test ./... -race` → "3 passed in 2 packages"; `gofmt -l ./cmd ./internal` empty (exit 0); `go build ./...` Success. Compiled binary smokes: `--help`/bare → usage on stdout, empty stderr, exit 0 (AC-2); `--version` → `spacedock 0.1.0-dev` on stdout, exit 0 (AC-3); `bogus` → `unknown command: bogus`+usage on stderr, exit 2 (AC-4); `status` → `spacedock status: not implemented yet` on stderr, empty stdout, exit 2 (AC-5). Source inspection confirms AC-1 (`main.go` is a 11-line `main()` calling `cli.Run`; routing in `internal/cli/cli.go`). AC-6: AGENTS.md has all 5 required sections + skills/README.md present. AC-5 absence proof: `find . -path ./internal/status -type d` empty.
+- DONE: If any AC gap surfaces, make the minimal fix and commit it to the worktree branch; otherwise state explicitly 'no code change required' with the evidence that proves each AC is already met.
+  No code change required. Worktree working tree was clean before and after verification (`git status` empty); every AC proven satisfied by the bootstrap commit via the evidence above. No fix needed.
+- DONE: Keep the two commit streams separate: any code change commits to the worktree branch `spacedock-ensign/bootstrap-go-launcher`; the stage report is written to the entity file in the state checkout and committed in THAT repo (the entity file is outside the worktree).
+  No worktree code commit (none required). This stage report is the only edit, written to the entity file in the state checkout and committed in the `docs/dev/.spacedock-state` repo (branch `spacedock-state/dev`), separate from the worktree branch.
+
+### Summary
+
+Verification-only stage. Empirically confirmed all 7 ACs against the worktree
+checkout (`spacedock-ensign/bootstrap-go-launcher`): unit suite and race detector
+both report 3 passed in 2 packages, gofmt is clean, build succeeds, and every
+smoke command behaves as designed. Exit-code claims for the unknown-command (AC-4)
+and status-placeholder (AC-5) cases were proven against the compiled binary — both
+return a true exit 2 — sidestepping the documented `go run` masking artifact. The
+bootstrap commit already satisfies every AC; no code change was required and the
+worktree tree stayed clean throughout. Only this stage report was written, to the
+state-checkout entity file.
+
+Process note for the FO: the dispatch's `### Fetch commands` block calls
+`claude-team show-stage-def`, but the installed `claude-team` binary exposes only
+`{context-budget,build,spawn-standing,list-standing}` and exits non-zero on
+`show-stage-def`. The assignment was fully self-contained (inline checklist + this
+entity file as the spec), so the fetch failure was non-blocking, but the dispatch
+shape references a subcommand the current binary does not provide.
