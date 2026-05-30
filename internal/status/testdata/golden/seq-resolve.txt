@@ -1,0 +1,1 @@
+workflow=<ROOT> scope=active slug=003-wire-cli id=003 path=<ROOT>/003-wire-cli/index.md

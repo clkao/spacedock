@@ -1,0 +1,2546 @@
+#!/usr/bin/env python3
+# commissioned-by: spacedock@{spacedock_version}
+# ABOUTME: Workflow status viewer — shows entity overview from YAML frontmatter.
+# ABOUTME: Supports default table, --archived, --next, --next-id, --boot, --validate, --resolve, --short-id, and --discover.
+#
+# goal: Show one-line-per-{entity_label} workflow overview from YAML frontmatter.
+#
+# instruction: For every entity in this directory (excluding README.md),
+#   extract slug, id, status, title, score, source from YAML frontmatter.
+#   Print aligned table with columns: ID, SLUG, STATUS, TITLE, SCORE, SOURCE.
+#   Sorted by stage order ascending, then score descending.
+#   Default: scan entities at $DIR. With --archived, also scan $DIR/_archive/.
+#   With --next, read stage metadata from README frontmatter and output dispatchable entities.
+#   With --next-id, print only the next strategy-dependent ID candidate.
+#   README frontmatter `id-style` controls identity:
+#     sequential: required numeric id, allocated across active + archived entities.
+#     sd-b32: required 24-char lowercase SD-B32 (Spacedock Base32) stored ID
+#       derived from SHA-256 digest material. Display/address IDs are shortest
+#       unique prefixes across active + archived, MIN_PREFIX: 2.
+#     slug: id is optional; the slug is the effective ID and --next-id is not applicable.
+#   For id-style: sd-b32, `status --next-id --id-seed <slug-or-title>` adds
+#   creator seed material. Direct `--next-id` falls back to SHA-based manual seed
+#   material; it never uses random token character selection.
+#   --validate scans active + archived entities and prints VALID or one error per problem.
+#   --resolve REF prints workflow=, scope=, slug=, id=, path= for an unambiguous ref.
+#
+# Entity discovery: An entity is either a flat `{slug}.md` file OR a folder
+#   `{slug}/` containing an `index.md` file (folder-per-entity). Reserved
+#   subdirectories `_archive` and `_mods` are never treated as entity folders.
+#   When both `{slug}.md` and `{slug}/index.md` exist, validation fails before
+#   normal status output is trusted. `--set` and `--archive` operate on whichever
+#   form holds the slug (folder form preferred when both present).
+#
+# --where filters: Supply one or more --where clauses to filter the output.
+#   Accepted forms (operators `=` and `!=` only, with or without spaces around the operator):
+#     --where "status = watching"      (equality, spaced)
+#     --where "status=watching"        (equality, unspaced)
+#     --where "status != done"         (negation, spaced)
+#     --where "status!=done"           (negation, unspaced)
+#     --where "pr !="                  (presence — field is non-empty)
+#     --where "pr ="                   (absence — field is empty)
+#   Multiple --where clauses AND together. Works on any frontmatter field, including
+#   custom fields. Bare field names without an operator are rejected with an error.
+#   Field names and values are case-sensitive.
+#
+# --fields / --all-fields (append extra frontmatter columns):
+#   --fields a,b,c    append fields a, b, c as extra columns in the order listed.
+#   --all-fields      append every non-empty frontmatter field (minus default columns)
+#                     in sorted order.
+#   Both flags append — they do not replace — the default column set, and both work
+#   with the default table and the --next table. Missing, empty, or nonexistent
+#   fields render as blank. The two flags are mutually exclusive, and neither can be
+#   combined with --boot or --set.
+#
+# --archive <slug>: Archive an entity, creating _archive/ if missing, and stamping
+#   `archived: <ISO-8601 UTC>` in the entity's frontmatter before the move.
+#   For flat entities: move {workflow_dir}/{slug}.md -> {workflow_dir}/_archive/{slug}.md.
+#   For folder entities: stamp {workflow_dir}/{slug}/index.md, then move the whole
+#   folder {workflow_dir}/{slug}/ -> {workflow_dir}/_archive/{slug}/.
+#   Errors if the source is missing or the destination already exists.
+#   Does not touch `completed`. Does not run git — the caller handles commits.
+#
+# YAML parsing: Read lines between the first and second "---" delimiters.
+#   For each field, split on first ":" to get key and value.
+#   This handles both "field: value" and "field:" (empty). No PyYAML dependency.
+#
+# Empty field handling: YAML frontmatter fields may be empty (e.g., "score:" with nothing
+#   after the colon). After extraction, empty fields yield an empty string.
+#   Display empty fields as blank (empty string), NOT as "-" or "0" or the field name.
+#   For sort purposes, treat empty scores as lowest priority (sort after all scored items).
+#
+# Stage ordering: Map each status to a numeric order from the stages list.
+#   Unknown statuses get order 99 (sort last).
+#
+# Output format: Use fixed column widths. Header row, then separator row
+#   of dashes, then data rows.
+#
+# --next dispatch rules: An entity is dispatchable if ALL of:
+#   1. Not terminal — its current stage has a defined next stage
+#   2. Not gate-blocked — its current stage does NOT have gate: true
+#   3. Not actively worked — entity does NOT have a non-empty worktree field
+#   4. Concurrency available — count of actively-worked entities (non-empty worktree) in the next stage < that stage's concurrency limit
+#
+# constraints: Python 3 stdlib only (no PyYAML), resolves paths relative to this script, skips README.md.
+# valid status values: {stage1}, {stage2}, ..., {last_stage}.
+
+import glob
+import hashlib
+import os
+import re
+import subprocess
+import sys
+from datetime import datetime, timezone
+
+
+def _has_opening_fence(filepath):
+    """Return True iff the file's first non-empty, non-BOM line is exactly `---`.
+
+    Leading truly-empty lines (`\\n` only) are skipped before the check; a
+    whitespace-only line (e.g. `"   \\n"`) counts as content and disqualifies
+    the file. A leading UTF-8 BOM on the first line is ignored. Anything other
+    than an opening `---` fence at that position means the file has no
+    frontmatter — see issue #186 for the corruption this guards against.
+    """
+    try:
+        with open(filepath, 'r') as f:
+            first = True
+            for raw in f:
+                line = raw.rstrip('\n')
+                if first:
+                    if line.startswith('﻿'):
+                        line = line[1:]
+                    first = False
+                if line == '':
+                    continue
+                return line == '---'
+    except OSError:
+        return False
+    return False
+
+
+def parse_frontmatter(filepath):
+    """Extract YAML frontmatter fields from a markdown file."""
+    fields = {}
+    if not _has_opening_fence(filepath):
+        return fields
+    in_fm = False
+    first = True
+    with open(filepath, 'r') as f:
+        for line in f:
+            line = line.rstrip('\n')
+            if first:
+                if line.startswith('﻿'):
+                    line = line[1:]
+                first = False
+            if line == '---':
+                if in_fm:
+                    break
+                in_fm = True
+                continue
+            if in_fm:
+                if ':' in line:
+                    key, _, val = line.partition(':')
+                    key = key.strip()
+                    val = val.strip()
+                    if len(val) >= 2 and val[0] == val[-1] and val[0] in ('"', "'"):
+                        val = val[1:-1]
+                    if not line[0].isspace():
+                        fields[key] = val
+    return fields
+
+
+def parse_mod_metadata(filepath):
+    """Parse a mod-file's frontmatter + Agent Prompt body.
+
+    Mod frontmatter is a flat top-level key/value shape (e.g.
+    `standing: true`), distinct from README's nested `stages:` tree.
+    This is a sibling of parse_stages_block, not an extension of it.
+
+    Returns a dict with:
+      - `name`: the mod's frontmatter `name` (string, may be empty)
+      - `standing`: bool (True iff frontmatter has `standing: true`; False otherwise)
+      - `frontmatter`: the full parsed frontmatter dict
+      - `agent_prompt`: the verbatim body of the `## Agent Prompt` section
+                       (everything from the line AFTER the heading to EOF), or
+                       None when the section is absent.
+
+    Raises ValueError when the mod file contains any `^## ` heading STRICTLY
+    AFTER the `## Agent Prompt` heading (convention violation). The error
+    message names the offending heading text so the author can move or
+    delete it. Nested `##` inside code fences or inline emphasis within the
+    Agent Prompt body is preserved unchanged — the regex matches only lines
+    that start with a literal `## ` at the left margin. Whether a `##` line
+    appears inside a fenced code block is determined by walking the body
+    and toggling a fence flag on ```` ``` ```` opens/closes so content
+    inside fences is never treated as a heading.
+    """
+    frontmatter = parse_frontmatter(filepath)
+    standing_raw = frontmatter.get('standing', '')
+    standing = standing_raw.lower() == 'true'
+
+    with open(filepath, 'r') as f:
+        content = f.read()
+
+    lines = content.split('\n')
+
+    agent_prompt_line = None
+    for i, line in enumerate(lines):
+        if line == '## Agent Prompt':
+            agent_prompt_line = i
+            break
+
+    agent_prompt = None
+    if agent_prompt_line is not None:
+        body_lines = lines[agent_prompt_line + 1:]
+        in_fence = False
+        for offset, line in enumerate(body_lines):
+            stripped_left = line.lstrip()
+            if stripped_left.startswith('```'):
+                in_fence = not in_fence
+                continue
+            if in_fence:
+                continue
+            if line.startswith('## '):
+                raise ValueError(
+                    f"mod file {filepath}: found trailing top-level heading "
+                    f"{line!r} after '## Agent Prompt' — move the section "
+                    f"above '## Agent Prompt' or remove it. Everything after "
+                    f"'## Agent Prompt' is treated as the prompt body."
+                )
+        agent_prompt = '\n'.join(body_lines)
+
+    return {
+        'name': frontmatter.get('name', ''),
+        'standing': standing,
+        'frontmatter': frontmatter,
+        'agent_prompt': agent_prompt,
+    }
+
+
+def parse_stages_block(filepath):
+    """Parse the stages block from README frontmatter."""
+    lines = []
+    in_fm = False
+    with open(filepath, 'r') as f:
+        for line in f:
+            line = line.rstrip('\n')
+            if line == '---':
+                if in_fm:
+                    break
+                in_fm = True
+                continue
+            if in_fm:
+                lines.append(line)
+
+    stages_start = None
+    for i, line in enumerate(lines):
+        if line.rstrip() == 'stages:':
+            stages_start = i
+            break
+
+    if stages_start is None:
+        return None
+
+    defaults = {}
+    states = []
+    i = stages_start + 1
+    stages_indent = None
+    while i < len(lines):
+        line = lines[i]
+        stripped = line.lstrip()
+        if not stripped:
+            i += 1
+            continue
+        indent = len(line) - len(stripped)
+        if stages_indent is None:
+            stages_indent = indent
+        elif indent < stages_indent:
+            break
+
+        if indent == stages_indent:
+            if stripped == 'defaults:':
+                i += 1
+                while i < len(lines):
+                    dline = lines[i]
+                    dstripped = dline.lstrip()
+                    if not dstripped:
+                        i += 1
+                        continue
+                    dindent = len(dline) - len(dstripped)
+                    if dindent <= stages_indent:
+                        break
+                    if ':' in dstripped:
+                        k, _, v = dstripped.partition(':')
+                        defaults[k.strip()] = v.strip()
+                    i += 1
+                continue
+            elif stripped == 'states:':
+                i += 1
+                current_state = None
+                while i < len(lines):
+                    sline = lines[i]
+                    sstripped = sline.lstrip()
+                    if not sstripped:
+                        i += 1
+                        continue
+                    sindent = len(sline) - len(sstripped)
+                    if sindent <= stages_indent:
+                        break
+                    if sstripped.startswith('- name:'):
+                        _, _, name = sstripped.partition('- name:')
+                        current_state = {'name': name.strip()}
+                        states.append(current_state)
+                    elif current_state is not None and ':' in sstripped and not sstripped.startswith('- '):
+                        k, _, v = sstripped.partition(':')
+                        current_state[k.strip()] = v.strip()
+                    i += 1
+                continue
+        i += 1
+
+    if not states:
+        return None
+
+    default_worktree = defaults.get('worktree', 'false').lower() == 'true'
+    default_concurrency = int(defaults.get('concurrency', '2'))
+
+    result = []
+    for state in states:
+        stage = {
+            'name': state['name'],
+            'worktree': state.get('worktree', str(default_worktree)).lower() == 'true',
+            'concurrency': int(state.get('concurrency', str(default_concurrency))),
+            'gate': state.get('gate', 'false').lower() == 'true',
+            'terminal': state.get('terminal', 'false').lower() == 'true',
+            'initial': state.get('initial', 'false').lower() == 'true',
+        }
+        for optional_field in ('feedback-to', 'agent', 'fresh', 'model'):
+            if optional_field in state:
+                stage[optional_field] = state[optional_field]
+        result.append(stage)
+
+    return result
+
+
+def parse_stages_with_defaults(filepath):
+    """Parse the stages block and return (stages_list, defaults_dict).
+
+    Companion to parse_stages_block. Re-parses the frontmatter so callers
+    that need the raw `stages.defaults` mapping (e.g. for `model`) get it
+    without disturbing parse_stages_block's back-compat signature.
+    """
+    lines = []
+    in_fm = False
+    with open(filepath, 'r') as f:
+        for line in f:
+            line = line.rstrip('\n')
+            if line == '---':
+                if in_fm:
+                    break
+                in_fm = True
+                continue
+            if in_fm:
+                lines.append(line)
+
+    stages_start = None
+    for i, line in enumerate(lines):
+        if line.rstrip() == 'stages:':
+            stages_start = i
+            break
+
+    defaults = {}
+    if stages_start is not None:
+        i = stages_start + 1
+        stages_indent = None
+        while i < len(lines):
+            line = lines[i]
+            stripped = line.lstrip()
+            if not stripped:
+                i += 1
+                continue
+            indent = len(line) - len(stripped)
+            if stages_indent is None:
+                stages_indent = indent
+            elif indent < stages_indent:
+                break
+            if indent == stages_indent and stripped == 'defaults:':
+                i += 1
+                while i < len(lines):
+                    dline = lines[i]
+                    dstripped = dline.lstrip()
+                    if not dstripped:
+                        i += 1
+                        continue
+                    dindent = len(dline) - len(dstripped)
+                    if dindent <= stages_indent:
+                        break
+                    if ':' in dstripped:
+                        k, _, v = dstripped.partition(':')
+                        defaults[k.strip()] = v.strip()
+                    i += 1
+                continue
+            i += 1
+
+    stages = parse_stages_block(filepath)
+    return stages, defaults
+
+
+# Subdirectories that are never treated as entity folders. Keep in sync with
+# the rest of the status script and commission scaffolding.
+RESERVED_SUBDIRS = frozenset({'_archive', '_mods'})
+ID_STYLES = frozenset({'sequential', 'slug', 'sd-b32'})
+SD_B32_ALPHABET = '0123456789abcdefghjkmnpqrstvwxyz'
+SD_B32_ID_LENGTH = 24
+SD_B32_MIN_PREFIX = 2
+SD_B32_ID_RE = re.compile(r'^[%s]{%d}$' % (SD_B32_ALPHABET, SD_B32_ID_LENGTH))
+STAGE_NAME_RE = re.compile(r'^[a-z0-9][a-z0-9-]*[a-z0-9]$')
+
+
+def discover_entity_files(directory):
+    """Return [(slug, entity_file_path), ...] for entities found in directory.
+
+    An entity is either:
+      - a flat file `{directory}/{slug}.md` (existing behavior), OR
+      - a folder `{directory}/{slug}/` containing an `index.md` (new form).
+
+    README.md is skipped. Reserved subdirectories (see RESERVED_SUBDIRS) and
+    subdirectories whose names start with '.' are never treated as entity
+    folders.
+
+    When a slug is present in BOTH the flat and folder form, the folder form
+    wins and a warning is emitted to stderr so the operator can resolve the
+    duplication. Results are sorted by slug so callers see a stable order.
+    """
+    if not os.path.isdir(directory):
+        return []
+
+    flat_paths = {}
+    folder_paths = {}
+
+    try:
+        entries = os.listdir(directory)
+    except OSError:
+        return []
+
+    for name in entries:
+        full = os.path.join(directory, name)
+        if os.path.isfile(full):
+            if name == 'README.md':
+                continue
+            if not name.endswith('.md'):
+                continue
+            if name.startswith('.'):
+                continue
+            if not _has_opening_fence(full):
+                continue
+            slug = name[:-3]
+            flat_paths[slug] = full
+        elif os.path.isdir(full):
+            if name in RESERVED_SUBDIRS:
+                continue
+            if name.startswith('.'):
+                continue
+            index_path = os.path.join(full, 'index.md')
+            if os.path.isfile(index_path) and _has_opening_fence(index_path):
+                folder_paths[name] = index_path
+
+    slugs = sorted(set(flat_paths) | set(folder_paths))
+    entries_out = []
+    for slug in slugs:
+        if slug in folder_paths:
+            if slug in flat_paths:
+                print(
+                    f"Warning: entity '{slug}' has both {flat_paths[slug]} and "
+                    f"{folder_paths[slug]}; preferring folder form. Remove the "
+                    f"flat file to silence this warning.",
+                    file=sys.stderr,
+                )
+            entries_out.append((slug, folder_paths[slug]))
+        else:
+            entries_out.append((slug, flat_paths[slug]))
+    return entries_out
+
+
+def resolve_entity_path(directory, slug):
+    """Return the entity file path for a given slug, or None if absent.
+
+    Folder form (`{slug}/index.md`) takes precedence over the flat form
+    (`{slug}.md`) when both exist, matching discover_entity_files. A warning
+    is emitted on the conflict. Returns None if neither form is present so
+    callers can render their own error.
+    """
+    flat_path = os.path.join(directory, slug + '.md')
+    folder_path = os.path.join(directory, slug, 'index.md')
+    flat_exists = os.path.isfile(flat_path)
+    folder_exists = os.path.isfile(folder_path)
+    if folder_exists:
+        if flat_exists:
+            print(
+                f"Warning: entity '{slug}' has both {flat_path} and "
+                f"{folder_path}; preferring folder form. Remove the flat file "
+                f"to silence this warning.",
+                file=sys.stderr,
+            )
+        return folder_path
+    if flat_exists:
+        return flat_path
+    return None
+
+
+def scan_entities(directory):
+    """Scan a directory for entity files (excluding README.md).
+
+    Supports both flat `{slug}.md` and folder-form `{slug}/index.md` entities.
+    See discover_entity_files for the resolution rule.
+    """
+    entities = []
+    for slug, filepath in discover_entity_files(directory):
+        fields = parse_frontmatter(filepath)
+        entity = {k: v for k, v in fields.items()}
+        entity['slug'] = slug
+        for key in ('id', 'status', 'title', 'score', 'source', 'worktree'):
+            entity.setdefault(key, '')
+        entity['_stored_id'] = entity.get('id', '')
+        entity['_path'] = filepath
+        entity['_scope'] = 'active'
+        entities.append(entity)
+    return entities
+
+
+def _worktree_mirror_path(entity_path, pipeline_dir, git_root, worktree):
+    """Compute the worktree-side path mirroring entity_path under pipeline_dir.
+
+    Preserves entity form: a flat `{slug}.md` in pipeline_dir maps to
+    `{git_root}/{worktree}/{slug}.md`; a `{slug}/index.md` in pipeline_dir
+    maps to `{git_root}/{worktree}/{slug}/index.md`.
+    """
+    rel = os.path.relpath(entity_path, pipeline_dir)
+    return os.path.join(git_root, worktree, rel)
+
+
+def resolve_active_entity_path(entity_path, git_root, pipeline_dir=None):
+    """Resolve to the active worktree copy when an entity is worktree-backed.
+
+    When ``pipeline_dir`` is provided, the relative location of ``entity_path``
+    inside ``pipeline_dir`` is preserved in the worktree (so folder-form
+    entities at `{slug}/index.md` map to `{worktree}/{slug}/index.md`). When
+    omitted, the legacy basename-only resolution is used, which still works
+    for flat `{slug}.md` entities.
+    """
+    fields = parse_frontmatter(entity_path)
+    worktree = fields.get('worktree', '').strip()
+    if not worktree:
+        return entity_path
+
+    if pipeline_dir is not None:
+        worktree_entity_path = _worktree_mirror_path(entity_path, pipeline_dir, git_root, worktree)
+    else:
+        filename = os.path.basename(entity_path)
+        worktree_entity_path = os.path.join(git_root, worktree, filename)
+    if os.path.exists(worktree_entity_path):
+        return worktree_entity_path
+    return entity_path
+
+
+def load_active_entity_fields(entity_path, git_root, pipeline_dir=None):
+    """Load entity fields from the active worktree copy, overlaying main metadata."""
+    fields = parse_frontmatter(entity_path)
+    worktree = fields.get('worktree', '').strip()
+    if not worktree:
+        return fields
+
+    if pipeline_dir is not None:
+        worktree_entity_path = _worktree_mirror_path(entity_path, pipeline_dir, git_root, worktree)
+    else:
+        filename = os.path.basename(entity_path)
+        worktree_entity_path = os.path.join(git_root, worktree, filename)
+    if not os.path.exists(worktree_entity_path):
+        return fields
+
+    active_fields = parse_frontmatter(worktree_entity_path)
+    merged = dict(fields)
+    merged.update(active_fields)
+    return merged
+
+
+def scan_entities_active(directory, git_root):
+    """Scan entities, reading active worktree-backed entities from their worktree copy.
+
+    Supports both flat `{slug}.md` and folder-form `{slug}/index.md` entities.
+    """
+    entities = []
+    for slug, filepath in discover_entity_files(directory):
+        fields = load_active_entity_fields(filepath, git_root, pipeline_dir=directory)
+        entity = {k: v for k, v in fields.items()}
+        entity['slug'] = slug
+        for key in ('id', 'status', 'title', 'score', 'source', 'worktree'):
+            entity.setdefault(key, '')
+        entity['_stored_id'] = entity.get('id', '')
+        entity['_path'] = filepath
+        entity['_scope'] = 'active'
+        entities.append(entity)
+    return entities
+
+
+def workflow_id_style(workflow_dir):
+    """Read README frontmatter and return the configured id-style."""
+    readme_path = os.path.join(workflow_dir, 'README.md')
+    if not os.path.exists(readme_path):
+        return 'sequential'
+    fields = parse_frontmatter(readme_path)
+    style = fields.get('id-style', 'sequential').strip() or 'sequential'
+    if style not in ID_STYLES:
+        raise ValueError(f"unsupported id-style: {style}")
+    return style
+
+
+def archive_entities(workflow_dir):
+    archive_dir = os.path.join(workflow_dir, '_archive')
+    if not os.path.isdir(archive_dir):
+        return []
+    entities = scan_entities(archive_dir)
+    for entity in entities:
+        entity['_scope'] = 'archived'
+    return entities
+
+
+def active_and_archived_entities(workflow_dir, git_root):
+    active = scan_entities_active(workflow_dir, git_root)
+    archived = archive_entities(workflow_dir)
+    return active + archived
+
+
+def entity_evidence(entity, workflow_dir, problem, display_id=''):
+    stored_id = entity.get('_stored_id', entity.get('id', ''))
+    path = entity.get('_path', '')
+    scope = entity.get('_scope', 'active')
+    display = display_id or entity.get('_display_id', '')
+    parts = [
+        f"Error: {problem}:",
+        f"workflow={workflow_dir}",
+        f"scope={scope}",
+        f"slug={entity.get('slug', '')}",
+        f"id={stored_id}",
+    ]
+    if display:
+        parts.append(f"display={display}")
+    parts.append(f"path={path}")
+    return ' '.join(parts)
+
+
+def find_entity_form_conflicts(directory, scope):
+    """Return validation errors for slugs present as both flat and folder entities."""
+    if not os.path.isdir(directory):
+        return []
+    try:
+        entries = os.listdir(directory)
+    except OSError:
+        return []
+    slugs = set()
+    flat = set()
+    folder = set()
+    for name in entries:
+        full = os.path.join(directory, name)
+        if os.path.isfile(full) and name.endswith('.md') and name != 'README.md' and not name.startswith('.'):
+            flat.add(name[:-3])
+            slugs.add(name[:-3])
+        elif os.path.isdir(full) and name not in RESERVED_SUBDIRS and not name.startswith('.'):
+            if os.path.isfile(os.path.join(full, 'index.md')):
+                folder.add(name)
+                slugs.add(name)
+
+    errors = []
+    for slug in sorted(flat & folder):
+        folder_path = os.path.join(directory, slug, 'index.md')
+        flat_path = os.path.join(directory, slug + '.md')
+        errors.append(
+            f"Error: flat/folder conflict: workflow={os.path.dirname(directory) if scope == 'archived' else directory} "
+            f"scope={scope} slug={slug} flat_path={flat_path} folder_path={folder_path}"
+        )
+    return errors
+
+
+def is_valid_sd_b32_id(value):
+    return bool(SD_B32_ID_RE.match(value or ''))
+
+
+def compute_sd_b32_display_ids(entities):
+    """Return {stored_id: shortest unique address prefix} for valid SD-B32 IDs."""
+    ids = [e.get('_stored_id', e.get('id', '')) for e in entities]
+    valid_ids = [value for value in ids if is_valid_sd_b32_id(value)]
+    display = {}
+    for value in valid_ids:
+        length = SD_B32_MIN_PREFIX
+        while length < len(value):
+            prefix = value[:length]
+            if sum(1 for other in valid_ids if other.startswith(prefix)) == 1:
+                break
+            length += 1
+        display[value] = value[:length]
+    return display
+
+
+def apply_effective_ids(entities, id_style, all_entities=None):
+    """Mutate display-facing `id` fields while preserving `_stored_id`."""
+    all_entities = all_entities if all_entities is not None else entities
+    sd_b32_display = compute_sd_b32_display_ids(all_entities) if id_style == 'sd-b32' else {}
+    for entity in entities:
+        stored_id = entity.get('_stored_id', entity.get('id', ''))
+        if id_style == 'slug':
+            display_id = entity.get('slug', '')
+        elif id_style == 'sd-b32':
+            display_id = sd_b32_display.get(stored_id, stored_id)
+        else:
+            display_id = stored_id
+        entity['_display_id'] = display_id
+        entity['id'] = display_id
+    return entities
+
+
+def _kebab_suggestion(name):
+    """Best-effort kebab-case suggestion for an invalid stage name."""
+    lowered = name.lower()
+    replaced = re.sub(r'[^a-z0-9]+', '-', lowered)
+    return replaced.strip('-')
+
+
+def validate_workflow_stage_names(workflow_dir):
+    """Return errors for any README stage name violating the dispatch-name regex.
+
+    Reads the README via parse_stages_block. Returns [] silently when the README is
+    missing or contains no stages block — those shapes are enforced elsewhere.
+    """
+    readme_path = os.path.join(workflow_dir, 'README.md')
+    if not os.path.exists(readme_path):
+        return []
+    try:
+        states = parse_stages_block(readme_path)
+    except Exception:
+        return []
+    if not states:
+        return []
+    errors = []
+    for state in states:
+        name = state.get('name', '')
+        if not name or STAGE_NAME_RE.match(name):
+            continue
+        suggestion = _kebab_suggestion(name) or 'a-kebab-name'
+        errors.append(
+            f"workflow {workflow_dir!r}: stage name {name!r} must match "
+            f"^[a-z0-9][a-z0-9-]*[a-z0-9]$; rename to {suggestion!r} or similar"
+        )
+    return errors
+
+
+def validate_workflow(workflow_dir, git_root, id_style):
+    """Return a list of validation error lines for active + archived entities."""
+    errors = []
+    errors.extend(find_entity_form_conflicts(workflow_dir, 'active'))
+    errors.extend(find_entity_form_conflicts(os.path.join(workflow_dir, '_archive'), 'archived'))
+    errors.extend(validate_workflow_stage_names(workflow_dir))
+
+    entities = active_and_archived_entities(workflow_dir, git_root)
+    sd_b32_display = compute_sd_b32_display_ids(entities) if id_style == 'sd-b32' else {}
+
+    if id_style == 'sequential':
+        by_id = {}
+        for entity in entities:
+            stored_id = entity.get('_stored_id', entity.get('id', ''))
+            if not stored_id:
+                errors.append(entity_evidence(entity, workflow_dir, 'missing required id'))
+                continue
+            if not stored_id.isdigit():
+                errors.append(entity_evidence(entity, workflow_dir, 'non-numeric sequential id'))
+                continue
+            by_id.setdefault(stored_id, []).append(entity)
+        for group in by_id.values():
+            if len(group) < 2:
+                continue
+            if not any(entity.get('_scope') == 'active' for entity in group):
+                continue
+            for entity in group:
+                errors.append(entity_evidence(entity, workflow_dir, 'duplicate id'))
+    elif id_style == 'slug':
+        seen = {}
+        for entity in entities:
+            effective = entity.get('slug', '')
+            entity['_display_id'] = effective
+            if effective in seen:
+                errors.append(entity_evidence(seen[effective], workflow_dir, 'duplicate effective id', effective))
+                errors.append(entity_evidence(entity, workflow_dir, 'duplicate effective id', effective))
+            else:
+                seen[effective] = entity
+    elif id_style == 'sd-b32':
+        by_id = {}
+        for entity in entities:
+            stored_id = entity.get('_stored_id', entity.get('id', ''))
+            display = sd_b32_display.get(stored_id, '')
+            if not stored_id:
+                errors.append(entity_evidence(entity, workflow_dir, 'missing required id', display))
+                continue
+            if not (is_valid_sd_b32_id(stored_id) or stored_id.isdigit()):
+                errors.append(entity_evidence(entity, workflow_dir, 'invalid sd-b32 stored id', display))
+                continue
+            by_id.setdefault(stored_id, []).append(entity)
+        for stored_id, group in by_id.items():
+            if len(group) < 2:
+                continue
+            if not any(entity.get('_scope') == 'active' for entity in group):
+                continue
+            display = sd_b32_display.get(stored_id, '')
+            for entity in group:
+                errors.append(entity_evidence(entity, workflow_dir, 'duplicate sd-b32 stored id', display))
+    return errors
+
+
+def fail_on_validation_errors(workflow_dir, git_root, id_style):
+    errors = validate_workflow(workflow_dir, git_root, id_style)
+    if errors:
+        for error in errors:
+            print(error, file=sys.stderr)
+        sys.exit(1)
+
+
+def stage_order(status, stages):
+    """Map status to numeric order based on stages list. Unknown = 99."""
+    if stages:
+        for i, stage in enumerate(stages):
+            if stage['name'] == status:
+                return i + 1
+    return 99
+
+
+def sort_key_default(entity, stages):
+    """Sort key for default mode: stage order ascending, score descending."""
+    order = stage_order(entity['status'], stages)
+    score_str = entity['score']
+    if score_str:
+        try:
+            score_val = -float(score_str)
+        except ValueError:
+            score_val = 0
+    else:
+        score_val = 1
+    return (order, score_val)
+
+
+def sort_key_next(entity):
+    """Sort key for --next mode: score descending."""
+    score_str = entity['score']
+    if score_str:
+        try:
+            return -float(score_str)
+        except ValueError:
+            return 0
+    return 1
+
+
+def print_status_table(entities, stages, extra_fields=None):
+    """Print the default status table, optionally with extra frontmatter columns."""
+    extras = list(extra_fields or [])
+    base_fmt = '%-6s %-30s %-20s %-30s %-8s %s'
+    sorted_entities = sorted(entities, key=lambda e: sort_key_default(e, stages))
+
+    if not extras:
+        print(base_fmt % ('ID', 'SLUG', 'STATUS', 'TITLE', 'SCORE', 'SOURCE'))
+        print(base_fmt % ('--', '----', '------', '-----', '-----', '------'))
+        for e in sorted_entities:
+            print(base_fmt % (
+                e['id'], e['slug'], e['status'], e['title'], e['score'], e['source']
+            ))
+        return
+
+    # SOURCE column is the last %s in base_fmt and has no trailing width, so
+    # pad it when extra columns follow so the extras line up.
+    base_cells_fmt = '%-6s %-30s %-20s %-30s %-8s %-30s'
+    # Extras after the last column — last extra has no trailing width.
+    extra_fmt_parts = ['%-20s'] * (len(extras) - 1) + ['%s']
+    row_fmt = base_cells_fmt + ' ' + ' '.join(extra_fmt_parts)
+
+    header_extras = [name.upper() for name in extras]
+    sep_extras = ['-' * min(len(name), 20) for name in header_extras]
+    print(row_fmt % ('ID', 'SLUG', 'STATUS', 'TITLE', 'SCORE', 'SOURCE', *header_extras))
+    print(row_fmt % ('--', '----', '------', '-----', '-----', '------', *sep_extras))
+    for e in sorted_entities:
+        extra_cells = [format_extra_cell(e.get(name, '')) for name in extras]
+        print(row_fmt % (
+            e['id'], e['slug'], e['status'], e['title'], e['score'], e['source'],
+            *extra_cells,
+        ))
+
+
+def print_next_table(entities, stages, extra_fields=None):
+    """Print the --next dispatchable entities table, optionally with extras."""
+    extras = list(extra_fields or [])
+    stage_by_name = {s['name']: s for s in stages}
+    stage_names = [s['name'] for s in stages]
+    active_counts = {}
+    for e in entities:
+        if e['worktree']:
+            st = e['status']
+            active_counts[st] = active_counts.get(st, 0) + 1
+
+    candidates = sorted(entities, key=sort_key_next)
+    next_stage_counts = dict(active_counts)
+    dispatchable = []
+    for e in candidates:
+        status = e['status']
+        if status not in stage_by_name:
+            continue
+        stage_idx = stage_names.index(status)
+        stage = stage_by_name[status]
+        if stage.get('terminal', False):
+            continue
+        if stage.get('gate', False):
+            continue
+        if e['worktree']:
+            continue
+        if stage_idx + 1 >= len(stage_names):
+            continue
+        next_stage_name = stage_names[stage_idx + 1]
+        next_stage = stage_by_name[next_stage_name]
+        current_count = next_stage_counts.get(next_stage_name, 0)
+        if current_count >= next_stage['concurrency']:
+            continue
+        next_stage_counts[next_stage_name] = current_count + 1
+        dispatchable.append({
+            **e,
+            'next': next_stage_name,
+            'next_worktree': 'yes' if next_stage['worktree'] else 'no',
+        })
+
+    if not extras:
+        fmt = '%-6s %-30s %-20s %-20s %s'
+        print(fmt % ('ID', 'SLUG', 'CURRENT', 'NEXT', 'WORKTREE'))
+        print(fmt % ('--', '----', '-------', '----', '--------'))
+        for e in dispatchable:
+            print(fmt % (e['id'], e['slug'], e['status'], e['next'], e['next_worktree']))
+        return
+
+    base_cells_fmt = '%-6s %-30s %-20s %-20s %-8s'
+    extra_fmt_parts = ['%-20s'] * (len(extras) - 1) + ['%s']
+    row_fmt = base_cells_fmt + ' ' + ' '.join(extra_fmt_parts)
+    header_extras = [name.upper() for name in extras]
+    sep_extras = ['-' * min(len(name), 20) for name in header_extras]
+    print(row_fmt % ('ID', 'SLUG', 'CURRENT', 'NEXT', 'WORKTREE', *header_extras))
+    print(row_fmt % ('--', '----', '-------', '----', '--------', *sep_extras))
+    for e in dispatchable:
+        extra_cells = [format_extra_cell(e.get(name, '')) for name in extras]
+        print(row_fmt % (
+            e['id'], e['slug'], e['status'], e['next'], e['next_worktree'],
+            *extra_cells,
+        ))
+
+
+def scan_mods(workflow_dir):
+    """Scan _mods/*.md for ## Hook: headings, return {hook_point: [mod_names]} mapping."""
+    mods_dir = os.path.join(workflow_dir, '_mods')
+    if not os.path.isdir(mods_dir):
+        return {}
+    hooks = {}
+    for filepath in sorted(glob.glob(os.path.join(mods_dir, '*.md'))):
+        mod_name = os.path.splitext(os.path.basename(filepath))[0]
+        with open(filepath, 'r') as f:
+            for line in f:
+                line = line.rstrip('\n')
+                if line.startswith('## Hook:'):
+                    point = line[len('## Hook:'):].strip()
+                    if point:
+                        hooks.setdefault(point, []).append(mod_name)
+    return hooks
+
+
+def compute_next_sequential_id(active_entities, archive_dir):
+    """Find the highest numeric ID across active + archived entities, return next ID string."""
+    max_id = 0
+    all_entities = list(active_entities)
+    if os.path.isdir(archive_dir):
+        all_entities.extend(scan_entities(archive_dir))
+    for e in all_entities:
+        id_str = e.get('id', '')
+        if id_str:
+            try:
+                id_num = int(id_str)
+                if id_num > max_id:
+                    max_id = id_num
+            except ValueError:
+                pass
+    return '%03d' % (max_id + 1)
+
+
+def sd_b32_timestamp():
+    test_timestamp = os.environ.get('SPACEDOCK_TEST_SD_B32_TIMESTAMP', '').strip()
+    if test_timestamp:
+        return test_timestamp
+    return datetime.now(timezone.utc).isoformat(timespec='microseconds').replace('+00:00', 'Z')
+
+
+def encode_sd_b32_digest(digest, length=SD_B32_ID_LENGTH):
+    value = int.from_bytes(digest, 'big')
+    total_bits = len(digest) * 8
+    chars = []
+    for offset in range(total_bits - 5, -1, -5):
+        chars.append(SD_B32_ALPHABET[(value >> offset) & 31])
+        if len(chars) == length:
+            break
+    return ''.join(chars)
+
+
+def sd_b32_digest_material(workflow_dir, id_seed, id_actor, timestamp, nonce):
+    seed = (id_seed or '').strip() or 'manual'
+    actor = (
+        (id_actor or '').strip()
+        or os.environ.get('SPACEDOCK_ID_ACTOR', '').strip()
+        or os.environ.get('USER', '').strip()
+        or os.environ.get('USERNAME', '').strip()
+    )
+    context = os.environ.get('SPACEDOCK_ID_CONTEXT', '').strip()
+    return '\n'.join([
+        'spacedock-sd-b32-v1',
+        f'workflow={os.path.realpath(workflow_dir)}',
+        f'context={context}',
+        f'seed={seed}',
+        f'actor={actor}',
+        f'timestamp={timestamp}',
+        f'nonce={nonce}',
+    ]).encode('utf-8')
+
+
+def sd_b32_candidate(workflow_dir, id_seed, id_actor, timestamp, nonce):
+    digest = hashlib.sha256(
+        sd_b32_digest_material(workflow_dir, id_seed, id_actor, timestamp, nonce)
+    ).digest()
+    return encode_sd_b32_digest(digest)
+
+
+def compute_next_sd_b32_id(workflow_dir, git_root, id_seed='', id_actor=''):
+    existing = {
+        e.get('_stored_id', e.get('id', ''))
+        for e in active_and_archived_entities(workflow_dir, git_root)
+        if e.get('_stored_id', e.get('id', ''))
+    }
+    timestamp = sd_b32_timestamp()
+    for nonce in range(1024):
+        candidate = sd_b32_candidate(workflow_dir, id_seed, id_actor, timestamp, nonce)
+        if not is_valid_sd_b32_id(candidate):
+            print(f'Error: sd-b32 stored id candidate is invalid: {candidate}', file=sys.stderr)
+            sys.exit(1)
+        if candidate not in existing:
+            return candidate
+    print('Error: sd-b32 stored id collision retry exhausted', file=sys.stderr)
+    sys.exit(1)
+
+
+def compute_next_id(entities, workflow_dir, git_root, id_style, id_seed='', id_actor=''):
+    archive_dir = os.path.join(workflow_dir, '_archive')
+    if id_style == 'sequential':
+        if id_seed or id_actor:
+            print('Error: --id-seed and --id-actor are only applicable for id-style: sd-b32', file=sys.stderr)
+            sys.exit(1)
+        return compute_next_sequential_id(entities, archive_dir)
+    if id_style == 'slug':
+        print('Error: status --next-id is not applicable for id-style: slug', file=sys.stderr)
+        sys.exit(1)
+    if id_style == 'sd-b32':
+        return compute_next_sd_b32_id(workflow_dir, git_root, id_seed=id_seed, id_actor=id_actor)
+    raise ValueError(f"unsupported id-style: {id_style}")
+
+
+def print_next_id(entities, workflow_dir, git_root, id_style, id_seed='', id_actor=''):
+    """Print only the next strategy-dependent ID."""
+    print(compute_next_id(entities, workflow_dir, git_root, id_style, id_seed=id_seed, id_actor=id_actor))
+
+
+def scan_orphans(entities, git_root):
+    """Return entities with non-empty worktree field, with dir/branch existence info."""
+    worktree_paths = {}
+    try:
+        result = subprocess.run(
+            ['git', 'worktree', 'list', '--porcelain'],
+            capture_output=True, text=True, cwd=git_root
+        )
+        if result.returncode == 0:
+            current_path = None
+            for line in result.stdout.split('\n'):
+                if line.startswith('worktree '):
+                    current_path = line[len('worktree '):].strip()
+                elif line.startswith('branch ') and current_path is not None:
+                    worktree_paths[os.path.realpath(current_path)] = True
+                elif line == '':
+                    current_path = None
+    except FileNotFoundError:
+        pass
+
+    orphans = []
+    for e in entities:
+        wt = e.get('worktree', '')
+        if not wt:
+            continue
+        dir_path = os.path.join(git_root, wt)
+        dir_exists = 'yes' if os.path.isdir(dir_path) else 'no'
+        branch_exists = 'yes' if os.path.realpath(dir_path) in worktree_paths else 'no'
+        orphans.append({
+            'id': e.get('id', ''),
+            'slug': e.get('slug', ''),
+            'worktree': wt,
+            'dir_exists': dir_exists,
+            'branch_exists': branch_exists,
+        })
+    return orphans
+
+
+def check_pr_states(entities, stages):
+    """Check PR state for entities with non-empty pr and non-terminal status."""
+    stage_by_name = {s['name']: s for s in stages}
+    pr_entities = []
+    for e in entities:
+        pr = e.get('pr', '')
+        if not pr:
+            continue
+        status = e.get('status', '')
+        stage = stage_by_name.get(status)
+        if stage and stage.get('terminal', False):
+            continue
+        pr_entities.append(e)
+
+    if not pr_entities:
+        return 'none', []
+
+    # Check if gh is available
+    gh_path = None
+    for d in os.environ.get('PATH', '').split(os.pathsep):
+        candidate = os.path.join(d, 'gh')
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            gh_path = candidate
+            break
+    if gh_path is None:
+        return 'gh not available', []
+
+    results = []
+    for e in pr_entities:
+        pr = e.get('pr', '').lstrip('#')
+        try:
+            result = subprocess.run(
+                ['gh', 'pr', 'view', pr, '--json', 'state', '--jq', '.state'],
+                capture_output=True, text=True
+            )
+            if result.returncode == 0:
+                state = result.stdout.strip().upper()
+            else:
+                state = 'ERROR'
+        except FileNotFoundError:
+            state = 'ERROR'
+        results.append({
+            'id': e.get('id', ''),
+            'slug': e.get('slug', ''),
+            'pr': e.get('pr', ''),
+            'state': state,
+        })
+    return 'ok', results
+
+
+TEAM_STATE_MTIME_WINDOW_SECS = 30 * 60
+
+
+def probe_team_state():
+    """Ambient-mtime heuristic for a recent TeamCreate on ~/.claude/teams/*/config.json.
+
+    Returns (present: bool, detail: str). Present when any config.json was modified
+    within the last TEAM_STATE_MTIME_WINDOW_SECS. Detail names the directory when present.
+    """
+    import time
+    home = os.path.expanduser('~')
+    teams_dir = os.path.join(home, '.claude', 'teams')
+    if not os.path.isdir(teams_dir):
+        return False, ''
+    cutoff = time.time() - TEAM_STATE_MTIME_WINDOW_SECS
+    newest = None
+    newest_mtime = 0
+    try:
+        for entry in os.listdir(teams_dir):
+            cfg = os.path.join(teams_dir, entry, 'config.json')
+            if not os.path.isfile(cfg):
+                continue
+            try:
+                mtime = os.path.getmtime(cfg)
+            except OSError:
+                continue
+            if mtime > newest_mtime:
+                newest_mtime = mtime
+                newest = entry
+    except OSError:
+        return False, ''
+    if newest is not None and newest_mtime >= cutoff:
+        return True, 'recent team directory: %s' % newest
+    return False, ''
+
+
+def print_boot(entities, stages, workflow_dir, git_root, id_style):
+    """Print all boot sections: MODS, ID_STYLE/NEXT_ID, ORPHANS, PR_STATE, DISPATCHABLE, TEAM_STATE."""
+    # MODS
+    hooks = scan_mods(workflow_dir)
+    if not hooks:
+        print('MODS: none')
+    else:
+        print('MODS')
+        for point in sorted(hooks.keys()):
+            mods = ', '.join(sorted(hooks[point]))
+            print('%s: %s' % (point, mods))
+
+    # ID_STYLE / NEXT_ID
+    print('ID_STYLE: %s' % id_style)
+    if id_style == 'slug':
+        next_id = 'n/a (id-style: slug)'
+    else:
+        next_id = compute_next_id(entities, workflow_dir, git_root, id_style)
+    print('NEXT_ID: %s' % next_id)
+    if id_style == 'sd-b32':
+        print('MIN_PREFIX: %d' % SD_B32_MIN_PREFIX)
+
+    # ORPHANS
+    orphans = scan_orphans(entities, git_root)
+    if not orphans:
+        print('ORPHANS: none')
+    else:
+        print('ORPHANS')
+        fmt = '%-6s %-30s %-43s %-11s %s'
+        print(fmt % ('ID', 'SLUG', 'WORKTREE', 'DIR_EXISTS', 'BRANCH_EXISTS'))
+        for o in orphans:
+            print(fmt % (o['id'], o['slug'], o['worktree'], o['dir_exists'], o['branch_exists']))
+
+    # PR_STATE
+    pr_status, pr_results = check_pr_states(entities, stages)
+    if pr_status == 'none':
+        print('PR_STATE: none')
+    elif pr_status == 'gh not available':
+        print('PR_STATE: gh not available')
+    else:
+        print('PR_STATE')
+        fmt = '%-6s %-30s %-8s %s'
+        print(fmt % ('ID', 'SLUG', 'PR', 'STATE'))
+        for r in pr_results:
+            print(fmt % (r['id'], r['slug'], r['pr'], r['state']))
+
+    # DISPATCHABLE
+    print('DISPATCHABLE')
+    print_next_table(entities, stages)
+
+    # TEAM_STATE
+    print('TEAM_STATE')
+    present, detail = probe_team_state()
+    print('present: %s' % ('true' if present else 'false'))
+    if present:
+        print('hint: %s' % detail)
+    else:
+        print('hint: run TeamCreate before first team-mode dispatch (claude runtime supports it)')
+
+
+WHERE_SYNTAX_HELP = (
+    "--where requires an operator: use 'field = value', 'field != value', "
+    "'field !=' (non-empty), or 'field =' (empty)"
+)
+
+
+def parse_where_filters(args):
+    """Parse --where arguments from sys.argv.
+
+    Accepts equality (`=`) and negation (`!=`) with or without whitespace
+    around the operator. Presence checks are expressed as `field !=` (non-empty)
+    and `field =` (empty). Bare field names are rejected with an error that
+    names the four valid forms. `!=` is matched before `=` to prevent a single
+    `=` search from slicing inside the two-character `!=` operator.
+    """
+    filters = []
+    i = 0
+    while i < len(args):
+        if args[i] == '--where':
+            if i + 1 >= len(args):
+                raise ValueError('--where requires an argument')
+            where_arg = args[i + 1]
+            if not where_arg.strip():
+                raise ValueError('--where argument cannot be empty')
+
+            # Operator precedence: check for `!=` first, then `=`. Splitting on
+            # the first `=` in a string like `worktree !=` would slice the
+            # operator itself and mis-classify negation as equality.
+            if '!=' in where_arg:
+                op = '!='
+                field_part, _, value_part = where_arg.partition('!=')
+            elif '=' in where_arg:
+                op = '='
+                field_part, _, value_part = where_arg.partition('=')
+            else:
+                raise ValueError(WHERE_SYNTAX_HELP)
+
+            field = field_part.strip()
+            if not field:
+                raise ValueError(WHERE_SYNTAX_HELP)
+
+            value = value_part.strip()
+            if value == '':
+                value = None
+
+            filters.append((field, op, value))
+            i += 2
+        else:
+            i += 1
+    return filters
+
+
+def parse_workflow_dir(args):
+    """Extract --workflow-dir from argv and return (workflow_dir, remaining_args)."""
+    remaining = []
+    workflow_dir = None
+    i = 0
+    while i < len(args):
+        if args[i] == '--workflow-dir':
+            if i + 1 >= len(args):
+                raise ValueError('--workflow-dir requires an argument')
+            workflow_dir = args[i + 1]
+            i += 2
+            continue
+        remaining.append(args[i])
+        i += 1
+    return workflow_dir, remaining
+
+
+def parse_fields_options(args):
+    """Parse --fields and --all-fields from argv.
+
+    Returns (explicit_fields, all_fields_flag) where explicit_fields is a list
+    of field names in user order (deduped) or None, and all_fields_flag is a
+    bool. Raises ValueError if both flags are supplied together, or if
+    --fields has no argument / an empty argument.
+    """
+    explicit_fields = None
+    all_fields_flag = False
+    i = 0
+    while i < len(args):
+        if args[i] == '--fields':
+            if i + 1 >= len(args):
+                raise ValueError('--fields requires a comma-separated list of field names')
+            raw = args[i + 1]
+            if not raw.strip():
+                raise ValueError('--fields requires a comma-separated list of field names')
+            parsed = []
+            seen = set()
+            for name in raw.split(','):
+                name = name.strip()
+                if not name:
+                    continue
+                if name in seen:
+                    continue
+                seen.add(name)
+                parsed.append(name)
+            if not parsed:
+                raise ValueError('--fields requires a comma-separated list of field names')
+            explicit_fields = parsed
+            i += 2
+            continue
+        if args[i] == '--all-fields':
+            all_fields_flag = True
+            i += 1
+            continue
+        i += 1
+
+    if explicit_fields is not None and all_fields_flag:
+        raise ValueError('--fields and --all-fields are mutually exclusive')
+
+    return explicit_fields, all_fields_flag
+
+
+def parse_archive_arg(args):
+    """Parse --archive <slug> from argv. Returns slug or None."""
+    i = 0
+    while i < len(args):
+        if args[i] == '--archive':
+            if i + 1 >= len(args):
+                raise ValueError('--archive requires a slug argument')
+            slug = args[i + 1]
+            if not slug or slug.startswith('--'):
+                raise ValueError('--archive requires a slug argument')
+            return slug
+        i += 1
+    return None
+
+
+def parse_resolve_arg(args):
+    """Parse --resolve <ref> from argv. Returns ref or None."""
+    i = 0
+    while i < len(args):
+        if args[i] == '--resolve':
+            if i + 1 >= len(args):
+                raise ValueError('--resolve requires a reference argument')
+            ref = args[i + 1]
+            if not ref or ref.startswith('--'):
+                raise ValueError('--resolve requires a reference argument')
+            return ref
+        i += 1
+    return None
+
+
+def parse_short_id_arg(args):
+    """Parse --short-id <ref> from argv. Returns ref or None."""
+    i = 0
+    while i < len(args):
+        if args[i] == '--short-id':
+            if i + 1 >= len(args):
+                raise ValueError('--short-id requires a reference argument')
+            ref = args[i + 1]
+            if not ref or ref.startswith('--'):
+                raise ValueError('--short-id requires a reference argument')
+            return ref
+        i += 1
+    return None
+
+
+def parse_root_arg(args):
+    """Parse --root <path> from argv. Returns root or None."""
+    i = 0
+    while i < len(args):
+        if args[i] == '--root':
+            if i + 1 >= len(args):
+                raise ValueError('--root requires an argument')
+            return args[i + 1]
+        i += 1
+    return None
+
+
+def parse_id_material_options(args):
+    """Parse optional sd-b32 creator material for --next-id."""
+    values = {'--id-seed': '', '--id-actor': ''}
+    seen = set()
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg in values:
+            if arg in seen:
+                raise ValueError(f'{arg} may only be supplied once')
+            if i + 1 >= len(args):
+                raise ValueError(f'{arg} requires an argument')
+            value = args[i + 1]
+            if value.startswith('--'):
+                raise ValueError(f'{arg} requires an argument')
+            values[arg] = value
+            seen.add(arg)
+            i += 2
+            continue
+        i += 1
+    return values['--id-seed'], values['--id-actor'], seen
+
+
+DEFAULT_STATUS_FIELDS = ('id', 'slug', 'status', 'title', 'score', 'source')
+DEFAULT_NEXT_FIELDS = ('id', 'slug', 'status')
+
+
+def resolve_extra_fields(entities, explicit_fields, all_fields_flag, default_fields):
+    """Return the list of extra frontmatter field names to append as columns.
+
+    `explicit_fields` (if non-None) is used verbatim in user order.
+    `all_fields_flag` collects every non-empty frontmatter key across `entities`,
+    drops anything already in `default_fields`, and returns the remainder sorted.
+    """
+    if explicit_fields is not None:
+        return list(explicit_fields)
+    if all_fields_flag:
+        defaults = set(default_fields)
+        seen = set()
+        for e in entities:
+            for key, val in e.items():
+                if key.startswith('_'):
+                    continue
+                if key in defaults:
+                    continue
+                if val == '' or val is None:
+                    continue
+                seen.add(key)
+        return sorted(seen)
+    return []
+
+
+def format_extra_cell(value, width=20):
+    """Render an extra-column cell: blank for missing/empty, truncate with ellipsis."""
+    if value is None:
+        value = ''
+    value = str(value)
+    if len(value) > width:
+        return value[:width - 1] + '\u2026'
+    return value
+
+
+TIMESTAMP_FIELDS = {'started', 'completed'}
+
+
+def parse_set_args(args):
+    """Parse --set arguments, returning (slug, field_updates) or None.
+
+    field_updates is a list of (field, value) tuples where value is:
+    - a string for explicit field=value
+    - '' for field= (clear)
+    - None for bare timestamp fields (auto-fill with now())
+    """
+    i = 0
+    while i < len(args):
+        if args[i] == '--set':
+            if i + 1 >= len(args):
+                raise ValueError('--set requires a slug argument')
+            slug = args[i + 1]
+            updates = []
+            j = i + 2
+            while j < len(args) and not args[j].startswith('--'):
+                arg = args[j]
+                if '=' in arg:
+                    field, _, value = arg.partition('=')
+                    updates.append((field, value))
+                elif arg in TIMESTAMP_FIELDS:
+                    updates.append((arg, None))
+                else:
+                    raise ValueError(
+                        f"bare field '{arg}' requires a value (use {arg}=value); "
+                        f"only {', '.join(sorted(TIMESTAMP_FIELDS))} support auto-fill"
+                    )
+                j += 1
+            if not updates:
+                raise ValueError('--set requires at least one field=value argument')
+            return slug, updates
+        i += 1
+    return None
+
+
+def update_frontmatter(filepath, updates):
+    """Rewrite frontmatter fields in a file. Returns dict of updated fields."""
+    if not _has_opening_fence(filepath):
+        raise ValueError(f'No frontmatter found in {filepath}')
+
+    with open(filepath, 'r') as f:
+        content = f.read()
+
+    lines = content.split('\n')
+    in_fm = False
+    fm_start = None
+    fm_end = None
+    for i, line in enumerate(lines):
+        if line.rstrip() == '---':
+            if not in_fm:
+                in_fm = True
+                fm_start = i
+            else:
+                fm_end = i
+                break
+
+    if fm_start is None or fm_end is None:
+        raise ValueError(f'No frontmatter found in {filepath}')
+
+    # Read current values to support skip-if-set for timestamp fields
+    current_values = {}
+    for i in range(fm_start + 1, fm_end):
+        line = lines[i]
+        if ':' in line and not line[0].isspace():
+            key, _, val = line.partition(':')
+            current_values[key.strip()] = val.strip()
+
+    # Resolve auto-fill timestamps
+    resolved = {}
+    now_str = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+    for field, value in updates:
+        if value is None:
+            # Bare timestamp field — skip if already has a value
+            if current_values.get(field, ''):
+                continue
+            resolved[field] = now_str
+        else:
+            resolved[field] = value
+
+    # Rewrite matching lines in frontmatter
+    written = set()
+    for i in range(fm_start + 1, fm_end):
+        line = lines[i]
+        if ':' in line and not line[0].isspace():
+            key, _, _ = line.partition(':')
+            key_stripped = key.strip()
+            if key_stripped in resolved:
+                lines[i] = f'{key_stripped}: {resolved[key_stripped]}'
+                written.add(key_stripped)
+
+    # Insert fields not already present in frontmatter before closing ---
+    missing = [f for f in resolved if f not in written]
+    for field in missing:
+        lines.insert(fm_end, f'{field}: {resolved[field]}')
+        fm_end += 1
+
+    with open(filepath, 'w') as f:
+        f.write('\n'.join(lines))
+
+    return resolved
+
+
+def apply_filters(entities, filters):
+    """Filter entities based on --where conditions."""
+    if not filters:
+        return entities
+    filtered = []
+    for e in entities:
+        match = True
+        for field, op, value in filters:
+            field_val = e.get(field, '')
+            if op == '!=':
+                if value is None:
+                    if not field_val:
+                        match = False
+                        break
+                else:
+                    if field_val == value:
+                        match = False
+                        break
+            elif op == '=':
+                if value is None:
+                    if field_val:
+                        match = False
+                        break
+                else:
+                    if field_val != value:
+                        match = False
+                        break
+        if match:
+            filtered.append(e)
+    return filtered
+
+
+def parse_reference(ref):
+    """Return (scope_filter, mode, value) for a resolver reference."""
+    scope_filter = None
+    value = ref
+    if ref.startswith('active:'):
+        scope_filter = 'active'
+        value = ref[len('active:'):]
+    elif ref.startswith('archive:'):
+        scope_filter = 'archived'
+        value = ref[len('archive:'):]
+
+    mode = 'bare'
+    if value.startswith('id:'):
+        mode = 'id'
+        value = value[len('id:'):]
+    elif value.startswith('slug:'):
+        mode = 'slug'
+        value = value[len('slug:'):]
+    elif value.startswith('prefix:'):
+        mode = 'prefix'
+        value = value[len('prefix:'):]
+    return scope_filter, mode, value
+
+
+def format_resolve_line(workflow_dir, entity):
+    return (
+        f"workflow={os.path.realpath(workflow_dir)} "
+        f"scope={entity.get('_scope', 'active')} "
+        f"slug={entity.get('slug', '')} "
+        f"id={entity.get('_stored_id', entity.get('id', ''))} "
+        f"path={entity.get('_path', '')}"
+    )
+
+
+def candidate_line(entity):
+    return (
+        f"scope={entity.get('_scope', 'active')} "
+        f"slug={entity.get('slug', '')} "
+        f"id={entity.get('_stored_id', entity.get('id', ''))} "
+        f"display={entity.get('_display_id', entity.get('id', ''))} "
+        f"path={entity.get('_path', '')}"
+    )
+
+
+def resolve_reference_candidates(workflow_dir, ref, include_archived=False, id_style=None):
+    """Resolve a reference in one workflow.
+
+    Returns (status, matches, errors) where status is one of:
+    ok, unknown, ambiguous, too_short.
+    """
+    git_root = find_git_root(workflow_dir)
+    if id_style is None:
+        id_style = workflow_id_style(workflow_dir)
+    all_entities = active_and_archived_entities(workflow_dir, git_root)
+    apply_effective_ids(all_entities, id_style, all_entities)
+
+    scope_filter, mode, value = parse_reference(ref)
+    allowed_scopes = {'active'}
+    if include_archived:
+        allowed_scopes.add('archived')
+    if scope_filter is not None:
+        allowed_scopes = {scope_filter}
+
+    entities = [e for e in all_entities if e.get('_scope') in allowed_scopes]
+
+    def in_scope_matches(predicate):
+        return [e for e in entities if predicate(e)]
+
+    matches = []
+    if mode == 'slug':
+        matches = in_scope_matches(lambda e: e.get('slug') == value)
+    elif mode == 'id':
+        matches = in_scope_matches(lambda e: e.get('_stored_id', e.get('id', '')) == value)
+    elif mode == 'prefix':
+        if id_style != 'sd-b32':
+            return 'unknown', [], [f"Error: prefix resolution is only available for id-style: sd-b32"]
+        if len(value) < SD_B32_MIN_PREFIX:
+            return 'too_short', [], [f"Error: sd-b32 address prefix '{value}' is too short; minimum prefix length is {SD_B32_MIN_PREFIX}"]
+        matches = in_scope_matches(lambda e: e.get('_stored_id', '').startswith(value))
+    else:
+        slug_matches = in_scope_matches(lambda e: e.get('slug') == value)
+        id_matches = in_scope_matches(lambda e: e.get('_stored_id', e.get('id', '')) == value)
+        prefix_matches = []
+        prefix_too_short = False
+        if id_style == 'sd-b32' and all(ch in SD_B32_ALPHABET for ch in value):
+            if len(value) < SD_B32_MIN_PREFIX:
+                prefix_too_short = True
+            else:
+                prefix_matches = in_scope_matches(lambda e: e.get('_stored_id', '').startswith(value))
+
+        combined = []
+        seen_paths = set()
+        for entity in slug_matches + id_matches + prefix_matches:
+            key = (entity.get('_scope'), entity.get('slug'), entity.get('_path'))
+            if key in seen_paths:
+                continue
+            seen_paths.add(key)
+            combined.append(entity)
+        scopes = {e.get('_scope') for e in combined}
+        if include_archived and scope_filter is None and len(scopes) > 1:
+            errors = ['Error: ambiguous reference across active and archived entities']
+            errors.extend(candidate_line(e) for e in combined)
+            return 'ambiguous', combined, errors
+
+        if slug_matches:
+            return ('ok', slug_matches, []) if len(slug_matches) == 1 else (
+                'ambiguous', slug_matches, ['Error: ambiguous slug reference'] + [candidate_line(e) for e in slug_matches]
+            )
+        if id_matches:
+            matches = id_matches
+        elif prefix_matches:
+            matches = prefix_matches
+        elif prefix_too_short:
+            return 'too_short', [], [f"Error: sd-b32 address prefix '{value}' is too short; minimum prefix length is {SD_B32_MIN_PREFIX}"]
+
+    if not matches:
+        return 'unknown', [], [f"Error: unknown reference: {ref}"]
+    if len(matches) > 1:
+        errors = [f"Error: ambiguous reference: {ref}"]
+        errors.extend(candidate_line(e) for e in matches)
+        return 'ambiguous', matches, errors
+    return 'ok', matches, []
+
+
+def resolve_reference_or_exit(workflow_dir, ref, include_archived=False):
+    id_style = workflow_id_style(workflow_dir)
+    fail_on_validation_errors(workflow_dir, find_git_root(workflow_dir), id_style)
+    status, matches, errors = resolve_reference_candidates(
+        workflow_dir, ref, include_archived=include_archived, id_style=id_style
+    )
+    if status != 'ok':
+        for error in errors:
+            print(error, file=sys.stderr)
+        sys.exit(1)
+    print(format_resolve_line(workflow_dir, matches[0]))
+
+
+def print_short_id_or_exit(workflow_dir, ref):
+    """Resolve REF (across active+archived) and print its short display ID.
+
+    For sd-b32 the result is the shortest-unique-prefix used by the ID column.
+    For sequential the result is the stored numeric ID. For slug the result is
+    the slug literal. Always resolves across active+archived so prefixes account
+    for archived siblings that could otherwise collide with active entities.
+    """
+    id_style = workflow_id_style(workflow_dir)
+    fail_on_validation_errors(workflow_dir, find_git_root(workflow_dir), id_style)
+    status, matches, errors = resolve_reference_candidates(
+        workflow_dir, ref, include_archived=True, id_style=id_style
+    )
+    if status != 'ok':
+        for error in errors:
+            print(error, file=sys.stderr)
+        sys.exit(1)
+    entity = matches[0]
+    stored_id = entity.get('_stored_id', entity.get('id', ''))
+    if id_style == 'slug':
+        print(entity.get('slug', ''))
+    elif id_style == 'sd-b32':
+        git_root = find_git_root(workflow_dir)
+        all_entities = active_and_archived_entities(workflow_dir, git_root)
+        display = compute_sd_b32_display_ids(all_entities)
+        print(display.get(stored_id, stored_id))
+    else:
+        print(stored_id)
+
+
+def resolve_mutation_entity(workflow_dir, ref):
+    """Resolve a mutation target in active scope, with archived read-only diagnostics."""
+    id_style = workflow_id_style(workflow_dir)
+    status, matches, errors = resolve_reference_candidates(
+        workflow_dir, ref, include_archived=False, id_style=id_style
+    )
+    if status == 'ok':
+        return matches[0]
+
+    archived_status, archived_matches, _ = resolve_reference_candidates(
+        workflow_dir, ref, include_archived=True, id_style=id_style
+    )
+    archived_only = [
+        e for e in archived_matches
+        if e.get('_scope') == 'archived'
+    ]
+    if archived_only and not matches:
+        print(f"Error: archived entity is read-only: {ref}", file=sys.stderr)
+        for entity in archived_only:
+            print(candidate_line(entity), file=sys.stderr)
+        sys.exit(1)
+
+    if status == 'unknown':
+        print(f'Error: entity not found: {ref}', file=sys.stderr)
+        sys.exit(1)
+
+    for error in errors:
+        print(error, file=sys.stderr)
+    sys.exit(1)
+
+
+def resolve_from_root_or_exit(root_path, ref, include_archived=False):
+    if not os.path.isdir(root_path):
+        print('Error: --root path does not exist: %s' % root_path, file=sys.stderr)
+        sys.exit(1)
+
+    workflow_ref = None
+    inner_ref = ref
+    if '::' in ref:
+        workflow_ref, inner_ref = ref.split('::', 1)
+
+    workflows = discover_workflows(root_path)
+    if workflow_ref is not None:
+        if os.path.isabs(workflow_ref):
+            candidates = [os.path.realpath(workflow_ref)] if os.path.isdir(workflow_ref) else []
+        else:
+            candidates = [wf for wf in workflows if os.path.basename(wf) == workflow_ref]
+        if len(candidates) != 1:
+            print(f"Error: workflow qualifier is ambiguous or unknown: {workflow_ref}", file=sys.stderr)
+            for wf in candidates:
+                print(wf, file=sys.stderr)
+            sys.exit(1)
+        resolve_reference_or_exit(candidates[0], inner_ref, include_archived=include_archived)
+        return
+
+    matches = []
+    hard_errors = []
+    for workflow in workflows:
+        try:
+            id_style = workflow_id_style(workflow)
+        except ValueError as e:
+            hard_errors.append(f"Error: {workflow}: {e}")
+            continue
+        status, workflow_matches, errors = resolve_reference_candidates(
+            workflow, ref, include_archived=include_archived, id_style=id_style
+        )
+        if status == 'ok':
+            matches.append((workflow, workflow_matches[0]))
+        elif status not in ('unknown',):
+            hard_errors.extend(f"{workflow}: {error}" for error in errors)
+
+    if len(matches) == 1 and not hard_errors:
+        workflow, entity = matches[0]
+        print(format_resolve_line(workflow, entity))
+        return
+    if len(matches) > 1:
+        print(f"Error: multiple workflows match reference: {ref}", file=sys.stderr)
+        for workflow, entity in matches:
+            print(f"{workflow} {candidate_line(entity)}", file=sys.stderr)
+        sys.exit(1)
+    if hard_errors:
+        for error in hard_errors:
+            print(error, file=sys.stderr)
+        sys.exit(1)
+    print(f"Error: unknown reference: {ref}", file=sys.stderr)
+    sys.exit(1)
+
+
+def run_archive(pipeline_dir, slug, force=False):
+    """Archive an entity, supporting both flat and folder forms.
+
+    Flat: moves {pipeline_dir}/{slug}.md -> {pipeline_dir}/_archive/{slug}.md.
+    Folder: stamps {pipeline_dir}/{slug}/index.md with `archived:`, then moves
+      the whole folder {pipeline_dir}/{slug}/ -> {pipeline_dir}/_archive/{slug}/.
+
+    Stamps `archived: <ISO-8601 UTC>` in the frontmatter before moving, using
+    the same `update_frontmatter()` insert-if-missing path that `--set` uses.
+    Does not touch `completed`. Does not run git — the caller handles commits.
+    Errors if the source is missing or the destination already exists.
+    """
+    flat_path = os.path.join(pipeline_dir, slug + '.md')
+    folder_root = os.path.join(pipeline_dir, slug)
+    folder_index = os.path.join(folder_root, 'index.md')
+    flat_exists = os.path.isfile(flat_path)
+    folder_exists = os.path.isfile(folder_index)
+
+    if folder_exists:
+        if flat_exists:
+            print(
+                f"Warning: entity '{slug}' has both {flat_path} and "
+                f"{folder_index}; preferring folder form. Remove the flat file "
+                f"to silence this warning.",
+                file=sys.stderr,
+            )
+        is_folder = True
+        source_path = folder_index
+    elif flat_exists:
+        is_folder = False
+        source_path = flat_path
+    else:
+        print(f'Error: entity not found: {slug}', file=sys.stderr)
+        sys.exit(1)
+
+    # Mod-block guard: refuse archival while mod-block is active
+    fields = parse_frontmatter(source_path)
+    mod_block = fields.get('mod-block', '').strip()
+    pr = fields.get('pr', '').strip()
+    if mod_block:
+        if not force:
+            print(f'Error: entity {slug} has pending mod-block ({mod_block}). '
+                  f'Use --force to override.', file=sys.stderr)
+            sys.exit(1)
+        print(f'Warning: --force overriding mod-block ({mod_block}) on entity {slug}',
+              file=sys.stderr)
+
+    # Merge-hook invariant: archival is a terminal action. When the workflow
+    # registers a merge hook, refuse archival unless the hook has run (pr set),
+    # the hook is in flight (mod-block set, already handled above), or --force.
+    if not force and not mod_block and not pr:
+        merge_hooks = scan_mods(pipeline_dir).get('merge', [])
+        if merge_hooks:
+            hook_list = ', '.join(merge_hooks)
+            print(
+                f'Error: entity {slug} cannot be archived — workflow has merge '
+                f'hook(s) [{hook_list}] that have not run (pr field is empty and '
+                f'mod-block is empty). Invoke the hook first, or use --force to bypass.',
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
+    archive_dir = os.path.join(pipeline_dir, '_archive')
+
+    if is_folder:
+        dest_path = os.path.join(archive_dir, slug)
+        if os.path.exists(dest_path):
+            print(f'Error: already archived: {slug}/', file=sys.stderr)
+            sys.exit(1)
+    else:
+        dest_path = os.path.join(archive_dir, slug + '.md')
+        if os.path.exists(dest_path):
+            print(f'Error: already archived: {slug}.md', file=sys.stderr)
+            sys.exit(1)
+
+    os.makedirs(archive_dir, exist_ok=True)
+
+    now_str = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+    try:
+        update_frontmatter(source_path, [('archived', now_str)])
+    except ValueError as e:
+        print('Error: ' + str(e), file=sys.stderr)
+        sys.exit(1)
+
+    if is_folder:
+        os.rename(folder_root, dest_path)
+    else:
+        os.rename(source_path, dest_path)
+    print(f'archived: {dest_path}')
+
+
+def find_git_root(start_dir):
+    """Walk up from start_dir to find the .git directory, return its parent."""
+    d = os.path.abspath(start_dir)
+    while True:
+        if os.path.isdir(os.path.join(d, '.git')) or os.path.isfile(os.path.join(d, '.git')):
+            return d
+        parent = os.path.dirname(d)
+        if parent == d:
+            return start_dir
+        d = parent
+
+
+DISCOVER_IGNORE_DIRS = {'.git', '.worktrees', 'node_modules', 'vendor', 'dist', 'build', '__pycache__', 'tests'}
+
+
+def _read_gitignore_dir_basenames(root):
+    """Return the basenames of directory-pattern entries in ``{root}/.gitignore``.
+
+    Only lines ending with ``/`` are treated as directory patterns. The
+    trailing slash is stripped and the basename of the remaining path is
+    returned, so ``.claude/worktrees/`` contributes ``worktrees`` and
+    ``build/`` contributes ``build``. Comments and blank lines are skipped.
+    Missing or unreadable ``.gitignore`` returns an empty set.
+    """
+    path = os.path.join(root, '.gitignore')
+    names = set()
+    try:
+        with open(path) as f:
+            lines = f.readlines()
+    except (OSError, IOError):
+        return names
+    for line in lines:
+        entry = line.strip()
+        if not entry or entry.startswith('#'):
+            continue
+        if entry.startswith('!'):
+            continue
+        if not entry.endswith('/'):
+            continue
+        basename = os.path.basename(entry.rstrip('/'))
+        if basename:
+            names.add(basename)
+    return names
+
+
+def discover_workflows(root):
+    """Walk a directory tree and return workflow directories.
+
+    A workflow directory is one containing a README.md whose YAML frontmatter
+    has a ``commissioned-by`` field starting with ``spacedock@``.
+
+    Matching rule:
+        The ``commissioned-by`` value must start with the literal string
+        ``spacedock@``. Both ``spacedock@1.0`` and bare ``spacedock@`` (no
+        version suffix) are accepted.
+
+    Ignored directories (pruned during walk):
+        The hardcoded baseline ``DISCOVER_IGNORE_DIRS`` (``.git``,
+        ``.worktrees``, ``node_modules``, ``vendor``, ``dist``, ``build``,
+        ``__pycache__``, ``tests``) is augmented at startup with the
+        directory-pattern basenames from ``{root}/.gitignore`` (lines ending
+        with ``/``). For example, a ``.gitignore`` entry of
+        ``.claude/worktrees/`` contributes the basename ``worktrees`` to the
+        ignore set, suppressing agent-managed worktree copies. The trade-off
+        is basename matching: a sibling directory anywhere in the tree
+        sharing a basename with a gitignored directory pattern is also
+        pruned.
+
+    Symlink handling:
+        Symlinks are followed (``followlinks=True``). Paths are resolved with
+        ``os.path.realpath`` before deduplication. When both a symlink and its
+        target match, the canonical resolved (real) path is returned, not the
+        symlink path. Visited real paths are tracked to avoid infinite loops
+        from symlink cycles.
+
+    Returns:
+        Sorted list of absolute, resolved directory paths.
+    """
+    root = os.path.abspath(root)
+    ignore_dirs = DISCOVER_IGNORE_DIRS | _read_gitignore_dir_basenames(root)
+    seen_real = set()
+    results = []
+
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=True):
+        real_dir = os.path.realpath(dirpath)
+        if real_dir in seen_real:
+            dirnames[:] = []
+            continue
+        seen_real.add(real_dir)
+
+        dirnames[:] = [d for d in dirnames if d not in ignore_dirs]
+
+        if 'README.md' not in filenames:
+            continue
+
+        readme_path = os.path.join(dirpath, 'README.md')
+        try:
+            fields = parse_frontmatter(readme_path)
+        except (OSError, IOError):
+            continue
+
+        commissioned_by = fields.get('commissioned-by', '')
+        if commissioned_by.startswith('spacedock@'):
+            resolved = os.path.realpath(dirpath)
+            if resolved not in {r for r in results}:
+                results.append(resolved)
+
+    return sorted(results)
+
+
+def main():
+    args = sys.argv[1:]
+
+    # Handle --discover mode (incompatible with all other flags)
+    if '--discover' in args:
+        incompatible = [
+            f for f in args if f in (
+                '--boot', '--next', '--next-id', '--archived', '--where',
+                '--set', '--archive', '--fields', '--all-fields', '--workflow-dir',
+                '--validate', '--resolve', '--short-id', '--id-seed', '--id-actor',
+            )
+        ]
+        if incompatible:
+            print('Error: --discover is incompatible with %s' % ', '.join(sorted(set(incompatible))),
+                  file=sys.stderr)
+            sys.exit(1)
+
+        # Parse --root
+        root_path = None
+        i = 0
+        while i < len(args):
+            if args[i] == '--root':
+                if i + 1 >= len(args):
+                    print('Error: --root requires an argument', file=sys.stderr)
+                    sys.exit(1)
+                root_path = args[i + 1]
+                i += 2
+            else:
+                i += 1
+
+        if root_path is None:
+            try:
+                result = subprocess.run(
+                    ['git', 'rev-parse', '--show-toplevel'],
+                    capture_output=True, text=True,
+                )
+                if result.returncode == 0:
+                    root_path = result.stdout.strip()
+                else:
+                    root_path = os.getcwd()
+            except FileNotFoundError:
+                root_path = os.getcwd()
+
+        if not os.path.isdir(root_path):
+            print('Error: --root path does not exist: %s' % root_path, file=sys.stderr)
+            sys.exit(1)
+
+        for path in discover_workflows(root_path):
+            print(path)
+        sys.exit(0)
+
+    try:
+        workflow_dir, args = parse_workflow_dir(args)
+    except ValueError as e:
+        print('Error: ' + str(e), file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        root_path = parse_root_arg(args)
+    except ValueError as e:
+        print('Error: ' + str(e), file=sys.stderr)
+        sys.exit(1)
+
+    pipeline_dir = workflow_dir or os.environ.get('PIPELINE_DIR') or os.path.dirname(os.path.abspath(__file__))
+
+    # Parse --set before other flags
+    try:
+        set_result = parse_set_args(args)
+    except ValueError as e:
+        print('Error: ' + str(e), file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        archive_slug = parse_archive_arg(args)
+    except ValueError as e:
+        print('Error: ' + str(e), file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        resolve_ref = parse_resolve_arg(args)
+    except ValueError as e:
+        print('Error: ' + str(e), file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        short_id_ref = parse_short_id_arg(args)
+    except ValueError as e:
+        print('Error: ' + str(e), file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        explicit_fields, all_fields_flag = parse_fields_options(args)
+    except ValueError as e:
+        print('Error: ' + str(e), file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        id_seed, id_actor, id_material_flags = parse_id_material_options(args)
+    except ValueError as e:
+        print('Error: ' + str(e), file=sys.stderr)
+        sys.exit(1)
+
+    include_archive = '--archived' in args
+    show_next = '--next' in args
+    show_next_id = '--next-id' in args
+    show_boot = '--boot' in args
+    show_validate = '--validate' in args
+    has_fields_flag = explicit_fields is not None or all_fields_flag
+
+    if id_material_flags and not show_next_id:
+        print('Error: --id-seed and --id-actor can only be used with --next-id', file=sys.stderr)
+        sys.exit(1)
+
+    # --boot is incompatible with --next, --next-id, --archived, --where, --fields, --all-fields
+    if show_boot:
+        if show_next:
+            print('Error: --boot is incompatible with --next', file=sys.stderr)
+            sys.exit(1)
+        if show_next_id:
+            print('Error: --boot is incompatible with --next-id', file=sys.stderr)
+            sys.exit(1)
+        if include_archive:
+            print('Error: --boot is incompatible with --archived', file=sys.stderr)
+            sys.exit(1)
+        if has_fields_flag:
+            print('Error: --boot is incompatible with --fields / --all-fields', file=sys.stderr)
+            sys.exit(1)
+
+    try:
+        where_filters = parse_where_filters(args)
+    except ValueError as e:
+        print('Error: ' + str(e), file=sys.stderr)
+        sys.exit(1)
+
+    if show_boot and where_filters:
+        print('Error: --boot is incompatible with --where', file=sys.stderr)
+        sys.exit(1)
+
+    if show_next_id:
+        incompatible = []
+        if show_next:
+            incompatible.append('--next')
+        if include_archive:
+            incompatible.append('--archived')
+        if show_boot:
+            incompatible.append('--boot')
+        if where_filters:
+            incompatible.append('--where')
+        if has_fields_flag:
+            incompatible.append('--fields/--all-fields')
+        if archive_slug is not None:
+            incompatible.append('--archive')
+        if set_result is not None:
+            incompatible.append('--set')
+        if resolve_ref is not None:
+            incompatible.append('--resolve')
+        if show_validate:
+            incompatible.append('--validate')
+        if incompatible:
+            print(f'Error: --next-id cannot be combined with {", ".join(incompatible)}',
+                  file=sys.stderr)
+            sys.exit(1)
+
+        entities = scan_entities(pipeline_dir)
+        git_root = find_git_root(pipeline_dir)
+        try:
+            id_style = workflow_id_style(pipeline_dir)
+        except ValueError as e:
+            print('Error: ' + str(e), file=sys.stderr)
+            sys.exit(1)
+        fail_on_validation_errors(pipeline_dir, git_root, id_style)
+        print_next_id(entities, pipeline_dir, git_root, id_style, id_seed=id_seed, id_actor=id_actor)
+        sys.exit(0)
+
+    if resolve_ref is not None:
+        incompatible = []
+        if show_next:
+            incompatible.append('--next')
+        if show_boot:
+            incompatible.append('--boot')
+        if show_next_id:
+            incompatible.append('--next-id')
+        if where_filters:
+            incompatible.append('--where')
+        if has_fields_flag:
+            incompatible.append('--fields/--all-fields')
+        if archive_slug is not None:
+            incompatible.append('--archive')
+        if set_result is not None:
+            incompatible.append('--set')
+        if show_validate:
+            incompatible.append('--validate')
+        if incompatible:
+            print(f'Error: --resolve cannot be combined with {", ".join(incompatible)}',
+                  file=sys.stderr)
+            sys.exit(1)
+        if root_path:
+            resolve_from_root_or_exit(root_path, resolve_ref, include_archived=include_archive)
+        else:
+            resolve_reference_or_exit(pipeline_dir, resolve_ref, include_archived=include_archive)
+        sys.exit(0)
+
+    if short_id_ref is not None:
+        incompatible = []
+        if show_next:
+            incompatible.append('--next')
+        if show_boot:
+            incompatible.append('--boot')
+        if show_next_id:
+            incompatible.append('--next-id')
+        if include_archive:
+            incompatible.append('--archived')
+        if where_filters:
+            incompatible.append('--where')
+        if has_fields_flag:
+            incompatible.append('--fields/--all-fields')
+        if archive_slug is not None:
+            incompatible.append('--archive')
+        if set_result is not None:
+            incompatible.append('--set')
+        if show_validate:
+            incompatible.append('--validate')
+        if root_path:
+            incompatible.append('--root')
+        if incompatible:
+            print(f'Error: --short-id cannot be combined with {", ".join(incompatible)}',
+                  file=sys.stderr)
+            sys.exit(1)
+        print_short_id_or_exit(pipeline_dir, short_id_ref)
+        sys.exit(0)
+
+    if root_path:
+        print('Error: --root is only supported with --discover or --resolve', file=sys.stderr)
+        sys.exit(1)
+
+    if archive_slug is not None:
+        incompatible = []
+        if show_next:
+            incompatible.append('--next')
+        if include_archive:
+            incompatible.append('--archived')
+        if show_boot:
+            incompatible.append('--boot')
+        if show_next_id:
+            incompatible.append('--next-id')
+        if where_filters:
+            incompatible.append('--where')
+        if has_fields_flag:
+            incompatible.append('--fields/--all-fields')
+        if set_result is not None:
+            incompatible.append('--set')
+        if show_validate:
+            incompatible.append('--validate')
+        if incompatible:
+            print(f'Error: --archive cannot be combined with {", ".join(incompatible)}',
+                  file=sys.stderr)
+            sys.exit(1)
+
+        resolved_entity = resolve_mutation_entity(pipeline_dir, archive_slug)
+        run_archive(pipeline_dir, resolved_entity['slug'], force='--force' in args)
+        sys.exit(0)
+
+    if set_result is not None:
+        # Check for incompatible flags
+        incompatible = []
+        if show_next:
+            incompatible.append('--next')
+        if include_archive:
+            incompatible.append('--archived')
+        if show_boot:
+            incompatible.append('--boot')
+        if show_next_id:
+            incompatible.append('--next-id')
+        if where_filters:
+            incompatible.append('--where')
+        if has_fields_flag:
+            incompatible.append('--fields/--all-fields')
+        if show_validate:
+            incompatible.append('--validate')
+        if incompatible:
+            print(f'Error: --set cannot be combined with {", ".join(incompatible)}',
+                  file=sys.stderr)
+            sys.exit(1)
+
+        slug, updates = set_result
+        force = '--force' in args
+        resolved_entity = resolve_mutation_entity(pipeline_dir, slug)
+        slug = resolved_entity['slug']
+        main_entity_path = resolve_entity_path(pipeline_dir, slug)
+        if main_entity_path is None:
+            print(f'Error: entity not found: {slug}', file=sys.stderr)
+            sys.exit(1)
+        git_root = find_git_root(pipeline_dir)
+        entity_path = resolve_active_entity_path(
+            main_entity_path, git_root, pipeline_dir=pipeline_dir
+        )
+
+        # Mod-block guard: refuse terminal transitions while mod-block is active.
+        # Also refuse terminal transitions combined with clearing mod-block in the
+        # same --set call — the two operations must be separate so the clear gets
+        # its own commit and any reviewer/session-resume can see the block was
+        # resolved before terminalization began.
+        current_fields = parse_frontmatter(entity_path)
+        mod_block = current_fields.get('mod-block', '').strip()
+        current_pr = current_fields.get('pr', '').strip()
+        current_verdict = current_fields.get('verdict', '').strip()
+        clearing_mod_block = any(
+            field == 'mod-block' and value == '' for field, value in updates
+        )
+
+        readme_path = os.path.join(pipeline_dir, 'README.md')
+        stages = parse_stages_block(readme_path) if os.path.exists(readme_path) else None
+        terminal_names = {s['name'] for s in (stages or []) if s.get('terminal')}
+
+        def is_terminal_update():
+            """True when this --set applies any terminal field."""
+            for field, value in updates:
+                if field == 'status' and value in terminal_names:
+                    return True
+                if field in ('completed', 'verdict'):
+                    return True
+                if field == 'worktree' and value == '':
+                    return True
+            return False
+
+        # Resolve the post-update pr value. The current pr counts unless this
+        # --set itself sets it; `pr=` (clear) also counts as no pr.
+        post_update_pr = current_pr
+        for field, value in updates:
+            if field == 'pr':
+                post_update_pr = value.strip()
+
+        # Resolve the post-update verdict the same way; the merge-hook guard
+        # below treats the literal value 'rejected' as a captain-authoritative
+        # "this is not a ship" record and bypasses the hook requirement.
+        post_update_verdict = current_verdict
+        for field, value in updates:
+            if field == 'verdict':
+                post_update_verdict = value.strip()
+
+        if (mod_block or clearing_mod_block) and not force:
+            if is_terminal_update():
+                if mod_block and not clearing_mod_block:
+                    reason = f'pending mod-block ({mod_block})'
+                elif clearing_mod_block:
+                    # Either the block is currently set and the caller is clearing
+                    # it in the same call, or the caller redundantly cleared an
+                    # already-empty field alongside a terminal update. Either way
+                    # the combined operation is rejected to keep the clear commit
+                    # separate from the terminal commit.
+                    reason = (
+                        f'combined mod-block clear with terminal transition '
+                        f'(current mod-block={mod_block!r})'
+                    )
+                else:
+                    reason = 'mod-block transition'
+                print(f'Error: entity {slug} has {reason}. '
+                      f'Clear mod-block in a separate --set call, or use --force.',
+                      file=sys.stderr)
+                sys.exit(1)
+
+        # Merge-hook invariant: when the workflow registers a merge hook, the
+        # terminal transition must happen *after* that hook has run. We detect
+        # hook completion by requiring a non-empty pr, a set mod-block (hook
+        # in flight), or --force. If none of those hold, the FO is trying to
+        # skip the hook entirely — refuse so the hook cannot be bypassed.
+        if (not force and is_terminal_update() and not mod_block
+                and not post_update_pr and post_update_verdict != 'rejected'):
+            merge_hooks = scan_mods(pipeline_dir).get('merge', [])
+            if merge_hooks:
+                hook_list = ', '.join(merge_hooks)
+                print(
+                    f'Error: entity {slug} cannot advance to terminal — workflow '
+                    f'has merge hook(s) [{hook_list}] that have not run (pr field '
+                    f'is empty and mod-block is empty). Set mod-block=merge:{merge_hooks[0]} '
+                    f'and invoke the hook, or use --force to bypass.',
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+
+        if force and mod_block:
+            print(f'Warning: --force overriding mod-block ({mod_block}) on entity {slug}',
+                  file=sys.stderr)
+
+        try:
+            resolved = update_frontmatter(entity_path, updates)
+            # Mirror PR metadata back to main for discovery, but keep all
+            # other active-state updates on the worktree copy.
+            if entity_path != main_entity_path:
+                pr_updates = [(field, value) for field, value in updates if field == 'pr']
+                if pr_updates:
+                    update_frontmatter(main_entity_path, pr_updates)
+        except ValueError as e:
+            print('Error: ' + str(e), file=sys.stderr)
+            sys.exit(1)
+
+        # Emit one line per resolved field in the shape `field: old -> new`
+        # so callers (including the FO) can narrate the mutation without
+        # re-reading the entity file. Re-reading via Read triggers Claude
+        # Code's file-staleness safety net, which echoes the entire current
+        # file as a system-reminder on the turn after a Bash-driven mutation
+        # (upstream #96). Clear-to-empty renders as `field: old -> ` (empty
+        # right side, no brackets). Bare-timestamp auto-fill renders as
+        # `field: -> {timestamp}` (empty left side).
+        for field, value in resolved.items():
+            old_value = current_fields.get(field, '')
+            print(f'{field}: {old_value} -> {value}')
+        sys.exit(0)
+
+    readme_path = os.path.join(pipeline_dir, 'README.md')
+    stages = None
+    if os.path.exists(readme_path):
+        stages = parse_stages_block(readme_path)
+
+    if show_next and stages is None:
+        print('Error: README.md has no stages block. --next requires stage metadata.', file=sys.stderr)
+        sys.exit(1)
+
+    if show_boot and stages is None:
+        print('Error: README.md has no stages block. --boot requires stage metadata.', file=sys.stderr)
+        sys.exit(1)
+
+    git_root = find_git_root(pipeline_dir)
+    try:
+        id_style = workflow_id_style(pipeline_dir)
+    except ValueError as e:
+        print('Error: ' + str(e), file=sys.stderr)
+        sys.exit(1)
+
+    if show_validate:
+        incompatible = []
+        if show_next:
+            incompatible.append('--next')
+        if include_archive:
+            incompatible.append('--archived')
+        if show_boot:
+            incompatible.append('--boot')
+        if show_next_id:
+            incompatible.append('--next-id')
+        if where_filters:
+            incompatible.append('--where')
+        if has_fields_flag:
+            incompatible.append('--fields/--all-fields')
+        if archive_slug is not None:
+            incompatible.append('--archive')
+        if set_result is not None:
+            incompatible.append('--set')
+        if incompatible:
+            print(f'Error: --validate cannot be combined with {", ".join(incompatible)}',
+                  file=sys.stderr)
+            sys.exit(1)
+        errors = validate_workflow(pipeline_dir, git_root, id_style)
+        if errors:
+            for error in errors:
+                print(error, file=sys.stderr)
+            sys.exit(1)
+        print('VALID')
+        sys.exit(0)
+
+    fail_on_validation_errors(pipeline_dir, git_root, id_style)
+
+    all_entities = active_and_archived_entities(pipeline_dir, git_root)
+    entities = scan_entities_active(pipeline_dir, git_root)
+    if include_archive:
+        entities.extend(archive_entities(pipeline_dir))
+
+    apply_effective_ids(all_entities, id_style, all_entities)
+    apply_effective_ids(entities, id_style, all_entities)
+    entities = apply_filters(entities, where_filters)
+
+    if show_boot:
+        print_boot(entities, stages, pipeline_dir, git_root, id_style)
+    elif show_next:
+        extras = resolve_extra_fields(entities, explicit_fields, all_fields_flag, DEFAULT_NEXT_FIELDS)
+        print_next_table(entities, stages, extra_fields=extras)
+    else:
+        extras = resolve_extra_fields(entities, explicit_fields, all_fields_flag, DEFAULT_STATUS_FIELDS)
+        print_status_table(entities, stages, extra_fields=extras)
+
+
+if __name__ == '__main__':
+    main()

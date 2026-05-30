@@ -1,0 +1,6 @@
+ID     SLUG                           STATUS               TITLE                          SCORE    SOURCE
+--     ----                           ------               -----                          -----    ------
+001    001-design-seam                backlog              Design the runner seam         0.80     roadmap
+002    002-vendor-script              ideation             Vendor the status script       0.60     roadmap
+004    004-no-score                   ideation             Entity without a score                  backlog grooming
+003    003-wire-cli                   implementation       Wire the CLI routing           0.90     roadmap
