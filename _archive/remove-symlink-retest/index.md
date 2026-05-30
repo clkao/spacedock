@@ -8,6 +8,7 @@ worktree:
 started: 2026-05-30T04:30:16Z
 completed: 2026-05-30T18:50:09Z
 verdict: PASSED
+archived: 2026-05-30T18:50:09Z
 ---
 
 # Retest Without README Symlink
