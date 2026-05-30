@@ -1,7 +1,7 @@
 ---
 id: 60kbtwqrp8z8szp96e0mfm5a
 title: Implement native Go status parity
-status: validation
+status: implementation
 score: "0.65"
 source: bootstrap roadmap
 worktree: /Users/clkao/git/spacedock-research/spacedock-v1/.worktrees/spacedock-ensign-native-go-status
@@ -238,3 +238,17 @@ Resolved the deferred --new folder-form item per team-lead decision (option 1, t
 ### Summary
 
 PASSED. The native runner reproduces the oracle's observable contract byte-for-byte across all three id-styles, independently reproduced — not merely trusting the in-tree suite. I authored a separate parity harness (a4d93cf) with my own fixtures that drives the production NativeRunner.Run and shells to the live Python oracle; 60 subtests pass covering every read flag, mutation/archive (incl. unknown-field preservation), validation/usage defect classes (exit domain {0,1}, never 2), the EOF-newline identity trap, archive-dest-spelling, and resolve realpath asymmetry. The production default is unchanged (VendorRunner, byte-identical to the oracle on the real .spacedock-state), the resolveRoots seam is single-root this stage, and all four gates are green. One non-blocking OBSERVATION for the FO (not an oracle parity gap, since the oracle has zero --new support — verified): for `id-style: slug`, --new stamps a redundant `id: <slug>` line into the seed (matching the universal id-stamp rule in new.go), which makes `--resolve`/`--short-id` emit `id=<slug>` where hand-authored slug entities emit `id=` (empty). Default table is unaffected (slug display id is always the slug). This is a Decision-B design choice on the NEW surface, not a regression of any existing op; flag it if uniform-id-stamp on slug-style seeds is undesired.
+
+## Feedback Cycles
+
+### Cycle 1 — validation REJECTED (2026-05-30)
+
+Validation ensign recommended PASSED (60-subtest independent parity harness), but a parallel adversarial staff code-review plus an FO suite re-run surfaced parity-core defects that block merge:
+
+- **M1 (material) — CRLF parity divergence.** Native reads raw bytes and splits on `\n` only, leaving `\r` attached, so `"---\r" != "---"`. A CRLF entity is silently dropped (header + zero rows) where the oracle (Python universal-newlines) lists it — removing it from discovery, validation, AND the sequential-id max (colliding-id risk). A CRLF README makes `--next` exit 1 ("no stages block") vs oracle exit 0. Fix: normalize `\r\n`/`\r` -> `\n` on read (frontmatter.go, stages.go, mutate.go, new.go). Add a CRLF fixture parity test (CRLF entity + CRLF README, diffed against the oracle).
+- **M2 (material, narrow) — float score parse.** Go `strconv.ParseFloat` accepts hex-floats (`0x1p4`) that Python `float()` rejects (and rejects Arabic digits Python accepts) -> wrong sort order for exotic scores. Match Python `float()` semantics for the sort key; add an exotic-score fixture.
+- **P1 (hardening) — `--new` nil-Stdin panic.** `io.ReadAll(nil)` panics on a fresh-slug `--new` with nil Stdin (not reachable via the production CLI, but cheap to guard).
+- **slug `--new` id-stamp.** For id-style: slug, `--new` stamps a redundant `id: <slug>`, so `--resolve`/`--short-id` emit `id=<slug>` where hand-authored slug entities emit `id=` (empty). For consistency, do not stamp `id` for slug id-style.
+- **Flaky test.** The validator's `internal/status/zz_independent_parity_test.go` (`TestIndMutationSeq`, bare-timestamp-fill subtest) intermittently fails in the full suite (native-vs-oracle timestamp second-boundary). Make it deterministic; confirm with `-count=5`.
+
+Routed to a fresh implementation ensign (cycle 2) — the prior impl ensign was over context budget (reuse_ok=false, 142%). Re-validation will fresh-dispatch after the fix.
