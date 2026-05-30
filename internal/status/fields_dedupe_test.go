@@ -90,3 +90,22 @@ func TestNextFieldsStatusUnchanged(t *testing.T) {
 		t.Fatalf("--next --fields status should still append STATUS once, got %d: %q", c, header)
 	}
 }
+
+// TestNextFieldsIDSuppressed locks the de-dupe on the --next path for a name
+// that IS a displayed --next column: `id` is rendered as the first --next
+// column, so `--next --fields id` must NOT append a duplicate ID extra.
+func TestNextFieldsIDSuppressed(t *testing.T) {
+	root, err := filepath.Abs(filepath.Join("testdata", "seq-workflow"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := pinnedEnv(t)
+	out, errOut, code := runNative(t, root, env, "--workflow-dir", root, "--next", "--fields", "id")
+	if code != 0 {
+		t.Fatalf("native exit=%d stderr=%q", code, errOut)
+	}
+	header := headerOf(out)
+	if c := countToken(header, "ID"); c != 1 {
+		t.Fatalf("--next --fields id should not duplicate the displayed ID column, got %d: %q", c, header)
+	}
+}
