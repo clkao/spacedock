@@ -92,7 +92,7 @@ The only permitted path for initial `Agent()` dispatch is:
    `bare_mode` must reflect the current dispatch context — read it from live team state, never infer it from the stage. Set `is_feedback_reflow` to true only when routing a rejection back to its `feedback-to` target stage.
 2. **REQUIRED — Pipe the JSON to the helper** (do NOT skip this step):
    ```
-   echo '<json>' | {project_root}/skills/commission/bin/claude-team build --workflow-dir {workflow_dir}
+   echo '<json>' | spacedock dispatch build --workflow-dir {workflow_dir}
    ```
 3. **REQUIRED — On exit 0, parse the stdout JSON and call `Agent()` with the emitted fields verbatim.** The `name`, `description`, `prompt`, and `model` fields MUST come from helper output unchanged. The `description` field is REQUIRED by the Agent tool — do not omit it. The `prompt` is a file-pointer (`Skill(...) ; then Read /tmp/spacedock-dispatch/{name}.md and treat its content as your assignment.`); the ensign Reads the file on first action and treats the body (including the SendMessage completion-signal section) as the inline assignment. Do not strip or rewrite the prompt. Forward `output.model` as the `Agent()` `model=` parameter when present; when null, OMIT the `model=` argument entirely (do NOT pass `model=None` — default-inheritance only applies when the argument is absent):
    ```
