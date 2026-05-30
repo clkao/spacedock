@@ -1,10 +1,10 @@
 ---
 id: 60kbtwqrp8z8szp96e0mfm5a
 title: Implement native Go status parity
-status: ideation
+status: implementation
 score: "0.65"
 source: bootstrap roadmap
-worktree:
+worktree: /Users/clkao/git/spacedock-research/spacedock-v1/.worktrees/spacedock-ensign-native-go-status
 started: 2026-05-30T04:30:15Z
 ---
 
