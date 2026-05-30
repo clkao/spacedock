@@ -91,8 +91,13 @@ post-bootstrap / release-time (none block the current sprint):
 roborev-validation-hook (ng) is OUT of this sprint — it is a larger DEV-WORKFLOW
 improvement (incremental commit-review feeding the validation gate), not the core
 product build, and is sandbox-blocked (its daemon needs HOME relocation; claude-code is
-the only healthy review agent here). Left at backlog, deferred to a future
-dev-workflow-improvement effort; not dispatched.
+the only healthy review agent here). The BUILD stays deferred. UPDATE (captain,
+2026-05-30): its OPERATING-MODEL ideation is dispatched now as a research SPIKE — decide
+which integration model fits: (1) alongside docs/dev, incremental review as implementation
+proceeds (per-commit or chunked-logical-commits) feeding the validation gate; vs (2) as
+part of pr-mod (the PR workflow outside the local spacedock workflow), where the FO
+re-dispatches to address review feedback and/or finalize merge. Model #2 ties into the
+two-origin / pr-mod follow-up above. FO lean (spike decides): #2.
 
 ## Debrief notes
 - external-tracker-checkpoint shipped PASSED but AC-6 was a prose self-oracle (the
