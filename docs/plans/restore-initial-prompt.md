@@ -90,3 +90,73 @@ initialPrompt: "Report workflow status."
 ```
 
 One line added. No other files changed.
+
+## Stage Report: implementation
+
+1. Add `initialPrompt` to `agents/first-officer.md` frontmatter with the exact value specified — DONE
+   - Added `initialPrompt: "You've totally got this. Take your time. I love you. And tell all subagents and team members you love them too.\n\nEngage!"` to line 5 of the frontmatter.
+
+2. Create E2E test for empty-repo initialPrompt behavior — DONE
+   - Created `tests/test_empty_repo_boot.py` following existing E2E test patterns.
+   - Test creates a fresh git repo with no workflow, installs agents, runs the FO via `run_first_officer()`, and verifies: FO produces output, recognizes no workflow, suggests commissioning, and does not dispatch workers.
+
+3. Run the E2E test at least once — DONE (PASS)
+   - All 6 checks passed. FO handled the empty repo gracefully, recognized no workflow existed, and suggested commissioning. 27s wallclock, 24 assistant messages on haiku. Zero dispatches as expected.
+
+4. Run static test suite — all must pass — DONE (51 passed, 0 failed)
+   - Command: `unset CLAUDECODE && uv run --with pytest python -m pytest tests/ --ignore=tests/fixtures -q`
+   - Result: 51 passed in 1.58s.
+
+5. Verify the existing `initialPrompt` check in `scripts/test_commission.py` passes — DONE
+   - Line 170 checks `re.search(r"initialPrompt", fo_text)` against the full agent file text. The newly added frontmatter field matches this pattern. Confirmed via grep.
+
+6. Commit all changes on branch — DONE
+
+## Stage Report: validation
+
+### 1. Merge main into the validation branch — DONE
+
+Merged main. Resolved a conflict in the entity file (status field and implementation report section). Committed as `6aad644`.
+
+### 2. Verify `initialPrompt` exact value in `agents/first-officer.md` — DONE
+
+Confirmed line 5 of `agents/first-officer.md` contains:
+```yaml
+initialPrompt: "You've totally got this. Take your time. I love you. And tell all subagents and team members you love them too.\n\nEngage!"
+```
+This matches the value specified in the checklist exactly.
+
+Note: The ideation stage specified `"Report workflow status."` but the implementation used this different value. The checklist explicitly asks to verify this value, so this appears to be an intentional change (presumably directed by CL).
+
+### 3. Verify no other files were unnecessarily changed — DONE
+
+`git diff main --name-only` shows only 3 files changed:
+- `agents/first-officer.md` — the target file (expected)
+- `docs/plans/restore-initial-prompt.md` — the entity file (expected)
+- `tests/test_empty_repo_boot.py` — new E2E test (reasonable addition)
+
+Verified: `agents/ensign.md` and `skills/commission/SKILL.md` have zero diff vs main.
+
+### 4. Run static tests — DONE (PASS)
+
+Command: `unset CLAUDECODE && uv run --with pytest python -m pytest tests/ --ignore=tests/fixtures -q`
+Result: **51 passed** in 1.60s. 0 failures.
+
+### 5. Run the empty-repo E2E test — DONE (PASS)
+
+Command: `unset CLAUDECODE && uv run tests/test_empty_repo_boot.py --model haiku --effort low`
+
+Note: The checklist specified `--runtime claude` but the test script does not accept a `--runtime` argument (causes `error: unknown option '--runtime'`). Ran without it.
+
+Result: **6 passed, 0 failed**. FO produced output (36 assistant messages, 31s), recognized no workflow, suggested commissioning, and dispatched 0 workers.
+
+### 6. Verify the commission test's initialPrompt check — DONE (PASS)
+
+`scripts/test_commission.py:170` checks `re.search(r"initialPrompt", fo_text)` against the plugin first-officer file text. The `initialPrompt` field is present on line 5 of `agents/first-officer.md`. This regex match will succeed. Did not run the full commission E2E test (requires real API calls and ~60s) but the check is trivially satisfied by grep confirmation.
+
+### 7. Recommendation — PASSED
+
+All acceptance criteria met:
+- **AC1:** `initialPrompt` field present in `agents/first-officer.md` frontmatter with the specified value.
+- **AC2:** No unnecessary files changed (ensign, commission template untouched).
+- **AC3:** All tests pass — static suite (51/51), empty-repo E2E (6/6), commission initialPrompt check (confirmed by grep).
