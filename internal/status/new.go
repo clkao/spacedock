@@ -27,6 +27,11 @@ func runNew(roots roots, slug string, folderForm bool, idSeed, idActor string, i
 		return errExit(stderr, "entity already exists: "+slug)
 	}
 
+	// A nil Stdin (no pipe wired) reads as an empty body rather than panicking
+	// io.ReadAll(nil); the empty body then fails the opening-fence guard below.
+	if stdin == nil {
+		stdin = strings.NewReader("")
+	}
 	body, err := io.ReadAll(stdin)
 	if err != nil {
 		return errExit(stderr, "cannot read entity body from stdin: "+err.Error())
@@ -60,7 +65,17 @@ func runNew(roots roots, slug string, folderForm bool, idSeed, idActor string, i
 		return errExit(stderr, fmt.Sprintf("--new entity body already declares id '%s'; remove it so --new can mint the id", existingID))
 	}
 
-	stamped := stampID(body, mintedID)
+	// For id-style: slug the identity IS the slug; a stored `id:` field is
+	// redundant and would make --resolve/--short-id emit id=<slug> where
+	// hand-authored slug entities emit id= (empty). Leave the seed id-less so it
+	// matches a hand-authored slug entity. The body is still newline-normalized
+	// (universal newlines) so a later --set sees the same bytes as for any style.
+	var stamped []byte
+	if idStyle == "slug" {
+		stamped = []byte(normalizeNewlines(string(body)))
+	} else {
+		stamped = stampID(body, mintedID)
+	}
 
 	var targetPath string
 	if folderForm {

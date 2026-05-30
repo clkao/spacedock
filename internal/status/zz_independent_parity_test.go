@@ -556,22 +556,29 @@ func TestIndNewAtomicCreate(t *testing.T) {
 			if err != nil {
 				t.Fatalf("[%s] seed not written at %s: %v", name, seedPath, err)
 			}
-			// --new stamps the minted id for EVERY style (per new.go: slug style mints
-			// the slug as the id, then stampID inserts it). The seed is therefore
-			// STDIN + the id-stamp. For slug style the stamped id equals the slug.
-			wantID := expectedID
+			// --new stamps the minted id for sequential/sd-b32, where the id is a
+			// real stored field. For id-style: slug the identity IS the slug; a
+			// stored id line is redundant and would make --resolve emit id=<slug>
+			// where hand-authored slug entities emit id= (empty), so the slug seed
+			// carries NO id line and equals STDIN verbatim (byte-identity).
 			if idStyle == "slug" {
-				wantID = newSlug
-			}
-			wantLine := "id: " + wantID
-			if !strings.Contains(string(seed), wantLine) {
-				t.Errorf("[%s] seed missing minted id line %q:\n%s", name, wantLine, string(seed))
-			}
-			// Seed must equal STDIN with exactly the id-stamp added (byte-identity of
-			// every other line — AC-5 preservation), verified by reconstructing it.
-			wantSeed := string(stampID([]byte(body), wantID))
-			if string(seed) != wantSeed {
-				t.Errorf("[%s] seed not STDIN+id-stamp:\ngot=%q\nwant=%q", name, string(seed), wantSeed)
+				if strings.Contains(string(seed), "\nid:") || strings.HasPrefix(string(seed), "id:") {
+					t.Errorf("[%s] slug seed should carry no id line:\n%s", name, string(seed))
+				}
+				if string(seed) != body {
+					t.Errorf("[%s] slug seed not byte-identical to STDIN:\ngot=%q\nwant=%q", name, string(seed), body)
+				}
+			} else {
+				wantLine := "id: " + expectedID
+				if !strings.Contains(string(seed), wantLine) {
+					t.Errorf("[%s] seed missing minted id line %q:\n%s", name, wantLine, string(seed))
+				}
+				// Seed must equal STDIN with exactly the id-stamp added (byte-identity
+				// of every other line — AC-5 preservation), verified by reconstructing.
+				wantSeed := string(stampID([]byte(body), expectedID))
+				if string(seed) != wantSeed {
+					t.Errorf("[%s] seed not STDIN+id-stamp:\ngot=%q\nwant=%q", name, string(seed), wantSeed)
+				}
 			}
 
 			// No id-less window: --validate is VALID immediately after.
@@ -828,4 +835,82 @@ func TestIndCRLFParity(t *testing.T) {
 		// native must produce byte-identical output, so the mutated file has no CRLF.
 		indMutationCase(t, "crlf-set", src, env, "--workflow-dir", "@WD@", "--set", "001", "score=0.9")
 	})
+}
+
+// TestIndExoticScoreSort locks the M2 trap: the sort key parses score with Go's
+// strconv.ParseFloat, which accepts hex-floats (`0x1p4` -> 16) that Python
+// float() rejects (-> ValueError -> score_val 0). The oracle therefore sorts a
+// hex-float score as non-numeric (after every real number in the same stage),
+// where native would mis-rank it as 16. Fixtures pin one hex-float score plus
+// normal high/low scores in the same stage; both default and --next ordering are
+// diffed raw against the oracle.
+func TestIndExoticScoreSort(t *testing.T) {
+	env := indEnv(t)
+	root := t.TempDir()
+	indWrite(t, filepath.Join(root, "README.md"), "---\nentity-label: task\nid-style: sequential\nstages:\n  states:\n    - name: backlog\n      initial: true\n    - name: done\n      terminal: true\n---\n# WF\n")
+	// 0x1p4: Go ParseFloat -> 16 (would sort first); Python float() -> ValueError
+	// -> score_val 0 (sorts after the real numbers below).
+	indWrite(t, filepath.Join(root, "001-hex.md"), "---\nid: \"001\"\ntitle: HexScore\nstatus: backlog\nscore: \"0x1p4\"\nsource: r\n---\n# A\n")
+	indWrite(t, filepath.Join(root, "002-high.md"), "---\nid: \"002\"\ntitle: NormalHigh\nstatus: backlog\nscore: \"0.9\"\nsource: r\n---\n# B\n")
+	indWrite(t, filepath.Join(root, "003-low.md"), "---\nid: \"003\"\ntitle: NormalLow\nstatus: backlog\nscore: \"0.1\"\nsource: r\n---\n# C\n")
+	// A bare non-numeric score (also Python-float-rejected -> 0); locks that
+	// genuinely-non-numeric scores stay parity-equal alongside the hex case.
+	indWrite(t, filepath.Join(root, "004-na.md"), "---\nid: \"004\"\ntitle: NotANumber\nstatus: backlog\nscore: \"high\"\nsource: r\n---\n# D\n")
+
+	for _, c := range []struct {
+		name string
+		args []string
+	}{
+		{"default", []string{"--workflow-dir", root}},
+		{"next", []string{"--workflow-dir", root, "--next"}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			nOut, nErr, nCode := indRunNative(t, root, env, "", c.args...)
+			oOut, oErr, oCode := indRunOracle(t, root, env, "", c.args...)
+			indDiff(t, c.name, root, nOut, nErr, nCode, oOut, oErr, oCode)
+		})
+	}
+}
+
+// TestIndNewSlugNoIDStamp locks that for id-style: slug, --new does NOT stamp a
+// redundant `id: <slug>` line into the seed. The oracle has no --new, so the
+// parity reference is a hand-authored slug entity, which carries no id field and
+// resolves to `id=` (empty). A --new slug seed must resolve identically; a stray
+// `id: <slug>` would make --resolve/--short-id emit `id=<slug>`/`<slug>` where
+// the oracle emits `id=`/the slug. We build two slug entities — one hand-authored,
+// one via --new — and diff each entity's native --resolve against the oracle's.
+func TestIndNewSlugNoIDStamp(t *testing.T) {
+	env := indEnv(t)
+	root := t.TempDir()
+	indWrite(t, filepath.Join(root, "README.md"), "---\nentity-label: doc\nid-style: slug\nstages:\n  states:\n    - name: draft\n      initial: true\n    - name: published\n      terminal: true\n---\n# Slug WF\n")
+	// Hand-authored slug entity (no id field) — the parity reference.
+	indWrite(t, filepath.Join(root, "manual.md"), "---\ntitle: Manual\nstatus: draft\nscore: \"0.7\"\nsource: roadmap\n---\n# Manual\n")
+
+	// Create a second slug entity via --new.
+	newBody := "---\ntitle: Minted\nstatus: draft\nscore: \"0.4\"\nsource: roadmap\n---\n# Minted\nseed\n"
+	_, nErr, nCode := indRunNative(t, root, env, newBody, "--workflow-dir", root, "--new", "minted")
+	if nCode != 0 {
+		t.Fatalf("--new slug exit=%d stderr=%q", nCode, nErr)
+	}
+
+	// The seed must not carry an id line at all (matching hand-authored slugs).
+	seed, err := os.ReadFile(filepath.Join(root, "minted.md"))
+	if err != nil {
+		t.Fatalf("seed not written: %v", err)
+	}
+	for _, line := range strings.Split(string(seed), "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "id:") {
+			t.Errorf("slug --new stamped a redundant id line %q into the seed:\n%s", line, string(seed))
+		}
+	}
+
+	// Both entities resolve identically native-vs-oracle, with id= empty.
+	for _, slug := range []string{"manual", "minted"} {
+		nOut, nE, nC := indRunNative(t, root, env, "", "--workflow-dir", root, "--resolve", slug)
+		oOut, oE, oC := indRunOracle(t, root, env, "", "--workflow-dir", root, "--resolve", slug)
+		indDiff(t, "resolve-"+slug, root, nOut, nE, nC, oOut, oE, oC)
+		if !strings.Contains(nOut, "id= ") {
+			t.Errorf("resolve %s: native id not empty: %q", slug, nOut)
+		}
+	}
 }

@@ -31,12 +31,33 @@ func stageOrder(status string, stages []stage) int {
 // handling shared by sort_key_default / sort_key_next.
 func scoreSortVal(score string) float64 {
 	if score != "" {
-		if f, err := strconv.ParseFloat(score, 64); err == nil {
+		if f, ok := pythonFloat(score); ok {
 			return -f
 		}
 		return 0
 	}
 	return 1
+}
+
+// pythonFloat parses score with Python float() semantics for the sort key,
+// returning (value, true) on success and (0, false) on what Python rejects.
+// Go's strconv.ParseFloat accepts hex-float notation (0x1p4 -> 16) that Python
+// float() rejects (-> ValueError); for the reachable, TrimSpace'd ASCII score
+// values the two parsers otherwise agree, so rejecting the 0x/0X prefix is the
+// one correction needed to order identically to the oracle.
+func pythonFloat(score string) (float64, bool) {
+	body := score
+	if len(body) > 0 && (body[0] == '+' || body[0] == '-') {
+		body = body[1:]
+	}
+	if strings.HasPrefix(body, "0x") || strings.HasPrefix(body, "0X") {
+		return 0, false
+	}
+	f, err := strconv.ParseFloat(score, 64)
+	if err != nil {
+		return 0, false
+	}
+	return f, true
 }
 
 // sortDefault sorts entities by (stage order asc, score). A stable sort

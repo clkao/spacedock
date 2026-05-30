@@ -234,6 +234,22 @@ func TestNewGuards(t *testing.T) {
 			t.Fatalf("stderr=%q, want conflicting-id error", errOut)
 		}
 	})
+
+	t.Run("nil-stdin-no-panic", func(t *testing.T) {
+		// A nil Stdin (no pipe wired) must not panic io.ReadAll(nil); it reads as
+		// an empty body which then fails the opening-fence guard, exit 1.
+		root := stageFixture(t, "seq-workflow")
+		_, errOut, code := runNativeStdin(t, root, env, nil, "--workflow-dir", root, "--new", "freshslug")
+		if code != 1 {
+			t.Fatalf("exit=%d, want 1 (nil stdin)", code)
+		}
+		if !strings.Contains(errOut, "no frontmatter") {
+			t.Fatalf("stderr=%q, want no-frontmatter error", errOut)
+		}
+		if _, err := os.Stat(filepath.Join(root, "freshslug.md")); !os.IsNotExist(err) {
+			t.Fatalf("nil-stdin --new should not write a seed")
+		}
+	})
 }
 
 // slugWorkflow builds a minimal id-style: slug workflow in a temp dir.
