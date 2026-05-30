@@ -162,47 +162,77 @@ func probeTeamState(e env) (bool, string) {
 	return false, ""
 }
 
+// bootData holds the gathered boot-section material the text and JSON renderers
+// both consume, so the two output forms read from one source of truth.
+type bootData struct {
+	hooks        map[string][]string
+	idStyle      string
+	nextID       string
+	orphans      []orphan
+	prStatus     string
+	prResults    []prResult
+	dispatchable []dispatchable
+	teamPresent  bool
+	teamHint     string
+}
+
+// gatherBoot runs every boot probe once and returns the result. NEXT_ID is
+// minted here (timestamp-dependent for sd-b32); on a minting error it returns
+// the error after the caller has emitted the stderr diagnostic.
+func gatherBoot(entities []*entity, stages []stage, definitionDir, entityDir, gitRoot, idStyle string, e env, stderr io.Writer) (*bootData, error) {
+	d := &bootData{idStyle: idStyle, hooks: scanMods(entityDir)}
+
+	if idStyle == "slug" {
+		d.nextID = "n/a (id-style: slug)"
+	} else {
+		id, err := computeNextID(definitionDir, entityDir, idStyle, "", "", e, stderr)
+		if err != nil {
+			fmt.Fprintf(stderr, "Error: %s\n", err)
+			return nil, err
+		}
+		d.nextID = id
+	}
+
+	d.orphans = scanOrphans(entities, gitRoot)
+	d.prStatus, d.prResults = checkPRStates(entities, stages, e)
+	d.dispatchable = computeDispatchable(entities, stages)
+	d.teamPresent, d.teamHint = probeTeamState(e)
+	return d, nil
+}
+
 // printBoot writes all boot sections in order. Matches print_boot.
 func printBoot(w io.Writer, entities []*entity, stages []stage, definitionDir, entityDir, gitRoot, idStyle string, e env, stderr io.Writer) error {
+	d, err := gatherBoot(entities, stages, definitionDir, entityDir, gitRoot, idStyle, e, stderr)
+	if err != nil {
+		return err
+	}
+
 	// MODS
-	hooks := scanMods(entityDir)
-	if len(hooks) == 0 {
+	if len(d.hooks) == 0 {
 		fmt.Fprintln(w, "MODS: none")
 	} else {
 		fmt.Fprintln(w, "MODS")
-		points := make([]string, 0, len(hooks))
-		for p := range hooks {
+		points := make([]string, 0, len(d.hooks))
+		for p := range d.hooks {
 			points = append(points, p)
 		}
 		sort.Strings(points)
 		for _, point := range points {
-			mods := append([]string(nil), hooks[point]...)
+			mods := append([]string(nil), d.hooks[point]...)
 			sort.Strings(mods)
 			fmt.Fprintf(w, "%s: %s\n", point, strings.Join(mods, ", "))
 		}
 	}
 
 	// ID_STYLE / NEXT_ID
-	fmt.Fprintf(w, "ID_STYLE: %s\n", idStyle)
-	var nextID string
-	if idStyle == "slug" {
-		nextID = "n/a (id-style: slug)"
-	} else {
-		id, err := computeNextID(definitionDir, entityDir, idStyle, "", "", e, stderr)
-		if err != nil {
-			fmt.Fprintf(stderr, "Error: %s\n", err)
-			return err
-		}
-		nextID = id
-	}
-	fmt.Fprintf(w, "NEXT_ID: %s\n", nextID)
-	if idStyle == "sd-b32" {
+	fmt.Fprintf(w, "ID_STYLE: %s\n", d.idStyle)
+	fmt.Fprintf(w, "NEXT_ID: %s\n", d.nextID)
+	if d.idStyle == "sd-b32" {
 		fmt.Fprintf(w, "MIN_PREFIX: %d\n", sdB32MinPrefix)
 	}
 
 	// ORPHANS
-	orphans := scanOrphans(entities, gitRoot)
-	if len(orphans) == 0 {
+	if len(d.orphans) == 0 {
 		fmt.Fprintln(w, "ORPHANS: none")
 	} else {
 		fmt.Fprintln(w, "ORPHANS")
@@ -210,14 +240,13 @@ func printBoot(w io.Writer, entities []*entity, stages []stage, definitionDir, e
 			return padRight(a, 6) + " " + padRight(b, 30) + " " + padRight(c, 43) + " " + padRight(d, 11) + " " + e
 		}
 		fmt.Fprintln(w, row("ID", "SLUG", "WORKTREE", "DIR_EXISTS", "BRANCH_EXISTS"))
-		for _, o := range orphans {
+		for _, o := range d.orphans {
 			fmt.Fprintln(w, row(o.id, o.slug, o.worktree, o.dirExists, o.branchExists))
 		}
 	}
 
 	// PR_STATE
-	prStatus, prResults := checkPRStates(entities, stages, e)
-	switch prStatus {
+	switch d.prStatus {
 	case "none":
 		fmt.Fprintln(w, "PR_STATE: none")
 	case "gh not available":
@@ -228,21 +257,20 @@ func printBoot(w io.Writer, entities []*entity, stages []stage, definitionDir, e
 			return padRight(a, 6) + " " + padRight(b, 30) + " " + padRight(c, 8) + " " + d
 		}
 		fmt.Fprintln(w, row("ID", "SLUG", "PR", "STATE"))
-		for _, r := range prResults {
+		for _, r := range d.prResults {
 			fmt.Fprintln(w, row(r.id, r.slug, r.pr, r.state))
 		}
 	}
 
 	// DISPATCHABLE
 	fmt.Fprintln(w, "DISPATCHABLE")
-	printNextTable(w, entities, stages, nil)
+	printNextTable(w, entities, stages, nil, false)
 
 	// TEAM_STATE
 	fmt.Fprintln(w, "TEAM_STATE")
-	present, detail := probeTeamState(e)
-	if present {
+	if d.teamPresent {
 		fmt.Fprintln(w, "present: true")
-		fmt.Fprintf(w, "hint: %s\n", detail)
+		fmt.Fprintf(w, "hint: %s\n", d.teamHint)
 	} else {
 		fmt.Fprintln(w, "present: false")
 		fmt.Fprintln(w, "hint: run TeamCreate before first team-mode dispatch (claude runtime supports it)")

@@ -21,7 +21,12 @@ var nativeReadCases = []struct {
 	{"resolve", []string{"--resolve", "003-wire-cli"}},
 	{"short-id", []string{"--short-id", "003-wire-cli"}},
 	{"where-status", []string{"--where", "status=ideation"}},
-	{"fields", []string{"--fields", "source"}},
+	// `worktree` is a non-default frontmatter key, so it appends as a single
+	// extra in both runners. A default-named --fields (e.g. `source`) is NOT a
+	// parity case: native de-dupes the duplicate column (captain-approved bug
+	// fix) while the oracle still renders it twice — that deliberate divergence
+	// is locked by TestFieldsDedupeNoDuplicateDefaultColumns instead.
+	{"fields", []string{"--fields", "worktree"}},
 	{"all-fields", []string{"--all-fields"}},
 }
 

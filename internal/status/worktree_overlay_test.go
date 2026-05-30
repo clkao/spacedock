@@ -85,7 +85,11 @@ func TestWorktreeOverlayActiveReads(t *testing.T) {
 	}{
 		{"table", nil, "review"},
 		{"where-status", []string{"--where", "status=review"}, ""},
-		{"fields-status", []string{"--fields", "status"}, "review"},
+		// `worktree` is a non-default key, so it appends as a single extra in both
+		// runners (no de-dupe). Projecting the DEFAULT `status` would make native
+		// diverge from the buggy oracle (de-dupe drops the duplicate column); that
+		// overlay+de-dupe case is locked by TestWorktreeOverlayFieldsStatusDeduped.
+		{"fields-worktree", []string{"--fields", "worktree"}, ""},
 		{"resolve", []string{"--resolve", "add-login"}, ""},
 	}
 	for _, tc := range cases {
@@ -137,6 +141,31 @@ func TestWorktreeOverlayActiveReads(t *testing.T) {
 	root := buildWorktreeBacked(t, overlayReadme, pipelineEntity, worktreeEntity)
 	if _, err := os.Stat(filepath.Join(root, "wt", "add-login.md")); err != nil {
 		t.Fatalf("worktree copy must exist: %v", err)
+	}
+}
+
+// TestWorktreeOverlayFieldsStatusDeduped locks the overlay+de-dupe intersection
+// the parity table can no longer cover: `--fields status` on a worktree-backed
+// entity surfaces the overlaid worktree-copy status (review) in the default
+// STATUS column, and the de-dupe means STATUS is NOT rendered twice. This is a
+// native-only assertion because the oracle still emits the duplicate column.
+func TestWorktreeOverlayFieldsStatusDeduped(t *testing.T) {
+	pipelineEntity := "---\nid: add-login\nstatus: implementation\ntitle: Add login\nworktree: wt\n---\n"
+	worktreeEntity := "---\nid: add-login\nstatus: review\ntitle: Add login\nworktree: wt\n---\n"
+	root := buildWorktreeBacked(t, overlayReadme, pipelineEntity, worktreeEntity)
+	env := pinnedEnv(t)
+
+	out, errOut, code := runNative(t, root, env, "--workflow-dir", root, "--fields", "status")
+	if code != 0 {
+		t.Fatalf("native exit=%d stderr=%q", code, errOut)
+	}
+	header := headerOf(out)
+	if c := countToken(header, "STATUS"); c != 1 {
+		t.Fatalf("--fields status duplicated the STATUS column (want 1, got %d): %q", c, header)
+	}
+	// The overlaid worktree-copy status is observable in the default STATUS column.
+	if !strings.Contains(out, "review") {
+		t.Fatalf("--fields status should surface the overlaid status 'review':\n%s", out)
 	}
 }
 

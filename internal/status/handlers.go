@@ -16,7 +16,7 @@ import (
 // terminal-transition guards and the field: old -> new narration. Matches the
 // --set branch of main().
 func runSet(roots roots, set *setUpdate, args []string, whereFilters []whereFilter,
-	includeArchive, showNext, showBoot, showNextID, showValidate, hasFieldsFlag bool,
+	includeArchive, showNext, showBoot, showNextID, showValidate, hasFieldsFlag, quiet, asJSON bool,
 	stdout, stderr io.Writer) int {
 
 	var incompatible []string
@@ -144,10 +144,28 @@ func runSet(roots roots, set *setUpdate, args []string, whereFilters []whereFilt
 		return errExit(stderr, err.Error())
 	}
 
-	for _, field := range resolvedFields.keys() {
-		val, _ := resolvedFields.get(field)
-		oldValue := currentFields[field]
-		fmt.Fprintf(stdout, "%s: %s -> %s\n", field, oldValue, val)
+	switch {
+	case asJSON:
+		changes := make(jsonArr, 0, len(resolvedFields.keys()))
+		for _, field := range resolvedFields.keys() {
+			val, _ := resolvedFields.get(field)
+			changes = append(changes, newJSONObj().
+				set("field", field).set("old", currentFields[field]).set("new", val))
+		}
+		emitJSON(stdout, newJSONObj().set("command", "set").set("slug", slug).setValue("changes", changes))
+	case quiet:
+		var pairs []string
+		for _, field := range resolvedFields.keys() {
+			val, _ := resolvedFields.get(field)
+			pairs = append(pairs, fmt.Sprintf("%s=%s->%s", field, currentFields[field], val))
+		}
+		fmt.Fprintf(stdout, "set slug=%s %s\n", slug, strings.Join(pairs, " "))
+	default:
+		for _, field := range resolvedFields.keys() {
+			val, _ := resolvedFields.get(field)
+			oldValue := currentFields[field]
+			fmt.Fprintf(stdout, "%s: %s -> %s\n", field, oldValue, val)
+		}
 	}
 	return 0
 }
@@ -156,7 +174,7 @@ func runSet(roots roots, set *setUpdate, args []string, whereFilters []whereFilt
 // the tail of main() after the mutation branches.
 func runRead(roots roots, args []string, e env, whereFilters []whereFilter,
 	includeArchive, showNext, showBoot, showNextID, showValidate bool,
-	explicitFields []string, allFieldsFlag bool,
+	explicitFields []string, allFieldsFlag, asJSON, quiet bool,
 	hasArchiveSlug, hasSet, hasResolve bool,
 	stdout, stderr io.Writer) int {
 
@@ -213,7 +231,14 @@ func runRead(roots roots, args []string, e env, whereFilters []whereFilter,
 			for _, er := range errs {
 				fmt.Fprintln(stderr, er)
 			}
+			if asJSON {
+				emitJSON(stdout, singletonJSON("validate", "valid", "false"))
+			}
 			return 1
+		}
+		if asJSON {
+			emitJSON(stdout, singletonJSON("validate", "valid", "true"))
+			return 0
 		}
 		fmt.Fprintln(stdout, "VALID")
 		return 0
@@ -235,15 +260,32 @@ func runRead(roots roots, args []string, e env, whereFilters []whereFilter,
 
 	switch {
 	case showBoot:
+		if asJSON {
+			data, err := gatherBoot(entities, stages, roots.definitionDir, roots.entityDir, gitRoot, idStyle, e, stderr)
+			if err != nil {
+				return 1
+			}
+			emitJSON(stdout, bootJSON(data))
+			return 0
+		}
 		if err := printBoot(stdout, entities, stages, roots.definitionDir, roots.entityDir, gitRoot, idStyle, e, stderr); err != nil {
 			return 1
 		}
 	case showNext:
-		extras := resolveExtraFields(entities, explicitFields, allFieldsFlag, defaultNextFields)
-		printNextTable(stdout, entities, stages, extras)
+		if asJSON {
+			emitJSON(stdout, nextJSON(entities, stages, explicitFields, allFieldsFlag))
+			return 0
+		}
+		extras := resolveExtraFields(entities, explicitFields, allFieldsFlag, defaultNextFields, nextFixedFields)
+		printNextTable(stdout, entities, stages, extras, quiet)
 	default:
-		extras := resolveExtraFields(entities, explicitFields, allFieldsFlag, defaultStatusFields)
-		printStatusTable(stdout, entities, stages, extras)
+		if asJSON {
+			fields := resolveJSONFields(entities, explicitFields, allFieldsFlag, defaultStatusFields)
+			emitJSON(stdout, statusJSON(entities, stages, fields))
+			return 0
+		}
+		extras := resolveExtraFields(entities, explicitFields, allFieldsFlag, defaultStatusFields, defaultStatusFields)
+		printStatusTable(stdout, entities, stages, extras, quiet)
 	}
 	return 0
 }

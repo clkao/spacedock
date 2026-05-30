@@ -153,7 +153,7 @@ func atomicWrite(path string, data []byte) error {
 // entityDir is the absolute entity root for I/O; spellingDir is the as-passed
 // spelling used for the printed dest (so a relative --workflow-dir renders a
 // relative `archived:` path, matching the oracle's literal os.path.join).
-func runArchive(entityDir, spellingDir, slug string, force bool, stdout, stderr io.Writer) int {
+func runArchive(entityDir, spellingDir, slug string, force, quiet, asJSON bool, stdout, stderr io.Writer) int {
 	flatPath := filepath.Join(entityDir, slug+".md")
 	folderRoot := filepath.Join(entityDir, slug)
 	folderIndex := filepath.Join(folderRoot, "index.md")
@@ -243,7 +243,14 @@ func runArchive(entityDir, spellingDir, slug string, force bool, stdout, stderr 
 		fmt.Fprintf(stderr, "Error: %s\n", moveErr)
 		return 1
 	}
-	fmt.Fprintf(stdout, "archived: %s\n", destSpelling)
+	switch {
+	case asJSON:
+		emitJSON(stdout, newJSONObj().set("command", "archive").set("slug", slug))
+	case quiet:
+		fmt.Fprintf(stdout, "archived slug=%s\n", slug)
+	default:
+		fmt.Fprintf(stdout, "archived: %s\n", destSpelling)
+	}
 	return 0
 }
 
