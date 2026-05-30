@@ -1,7 +1,7 @@
 ---
 id: 7w8w5nsa5mbc807b3jb88psv
 title: Native Go dispatch helper
-status: validation
+status: implementation
 score: "0.40"
 source: handoff self-hosting gap
 worktree: /Users/clkao/git/spacedock-research/spacedock-v1/.worktrees/spacedock-ensign-native-dispatch-helper
@@ -220,3 +220,16 @@ Closed the self-hosting linchpin: the dispatch path now uses ONE native binary (
 ### Summary
 
 RECOMMENDATION: REJECTED. The gates are green (326 pass, -race clean, gofmt/vet clean) and status is unregressed by the export-in-place renames, AC-2 and AC-3 hold, and show-stage-def is byte-identical on the real workflow. But the AC-1 semantic-equivalence contract — the linchpin — breaks on a real, production-reachable input. Root cause (confirmed, not symptom): `internal/dispatch/build.go:204` uses `filepath.Join(gitRoot, entityWorktree)` for the worktree-existence resolution. When `entityWorktree` is absolute, Go's `filepath.Join` grafts it under gitRoot (doubling the path) while the Python oracle's `os.path.join` (claude-team:329) lets the absolute component win. The live `native-dispatch-helper` entity has an ABSOLUTE `worktree:` value, so native `build` rejects it (exit 1, doubled-path error) while the oracle succeeds (exit 0, full dispatch) — a three-channel divergence on the exact entity this work targets. The dispatch package already has the correct helper (`helpers.go:161 pyJoin`, used at build.go:325 for the entity-read rewrite) and the SIBLING status package solves the identical problem deliberately (`internal/status/boot.go:50-54 pyJoin(gitRoot, wt)` with a comment warning that `filepath.Join` "would graft it under git_root and miss the existing dir"). The parity tests miss this because `build_parity_test.go:107` only ever stamps a RELATIVE worktree value (`.worktrees/spacedock-ensign-thing`), where both join semantics agree. FIX (one line, hypothesis-verified by patch-and-rerun: all 17 independent fixtures then byte-identical, including the real absolute-worktree entity): change build.go:204 `filepath.Join(gitRoot, entityWorktree)` → `pyJoin(gitRoot, entityWorktree)`, and add an absolute-`worktree:` parity fixture so the gap stays closed. Independent reproduction used the REAL built binary (`spacedock dispatch build`) and the REAL Python oracle (`claude-team build`) as black-box processes on the real docs/dev workflow + self-built fixtures — not the impl's in-process harness.
+
+## Feedback Cycle 2 — validation gate REJECT (validator + parallel staff audit, 2026-05-30)
+
+Both reject; the parity work is otherwise strong (326 tests, AC-2/AC-3 hold, show-stage-def byte-identical on the real workflow, status unregressed by the export-in-place renames). FOUR fixes routed to implementation — all surgical, no behavior-shape change. The first is a happy-path blocker; the other three move native TOWARD the oracle (native was the quirk, not Python — so fixing improves correctness, per the prefer-standard-compliance steer):
+
+1. **abs-worktree (validator; HAPPY-PATH blocker).** `build.go:204` `filepath.Join(gitRoot, entityWorktree)` doubles an ABSOLUTE worktree path; the oracle's `os.path.join` lets the absolute component win. The FO sets absolute `worktree:` values, so native build breaks on the live entities. FIX: `filepath.Join` → the package's existing `pyJoin` (status/boot.go:50-54 already solves this identically) + an absolute-`worktree:` parity fixture.
+2. **splitlines separators (audit).** `splitTextLines` (showstagedef.go:132) only handles `\r\n`/`\r`/`\n`; Python `str.splitlines()` also breaks on FF/VT/U+2028/U+2029/U+0085/U+001C-1E. A Unicode separator in a captain-pasted README would corrupt the show-stage-def fetch (dev README is LF-only today, so not broken now). FIX: extend `splitTextLines` to Python's full separator set + a parity case per separator.
+3. **schema_version numeric vs string (audit).** `isSchemaVersion` (helpers.go:27) string-matches `"2"`; the oracle compares numerically. Native+oracle disagree in BOTH directions on `"2"` vs `2.0` (divergent exit codes). FIX: numeric comparison (json.Number; `2`==`2.0`, `"2"` rejected) + string/float fixtures.
+4. **null stdin (audit).** native → `missing required field 'schema_version'`; oracle → `stdin must be a JSON object`. FIX: detect a non-object top-level (null/array/scalar) before the required-field loop + a null-stdin fixture.
+
+Polish (fold in): the dispatch-block INSTRUCTION PROSE (`claude-first-officer-runtime.md` lines 71/73/142) still says `claude-team build` though the runnable line 95 is native — update the prose for the Python-free goal.
+
+Captain scope note: the 3 audit divergences are OFF the FO's current fixed-shape happy path; the captain elected to FIX them (cheap + more-correct) rather than log as known-narrowing. Routed to the REUSED implementation ensign (233k ≈ 23% of the real 1M window; the tool's `reuse_ok:false` is the stale-200k false-negative).
