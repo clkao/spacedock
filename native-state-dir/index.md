@@ -1,7 +1,7 @@
 ---
 id: nc85apg7333k7c594qam5m2n
 title: Implement native state-dir support
-status: implementation
+status: validation
 score: "0.55"
 source: bootstrap roadmap
 worktree: /Users/clkao/git/spacedock-research/spacedock-v1/.worktrees/spacedock-ensign-native-state-dir
