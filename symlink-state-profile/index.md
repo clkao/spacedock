@@ -1,10 +1,11 @@
 ---
 id: bdxxg3yr1ys4nsmwk8x65j7b
 title: Prove symlink state profile
-status: backlog
+status: ideation
 score: "0.85"
 source: bootstrap roadmap
 worktree:
+started: 2026-05-30T04:30:15Z
 ---
 
 # Prove Symlink State Profile

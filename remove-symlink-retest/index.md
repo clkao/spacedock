@@ -1,10 +1,11 @@
 ---
 id: zrep3rt8a21y7k3szbs3ysyn
 title: Retest without README symlink
-status: backlog
+status: ideation
 score: "0.45"
 source: bootstrap roadmap
 worktree:
+started: 2026-05-30T04:30:16Z
 ---
 
 # Retest Without README Symlink

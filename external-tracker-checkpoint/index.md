@@ -1,10 +1,11 @@
 ---
 id: p31ep68fer46hhms1pvp3b6f
 title: Check external tracker integration point
-status: backlog
+status: ideation
 score: "0.25"
 source: bootstrap roadmap
 worktree:
+started: 2026-05-30T04:30:16Z
 ---
 
 # Check External Tracker Integration Point

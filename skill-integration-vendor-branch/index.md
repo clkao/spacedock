@@ -1,10 +1,11 @@
 ---
 id: v2j735kcfmsg6yv30nqt8t61
 title: Integrate skills with launcher
-status: backlog
+status: ideation
 score: "0.75"
 source: bootstrap roadmap
 worktree:
+started: 2026-05-30T04:30:15Z
 ---
 
 # Integrate Skills With Launcher

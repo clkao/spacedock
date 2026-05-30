@@ -1,10 +1,11 @@
 ---
 id: nc85apg7333k7c594qam5m2n
 title: Implement native state-dir support
-status: backlog
+status: ideation
 score: "0.55"
 source: bootstrap roadmap
 worktree:
+started: 2026-05-30T04:30:15Z
 ---
 
 # Implement Native State-Dir Support

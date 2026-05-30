@@ -1,10 +1,11 @@
 ---
 id: 60kbtwqrp8z8szp96e0mfm5a
 title: Implement native Go status parity
-status: backlog
+status: ideation
 score: "0.65"
 source: bootstrap roadmap
 worktree:
+started: 2026-05-30T04:30:15Z
 ---
 
 # Implement Native Go Status Parity
