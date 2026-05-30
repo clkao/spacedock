@@ -39,6 +39,40 @@ func TestNativeRunnerSelectableThroughCLI(t *testing.T) {
 	}
 }
 
+// TestRunDefaultsToNativeRunner pins cli.Run's public default to the native
+// runner with NO runner injection. The proof uses split-root behavior only the
+// native runner produces: a workflow whose README carries `state:` keeps its
+// entities in a state subdir with NO README of its own. The single-root vendor
+// oracle, pointed at the definition dir, renders an empty table (it never
+// composes the state subdir); the native runner reads stages from the
+// definition README and entities from the state dir, so the entity appears.
+// Seeing the state-dir entity through Run is therefore native-only behavior and
+// locks the flip at the public entrypoint, not just the injectable run() core.
+func TestRunDefaultsToNativeRunner(t *testing.T) {
+	def := t.TempDir()
+	writeFile(t, filepath.Join(def, "README.md"), "---\nid-style: slug\nstate: .spacedock-state\nstages:\n  states:\n    - name: backlog\n      initial: true\n    - name: done\n      terminal: true\n---\n# WF\n")
+	state := filepath.Join(def, ".spacedock-state")
+	if err := os.MkdirAll(state, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(state, "add-login.md"), "---\nstatus: backlog\n---\n")
+
+	// Guard: the state subdir has no README of its own — the native runner must
+	// compose the two roots itself, not read a symlinked twin.
+	if _, err := os.Lstat(filepath.Join(state, "README.md")); !os.IsNotExist(err) {
+		t.Fatalf("state subdir must have no README.md, lstat err=%v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"status", "--workflow-dir", def}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("Run status exit=%d stderr=%q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "add-login") {
+		t.Fatalf("Run default did not render the state-dir entity — VendorRunner cannot compose split-root, so the default is not native:\n%s", stdout.String())
+	}
+}
+
 func writeFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
