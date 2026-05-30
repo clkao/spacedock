@@ -1,7 +1,7 @@
 ---
 id: zrep3rt8a21y7k3szbs3ysyn
 title: Retest without README symlink
-status: implementation
+status: validation
 score: "0.45"
 source: bootstrap roadmap
 worktree: /Users/clkao/git/spacedock-research/spacedock-v1/.worktrees/spacedock-ensign-remove-symlink-retest
