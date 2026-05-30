@@ -1,10 +1,11 @@
 ---
 id: 7w8w5nsa5mbc807b3jb88psv
 title: Native Go dispatch helper
-status: backlog
+status: ideation
 score: "0.40"
 source: handoff self-hosting gap
 worktree:
+started: 2026-05-30T19:18:28Z
 ---
 
 Reimplement the `claude-team` dispatch helper — currently a vendored Python script at `skills/commission/bin/claude-team` — as a native Go surface of the `spacedock` launcher, so the first-officer handoff uses a SINGLE native binary for BOTH status and dispatch and the dispatch path has no Python dependency. Raised during the handoff-prompt review: after the native-status flip the launcher is native Go, but `claude-team build` is still Python, so a self-hosted handoff still shells out to Python (and assumes `claude-team` on PATH).
