@@ -4,7 +4,7 @@ title: Bootstrap Go launcher
 status: implementation
 score: "0.95"
 source: bootstrap roadmap
-worktree: .worktrees/spacedock-ensign-bootstrap-go-launcher
+worktree: /Users/clkao/git/spacedock-research/spacedock-v1/.worktrees/spacedock-ensign-bootstrap-go-launcher
 started: 2026-05-30T04:04:36Z
 ---
 
