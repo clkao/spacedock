@@ -8,6 +8,7 @@ worktree:
 started: 2026-05-30T04:30:15Z
 completed: 2026-05-30T07:40:23Z
 verdict: PASSED
+archived: 2026-05-30T07:40:23Z
 ---
 
 # Implement Native Go Status Parity
