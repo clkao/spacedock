@@ -10,16 +10,15 @@ import (
 	"strings"
 )
 
-// runNew implements --new <slug>: read the entity body from stdin, mint the
-// id-style-appropriate id, stamp it into the STDIN frontmatter, and write the
-// entity in one filesystem operation (temp file + rename) so no id-less window
-// is observable. Folder form is selected by the --folder flag (default flat).
-// Guards: slug already exists, STDIN lacks an opening fence, conflicting id in
-// STDIN, and --id-seed/--id-actor with id-style: slug.
-func runNew(roots roots, slug, idSeed, idActor string, idMaterialFlags []string,
+// runNew implements --new [--folder] <slug>: read the entity body from stdin,
+// mint the id-style-appropriate id, stamp it into the STDIN frontmatter, and
+// write the entity in one filesystem operation (temp file + rename) so no
+// id-less window is observable. folderForm selects {slug}/index.md; default
+// flat {slug}.md matches current creation. Guards: slug already exists in EITHER
+// form, STDIN lacks an opening fence, conflicting id in STDIN, and
+// --id-seed/--id-actor with id-style: slug.
+func runNew(roots roots, slug string, folderForm bool, idSeed, idActor string, idMaterialFlags []string,
 	stdin io.Reader, stdout, stderr io.Writer, e env) int {
-
-	folderForm := false // future: --folder; default flat matches current creation
 
 	// Slug must not already exist (flat or folder form).
 	flatPath := filepath.Join(roots.entityDir, slug+".md")

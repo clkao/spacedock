@@ -127,7 +127,8 @@ func dispatch(args []string, dir string, e env, stdin io.Reader, stdout, stderr 
 
 	// --new atomic create.
 	if newSlug != "" {
-		return runNew(roots, newSlug, idSeed, idActor, idMaterialFlags, stdin, stdout, stderr, e)
+		folderForm := contains(args, "--folder")
+		return runNew(roots, newSlug, folderForm, idSeed, idActor, idMaterialFlags, stdin, stdout, stderr, e)
 	}
 
 	if showNextID {

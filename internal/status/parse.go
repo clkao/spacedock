@@ -289,15 +289,20 @@ func parseSetArgs(args []string) (*setUpdate, error) {
 	return nil, nil
 }
 
-// parseNewArg parses --new <slug>. Returns slug or "". A --new with no slug or a
-// --prefixed slug is an error.
+// parseNewArg parses --new [--folder] <slug>. Returns slug or "". The optional
+// --folder flag may sit between --new and the slug; the slug is the next token
+// and must not itself be --prefixed. A --new with no slug is an error.
 func parseNewArg(args []string) (string, error) {
 	for i := 0; i < len(args); i++ {
 		if args[i] == "--new" {
-			if i+1 >= len(args) {
+			j := i + 1
+			if j < len(args) && args[j] == "--folder" {
+				j++
+			}
+			if j >= len(args) {
 				return "", fmt.Errorf("--new requires a slug argument")
 			}
-			slug := args[i+1]
+			slug := args[j]
 			if slug == "" || strings.HasPrefix(slug, "--") {
 				return "", fmt.Errorf("--new requires a slug argument")
 			}

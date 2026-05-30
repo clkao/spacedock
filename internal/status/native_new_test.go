@@ -104,6 +104,84 @@ func TestNewNoIDLessWindow(t *testing.T) {
 	}
 }
 
+// TestNewFolderForm (AC-7) covers --new --folder: the entity is written as
+// {slug}/index.md (folder form) with the minted id stamped in, the workflow
+// validates immediately after (no id-less window), and no flat {slug}.md is
+// created. The written file is byte-identical to STDIN + the id-stamp.
+func TestNewFolderForm(t *testing.T) {
+	env := pinnedEnv(t)
+	root := stageFixture(t, "seq-workflow")
+
+	nextID, _, code := runNative(t, root, env, "--workflow-dir", root, "--next-id")
+	if code != 0 {
+		t.Fatalf("--next-id exit=%d", code)
+	}
+	want := strings.TrimSpace(nextID)
+
+	out, errOut, code := runNativeStdin(t, root, env, reader(newBody), "--workflow-dir", root, "--new", "--folder", "folder-task")
+	if code != 0 {
+		t.Fatalf("--new --folder exit=%d stderr=%q", code, errOut)
+	}
+
+	// Folder form written, flat form NOT created.
+	indexPath := filepath.Join(root, "folder-task", "index.md")
+	if !isRegularFile(indexPath) {
+		t.Fatalf("--new --folder should write %s", indexPath)
+	}
+	if isRegularFile(filepath.Join(root, "folder-task.md")) {
+		t.Fatalf("--new --folder must not create the flat form")
+	}
+	if !strings.Contains(out, "id="+want) {
+		t.Fatalf("--new --folder narration %q should report minted id %q", out, want)
+	}
+
+	written := readWhole(t, indexPath)
+	if !strings.Contains(written, "id: "+want) {
+		t.Fatalf("folder entity missing minted id %q:\n%s", want, written)
+	}
+	// Byte-identity: the written file equals STDIN with the id line inserted.
+	wantBytes := string(stampID([]byte(newBody), want))
+	if written != wantBytes {
+		t.Fatalf("folder entity not byte-identical to STDIN+id-stamp\n--- got ---\n%q\n--- want ---\n%q", written, wantBytes)
+	}
+
+	// Validate is VALID immediately after — no id-less window.
+	vOut, vErr, vCode := runNative(t, root, env, "--workflow-dir", root, "--validate")
+	if vCode != 0 || strings.TrimSpace(vOut) != "VALID" {
+		t.Fatalf("post---new --folder validate exit=%d out=%q err=%q", vCode, vOut, vErr)
+	}
+}
+
+// TestNewFolderCollisions (AC-7) locks that --new --folder refuses when the slug
+// exists in EITHER form, and likewise flat --new refuses a pre-existing folder.
+func TestNewFolderCollisions(t *testing.T) {
+	env := pinnedEnv(t)
+
+	t.Run("folder-new-refuses-existing-flat", func(t *testing.T) {
+		root := stageFixture(t, "seq-workflow")
+		// 001-design-seam exists as a flat file.
+		_, errOut, code := runNativeStdin(t, root, env, reader(newBody), "--workflow-dir", root, "--new", "--folder", "001-design-seam")
+		if code != 1 {
+			t.Fatalf("exit=%d, want 1 (flat slug exists)", code)
+		}
+		if !strings.Contains(errOut, "already exists") {
+			t.Fatalf("stderr=%q, want already-exists error", errOut)
+		}
+	})
+
+	t.Run("flat-new-refuses-existing-folder", func(t *testing.T) {
+		root := stageFixture(t, "seq-workflow")
+		// 003-wire-cli exists as a folder entity.
+		_, errOut, code := runNativeStdin(t, root, env, reader(newBody), "--workflow-dir", root, "--new", "003-wire-cli")
+		if code != 1 {
+			t.Fatalf("exit=%d, want 1 (folder slug exists)", code)
+		}
+		if !strings.Contains(errOut, "already exists") {
+			t.Fatalf("stderr=%q, want already-exists error", errOut)
+		}
+	})
+}
+
 // TestNewGuards (AC-7) covers the refusal paths: slug already exists, missing
 // fence, and --id-seed with id-style: slug.
 func TestNewGuards(t *testing.T) {
