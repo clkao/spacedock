@@ -118,7 +118,7 @@ func validateWorkflowStageNames(definitionDir string) []string {
 	}
 	var errs []string
 	for _, s := range states {
-		name := s.name
+		name := s.Name
 		if name == "" || stageNameRe.MatchString(name) {
 			continue
 		}

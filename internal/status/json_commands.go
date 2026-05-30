@@ -53,7 +53,7 @@ func entityJSONObj(e *entity, fields []string) *jsonObj {
 
 // statusJSON builds the {"command":"status","entities":[...]} envelope for the
 // default / --archived / --where reads. Array order is sortDefault.
-func statusJSON(entities []*entity, stages []stage, fields []string) *jsonObj {
+func statusJSON(entities []*entity, stages []Stage, fields []string) *jsonObj {
 	sorted := sortDefault(entities, stages)
 	arr := make(jsonArr, 0, len(sorted))
 	for _, e := range sorted {
@@ -69,7 +69,7 @@ var nextFixedFields = []string{"id", "slug", "current", "next", "worktree"}
 // nextJSON builds the {"command":"next","dispatchable":[...]} envelope. The
 // fixed five are always present; explicit/--all-fields frontmatter keys are
 // additive after them (the computed columns are not projectable, per spike).
-func nextJSON(entities []*entity, stages []stage, explicitFields []string, allFields bool) *jsonObj {
+func nextJSON(entities []*entity, stages []Stage, explicitFields []string, allFields bool) *jsonObj {
 	disp := computeDispatchable(entities, stages)
 	extras := resolveNextExtras(entities, explicitFields, allFields)
 	arr := dispatchableJSONArr(disp)

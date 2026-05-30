@@ -62,7 +62,7 @@ func workflowIDStyle(definitionDir string) (string, error) {
 	if !isRegularFile(readme) {
 		return "sequential", nil
 	}
-	style := strings.TrimSpace(parseFrontmatter(readme)["id-style"])
+	style := strings.TrimSpace(ParseFrontmatter(readme)["id-style"])
 	if style == "" {
 		style = "sequential"
 	}

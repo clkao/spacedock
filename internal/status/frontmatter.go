@@ -74,12 +74,12 @@ func splitLines(s string) []string {
 	return parts
 }
 
-// parseFrontmatter extracts top-level key/value pairs between the first and
+// ParseFrontmatter extracts top-level key/value pairs between the first and
 // second `---` fences. Matches parse_frontmatter: split on the first `:`, strip
 // key and value, strip matched surrounding quotes (len>=2, same char at both
 // ends, `"` or `'`), ignore nested/indented lines, last top-level key wins,
 // empty values yield "". Returns an empty map when there is no opening fence.
-func parseFrontmatter(path string) map[string]string {
+func ParseFrontmatter(path string) map[string]string {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return map[string]string{}
@@ -87,7 +87,7 @@ func parseFrontmatter(path string) map[string]string {
 	return parseFrontmatterContent(data)
 }
 
-// parseFrontmatterContent is parseFrontmatter over in-memory bytes.
+// parseFrontmatterContent is ParseFrontmatter over in-memory bytes.
 func parseFrontmatterContent(data []byte) map[string]string {
 	fields := map[string]string{}
 	if !contentHasOpeningFence(data) {

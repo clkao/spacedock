@@ -17,9 +17,9 @@ var (
 
 // stageOrder maps a status to its 1-based stage order; unknown statuses get 99.
 // Matches stage_order.
-func stageOrder(status string, stages []stage) int {
+func stageOrder(status string, stages []Stage) int {
 	for i, s := range stages {
-		if s.name == status {
+		if s.Name == status {
 			return i + 1
 		}
 	}
@@ -63,7 +63,7 @@ func pythonFloat(score string) (float64, bool) {
 // sortDefault sorts entities by (stage order asc, score). A stable sort
 // preserves the discovery (slug) order for equal keys, matching Python's stable
 // sorted().
-func sortDefault(entities []*entity, stages []stage) []*entity {
+func sortDefault(entities []*entity, stages []Stage) []*entity {
 	out := append([]*entity(nil), entities...)
 	sort.SliceStable(out, func(i, j int) bool {
 		oi, oj := stageOrder(out[i].fields["status"], stages), stageOrder(out[j].fields["status"], stages)
@@ -99,7 +99,7 @@ func padRight(s string, w int) string {
 // printStatusTable writes the default table, optionally with extra columns.
 // Matches print_status_table. suppressHeader drops the header + separator rows
 // for --quiet, emitting data rows only.
-func printStatusTable(w io.Writer, entities []*entity, stages []stage, extras []string, suppressHeader bool) {
+func printStatusTable(w io.Writer, entities []*entity, stages []Stage, extras []string, suppressHeader bool) {
 	sorted := sortDefault(entities, stages)
 
 	if len(extras) == 0 {
@@ -148,12 +148,12 @@ type dispatchable struct {
 
 // computeDispatchable runs the --next dispatch rules and returns the ordered
 // dispatchable list. Matches the candidate loop in print_next_table.
-func computeDispatchable(entities []*entity, stages []stage) []dispatchable {
-	stageByName := map[string]stage{}
+func computeDispatchable(entities []*entity, stages []Stage) []dispatchable {
+	stageByName := map[string]Stage{}
 	var stageNames []string
 	for _, s := range stages {
-		stageByName[s.name] = s
-		stageNames = append(stageNames, s.name)
+		stageByName[s.Name] = s
+		stageNames = append(stageNames, s.Name)
 	}
 
 	activeCounts := map[string]int{}
@@ -193,7 +193,7 @@ func computeDispatchable(entities []*entity, stages []stage) []dispatchable {
 		}
 		nextCounts[nextName]++
 		nw := "no"
-		if nextStage.worktree {
+		if nextStage.Worktree {
 			nw = "yes"
 		}
 		out = append(out, dispatchable{e: e, next: nextName, nextWorktree: nw})
@@ -204,7 +204,7 @@ func computeDispatchable(entities []*entity, stages []stage) []dispatchable {
 // printNextTable writes the --next table, optionally with extras. Matches
 // print_next_table. suppressHeader drops the header + separator rows for
 // --quiet, emitting data rows only.
-func printNextTable(w io.Writer, entities []*entity, stages []stage, extras []string, suppressHeader bool) {
+func printNextTable(w io.Writer, entities []*entity, stages []Stage, extras []string, suppressHeader bool) {
 	disp := computeDispatchable(entities, stages)
 
 	if len(extras) == 0 {

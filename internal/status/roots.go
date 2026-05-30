@@ -52,7 +52,7 @@ func resolveRoots(workflowDir, baseDir string) (roots, error) {
 		entityDirSpelling:     workflowDir,
 	}
 
-	stateValue := strings.TrimSpace(parseFrontmatter(filepath.Join(abs, "README.md"))["state"])
+	stateValue := strings.TrimSpace(ParseFrontmatter(filepath.Join(abs, "README.md"))["state"])
 	if stateValue == "" {
 		return r, nil
 	}

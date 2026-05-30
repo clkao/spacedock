@@ -15,6 +15,20 @@ import (
 // also skipped (checked separately). Matches RESERVED_SUBDIRS exactly.
 var reservedSubdirs = map[string]bool{"_archive": true, "_mods": true}
 
+// EntitySlug returns an entity's slug using the discovery canonical rule: a
+// folder-form entity {slug}/index.md takes its slug from the folder name; a flat
+// {slug}.md takes its slug from the filename stem. Matches entity_slug, keeping
+// the dispatch helper and the status viewer in agreement on what an entity's
+// slug is so folder-form entities get per-entity-unique names instead of all
+// colliding on "index".
+func EntitySlug(entityPath string) string {
+	base := filepath.Base(entityPath)
+	if base == "index.md" {
+		return filepath.Base(filepath.Dir(entityPath))
+	}
+	return strings.TrimSuffix(base, filepath.Ext(base))
+}
+
 // entity carries an entity's frontmatter fields plus discovery/identity
 // metadata. fields holds the raw frontmatter (default keys backfilled to "");
 // the underscore-prefixed metadata mirrors the oracle's _stored_id/_path/_scope/
@@ -141,7 +155,7 @@ func scanEntities(directory string, stderr io.Writer) []*entity {
 	var out []*entity
 	for _, pair := range discoverEntityFiles(directory, stderr) {
 		slug, path := pair[0], pair[1]
-		fields := parseFrontmatter(path)
+		fields := ParseFrontmatter(path)
 		out = append(out, newEntity(fields, slug, path, "active"))
 	}
 	return out
@@ -165,7 +179,7 @@ func worktreeMirrorPath(entityPath, pipelineDir, gitRoot, worktree string) strin
 // exists. Pipeline-dir keys absent from the worktree copy are preserved; keys
 // present in the worktree copy win. Matches load_active_entity_fields.
 func loadActiveEntityFields(entityPath, gitRoot, pipelineDir string) map[string]string {
-	fields := parseFrontmatter(entityPath)
+	fields := ParseFrontmatter(entityPath)
 	worktree := strings.TrimSpace(fields["worktree"])
 	if worktree == "" {
 		return fields
@@ -174,7 +188,7 @@ func loadActiveEntityFields(entityPath, gitRoot, pipelineDir string) map[string]
 	if !fileExists(worktreeEntityPath) {
 		return fields
 	}
-	active := parseFrontmatter(worktreeEntityPath)
+	active := ParseFrontmatter(worktreeEntityPath)
 	for k, v := range active {
 		fields[k] = v
 	}
@@ -186,7 +200,7 @@ func loadActiveEntityFields(entityPath, gitRoot, pipelineDir string) map[string]
 // from the entity directory the way the oracle derives it from pipeline_dir, so
 // callers need not thread it through.
 func scanEntitiesActive(directory string, stderr io.Writer) []*entity {
-	gitRoot := findGitRoot(directory)
+	gitRoot := FindGitRoot(directory)
 	var out []*entity
 	for _, pair := range discoverEntityFiles(directory, stderr) {
 		slug, path := pair[0], pair[1]
