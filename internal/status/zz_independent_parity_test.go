@@ -186,7 +186,12 @@ func TestIndReadFlagsSeq(t *testing.T) {
 		{"archived", []string{"--workflow-dir", root, "--archived"}},
 		{"next", []string{"--workflow-dir", root, "--next"}},
 		{"where-status", []string{"--workflow-dir", root, "--where", "status=ideation"}},
-		{"fields", []string{"--workflow-dir", root, "--fields", "source"}},
+		// `issue` is a non-default frontmatter key, so it appends as a single extra
+		// in both runners. A default-named --fields is intentionally NOT a parity
+		// case: native de-dupes the duplicate column (captain-approved bug fix)
+		// while the oracle renders it twice; that divergence is locked by
+		// TestFieldsDedupeNoDuplicateDefaultColumns.
+		{"fields", []string{"--workflow-dir", root, "--fields", "issue"}},
 		{"all-fields", []string{"--workflow-dir", root, "--all-fields"}},
 		{"next-id", []string{"--workflow-dir", root, "--next-id"}},
 		{"resolve-id", []string{"--workflow-dir", root, "--resolve", "001"}},

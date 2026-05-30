@@ -293,12 +293,27 @@ func formatExtraCell(value string) string {
 	return value
 }
 
-// resolveExtraFields returns the extra column names: explicit verbatim, or every
-// non-empty non-default frontmatter key (sorted) under --all-fields, else none.
-// Matches resolve_extra_fields.
-func resolveExtraFields(entities []*entity, explicitFields []string, allFields bool, defaultFields []string) []string {
+// resolveExtraFields returns the extra column names: explicit fields de-duped
+// against the table's displayed columns, or every non-empty non-default
+// frontmatter key (sorted) under --all-fields, else none. The de-dupe drops an
+// explicit name that already names a displayed column so it is not rendered a
+// second time as an extra. displayedColumns are the columns the table already
+// shows (defaultStatusFields for the default table, the computed five for
+// --next); defaultFields is the --all-fields exclusion set.
+func resolveExtraFields(entities []*entity, explicitFields []string, allFields bool, defaultFields, displayedColumns []string) []string {
 	if explicitFields != nil {
-		return append([]string(nil), explicitFields...)
+		displayed := map[string]bool{}
+		for _, f := range displayedColumns {
+			displayed[f] = true
+		}
+		var out []string
+		for _, f := range explicitFields {
+			if displayed[f] {
+				continue
+			}
+			out = append(out, f)
+		}
+		return out
 	}
 	if allFields {
 		defaults := map[string]bool{}

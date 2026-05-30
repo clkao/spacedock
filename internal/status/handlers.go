@@ -273,7 +273,7 @@ func runRead(roots roots, args []string, e env, whereFilters []whereFilter,
 			emitJSON(stdout, nextJSON(entities, stages, explicitFields, allFieldsFlag))
 			return 0
 		}
-		extras := resolveExtraFields(entities, explicitFields, allFieldsFlag, defaultNextFields)
+		extras := resolveExtraFields(entities, explicitFields, allFieldsFlag, defaultNextFields, nextFixedFields)
 		printNextTable(stdout, entities, stages, extras, quiet)
 	default:
 		if asJSON {
@@ -281,7 +281,7 @@ func runRead(roots roots, args []string, e env, whereFilters []whereFilter,
 			emitJSON(stdout, statusJSON(entities, stages, fields))
 			return 0
 		}
-		extras := resolveExtraFields(entities, explicitFields, allFieldsFlag, defaultStatusFields)
+		extras := resolveExtraFields(entities, explicitFields, allFieldsFlag, defaultStatusFields, defaultStatusFields)
 		printStatusTable(stdout, entities, stages, extras, quiet)
 	}
 	return 0
