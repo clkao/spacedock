@@ -224,7 +224,7 @@ func runRead(roots roots, args []string, e env, whereFilters []whereFilter,
 	}
 
 	allEntities := activeAndArchivedEntities(roots.entityDir, stderr)
-	entities := scanEntities(roots.entityDir, stderr)
+	entities := scanEntitiesActive(roots.entityDir, stderr)
 	if includeArchive {
 		entities = append(entities, archiveEntities(roots.entityDir, stderr)...)
 	}
