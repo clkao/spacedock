@@ -8,6 +8,7 @@ worktree:
 started: 2026-05-30T19:17:39Z
 completed: 2026-05-30T21:11:18Z
 verdict: PASSED
+archived: 2026-05-30T21:11:18Z
 ---
 
 Give `spacedock status` agent-facing output modes so first officers and ensigns parse state cheaply and robustly instead of scraping a padded table. Inspired by rtk (Rust Token Killer): the agent surface should be token-frugal and structured. FLYWHEEL: the FO reads status on every boot / dispatchable check / gate across a long autonomous sprint, so per-read cost compounds.
