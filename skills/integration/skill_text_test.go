@@ -167,12 +167,16 @@ func TestSplitRootContractClause(t *testing.T) {
 	}
 }
 
-// TestEventLoopReadsUseJSON locks AC-4 (the contract switch): the FO runtime's
-// own `## Event Loop` scheduling reads consume `--json`, not the padded table.
-// The assertion is scoped to the `## Event Loop` section via sectionAfter and
-// requires each scheduling read in its `--json` form, so it fails both if the
-// switch was never made AND if a later edit reverts a line to the bare read —
-// the weakness the prior presence-of-substring check could not detect.
+// TestEventLoopReadsUseJSON locks AC-4 (the contract switch): EVERY FO-internal
+// `## Event Loop` scheduling read consumes `--json`, not the padded table. The
+// assertion is scoped to the `## Event Loop` section via sectionAfter and walks
+// each line: any line issuing a scheduling-read base form (`status --next`,
+// `status --where`) must also carry `--json`. Per-line (not whole-section
+// Contains) is load-bearing — `status --next --json` appears twice (step 3
+// dispatch, step 4 idle re-run), so a whole-section Contains is satisfied by
+// either occurrence and cannot detect a partial revert of only one. This walk
+// fails both if the switch was never made AND if a later edit reverts ANY single
+// scheduling-read line to its bare form.
 func TestEventLoopReadsUseJSON(t *testing.T) {
 	files := vendoredSkillFiles(t)
 	runtime := files["first-officer/references/claude-first-officer-runtime.md"]
@@ -182,18 +186,39 @@ func TestEventLoopReadsUseJSON(t *testing.T) {
 		t.Fatalf("claude-first-officer-runtime.md has no `## Event Loop` section")
 	}
 
-	// Each FO-internal scheduling read must appear in its --json form within the
-	// Event Loop. These are the reads the FO parses; the captain-facing table
-	// path lives elsewhere and is unaffected.
-	wantReads := []string{
-		`status --where "pr !=" --json`,
-		`status --where "mod-block !=" --json`,
-		`status --next --json`,
+	// A scheduling read is identified by its base form. The mod-block clear
+	// (`status --set ... mod-block=`) is a mutation, not a parsed read, so it is
+	// deliberately absent here — it must stay bare (asserted separately below).
+	readBases := []string{
+		"status --next",
+		`status --where`,
 	}
-	for _, read := range wantReads {
-		if !strings.Contains(section, read) {
-			t.Errorf("Event Loop section missing JSON-mode scheduling read %q", read)
+
+	// Walk each line: every line that issues a scheduling-read base must carry
+	// --json. Counting per matching line (not whole-section) is what catches a
+	// partial revert of one of the two duplicate `status --next` reads.
+	matched := map[string]int{}
+	for _, line := range strings.Split(section, "\n") {
+		for _, base := range readBases {
+			if strings.Contains(line, base) {
+				matched[base]++
+				if !strings.Contains(line, "--json") {
+					t.Errorf("Event Loop scheduling read missing --json on line: %q", strings.TrimSpace(line))
+				}
+			}
 		}
+	}
+
+	// Guard the per-line walk against silently matching nothing (e.g. a section
+	// rename or read removal): each base must appear at least once, and both
+	// `status --next` reads (step 3 dispatch + step 4 idle re-run) must be present.
+	for _, base := range readBases {
+		if matched[base] == 0 {
+			t.Errorf("Event Loop section has no scheduling read for base %q", base)
+		}
+	}
+	if matched["status --next"] < 2 {
+		t.Errorf("Event Loop has %d `status --next` reads, want both step-3 and step-4 (>=2)", matched["status --next"])
 	}
 
 	// The mod-block clear is a mutation, not a parsed read, and must NOT have been

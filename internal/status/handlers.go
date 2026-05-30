@@ -231,6 +231,9 @@ func runRead(roots roots, args []string, e env, whereFilters []whereFilter,
 			for _, er := range errs {
 				fmt.Fprintln(stderr, er)
 			}
+			if asJSON {
+				emitJSON(stdout, singletonJSON("validate", "valid", "false"))
+			}
 			return 1
 		}
 		if asJSON {

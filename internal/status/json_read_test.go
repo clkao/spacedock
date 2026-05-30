@@ -81,11 +81,20 @@ type statusEnvelope struct {
 	Entities []map[string]string `json:"entities"`
 }
 
+// defaultColumnWidths are the padRight min-widths printStatusTable uses for the
+// no-extras default row, in defaultStatusFields order. The final column (source)
+// is unpadded, so it has no width entry — the cursor walk treats it as the row
+// tail.
+var defaultColumnWidths = []int{6, 30, 20, 30, 8}
+
 // TestJSONStatusRoundTripsTableColumns (AC-1 oracle d) walks the parsed --json
 // entities against the default table the same run renders: each JSON value must
-// equal the corresponding default (full-value) table column. The table prints
-// default columns untruncated (padRight is a min-width, not a cap), so the JSON
-// value appears verbatim in that entity's table row.
+// equal the corresponding default (full-value) table column AT ITS OWN COLUMN,
+// not merely appear somewhere in the row. The table prints default columns
+// untruncated (padRight is a min-width, not a cap), so each value starts its
+// column verbatim; a left-to-right cursor walk pins every value to its column
+// boundary, so a value cannot pass by coincidentally matching another column's
+// text (the weakness of a whole-row Contains).
 func TestJSONStatusRoundTripsTableColumns(t *testing.T) {
 	root, err := filepath.Abs(filepath.Join("testdata", "seq-workflow"))
 	if err != nil {
@@ -110,8 +119,8 @@ func TestJSONStatusRoundTripsTableColumns(t *testing.T) {
 		t.Fatalf("command = %q, want status", env1.Command)
 	}
 
-	// Map each table data row by its slug (column 2), so we can match the JSON
-	// entity to its rendered row and assert each value appears in that row.
+	// Map each table data row by its slug (the second column), so we can match the
+	// JSON entity to its rendered row and walk that row column-by-column.
 	tableRows := map[string]string{}
 	for _, line := range strings.Split(tableOut, "\n") {
 		fields := strings.Fields(line)
@@ -130,14 +139,40 @@ func TestJSONStatusRoundTripsTableColumns(t *testing.T) {
 		if !ok {
 			t.Fatalf("JSON entity slug %q has no table row\ntable:\n%s", slug, tableOut)
 		}
-		for _, field := range defaultStatusFields {
-			val := e[field]
-			if val == "" {
-				continue // empty score etc. — nothing to find in the row
-			}
-			if !strings.Contains(row, val) {
-				t.Fatalf("JSON %s=%q for slug %q not present in default table row\nrow: %q", field, val, slug, row)
-			}
+		assertRowColumnsMatchJSON(t, row, e, slug)
+	}
+}
+
+// assertRowColumnsMatchJSON walks row left-to-right and asserts each default
+// column begins with the JSON value for that field. The cursor advances by the
+// column's rendered width (max of padRight min-width and the value's rune length,
+// since padRight does not truncate) plus the single-space separator, so each
+// value is checked against ITS column position rather than the whole row. The
+// final column (source) is unpadded and consumes the row tail.
+func assertRowColumnsMatchJSON(t *testing.T, row string, e map[string]string, slug string) {
+	t.Helper()
+	runes := []rune(row)
+	cursor := 0
+	for i, field := range defaultStatusFields {
+		val := e[field]
+		valRunes := []rune(val)
+		if cursor > len(runes) {
+			t.Fatalf("row exhausted before column %q for slug %q\nrow: %q", field, slug, row)
 		}
+		seg := runes[cursor:]
+		if !strings.HasPrefix(string(seg), val) {
+			t.Fatalf("JSON %s=%q for slug %q not at its column position (col %d)\nrow: %q\ncolumn tail: %q",
+				field, val, slug, i, row, string(seg))
+		}
+		if i == len(defaultColumnWidths) {
+			// Last field (source) is unpadded — it is the row tail; nothing follows.
+			continue
+		}
+		width := defaultColumnWidths[i]
+		colLen := len(valRunes)
+		if colLen < width {
+			colLen = width
+		}
+		cursor += colLen + 1 // advance past the padded column and the space separator
 	}
 }
