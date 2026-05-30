@@ -1,7 +1,7 @@
 ---
 id: 9869srv10sxp2ppkx9m0m321
 title: Bootstrap Go launcher
-status: implementation
+status: validation
 score: "0.95"
 source: bootstrap roadmap
 worktree: /Users/clkao/git/spacedock-research/spacedock-v1/.worktrees/spacedock-ensign-bootstrap-go-launcher
