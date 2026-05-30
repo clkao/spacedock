@@ -1,10 +1,10 @@
 ---
 id: 7w8w5nsa5mbc807b3jb88psv
 title: Native Go dispatch helper
-status: ideation
+status: implementation
 score: "0.40"
 source: handoff self-hosting gap
-worktree:
+worktree: /Users/clkao/git/spacedock-research/spacedock-v1/.worktrees/spacedock-ensign-native-dispatch-helper
 started: 2026-05-30T19:18:28Z
 ---
 
