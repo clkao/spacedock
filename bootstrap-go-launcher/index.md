@@ -1,10 +1,11 @@
 ---
 id: 9869srv10sxp2ppkx9m0m321
 title: Bootstrap Go launcher
-status: backlog
+status: ideation
 score: "0.95"
 source: bootstrap roadmap
 worktree:
+started: 2026-05-30T04:04:36Z
 ---
 
 # Bootstrap Go Launcher
