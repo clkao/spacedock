@@ -1,10 +1,10 @@
 ---
 id: bdxxg3yr1ys4nsmwk8x65j7b
 title: Prove symlink state profile
-status: ideation
+status: implementation
 score: "0.85"
 source: bootstrap roadmap
-worktree:
+worktree: /Users/clkao/git/spacedock-research/spacedock-v1/.worktrees/spacedock-ensign-symlink-state-profile
 started: 2026-05-30T04:30:15Z
 ---
 
