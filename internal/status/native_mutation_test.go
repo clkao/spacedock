@@ -167,6 +167,65 @@ func TestNativeUnknownFieldPreservation(t *testing.T) {
 	}
 }
 
+// TestNativeFolderEntityReportAppendPreservesTracker (AC-3) verifies the
+// folder-form combination: a folder entity (index.md + reports/ subdir) carrying
+// issue/source, after a stage-report body append, is discovered as exactly ONE
+// entity (the reports/ subdir is not misdetected as a second entity) and its
+// issue/source frontmatter survives the append intact.
+func TestNativeFolderEntityReportAppendPreservesTracker(t *testing.T) {
+	const index = "---\nid: \"070\"\ntitle: Tracker-linked folder entity\nstatus: implementation\nscore: \"0.50\"\nsource: kata\nissue: kata:task-xyz789\n---\n# Tracker-linked folder entity\n\nFolder-form entity carrying external-tracker fields.\n"
+	const reportSeed = "ideation notes\n"
+	env := pinnedEnv(t)
+
+	// Folder entity with a reports/ subdir, mirrored into native + oracle copies.
+	extra := map[string]string{
+		"070-tracker/index.md":            index,
+		"070-tracker/reports/ideation.md": reportSeed,
+	}
+	nativeRoot := stageFixtureWith(t, "seq-workflow", extra)
+	oracleRoot := stageFixtureWith(t, "seq-workflow", extra)
+
+	// Stage-report append: grow the entity body, the way an ensign appends its
+	// "## Stage Report" section to index.md.
+	report := "\n## Stage Report: implementation\n\n- DONE: wired the thing\n  ref abc123\n"
+	for _, root := range []string{nativeRoot, oracleRoot} {
+		idx := filepath.Join(root, "070-tracker", "index.md")
+		body := readWhole(t, idx)
+		if err := os.WriteFile(idx, []byte(body+report), 0o644); err != nil {
+			t.Fatalf("append report to %s: %v", idx, err)
+		}
+	}
+
+	// Default status read after the append: native must match the oracle on every
+	// channel. The oracle is the authoritative entity-count oracle, so parity here
+	// already proves native counts the folder entity exactly as the oracle does.
+	args := []string{"--workflow-dir", nativeRoot}
+	nOut, nErr, nCode := runNative(t, nativeRoot, env, args...)
+	oArgs := []string{"--workflow-dir", oracleRoot}
+	oOut, oErr, oCode := runOracle(t, oracleRoot, env, oArgs...)
+	if nCode != oCode {
+		t.Fatalf("exit: native=%d oracle=%d (nativeErr=%q oracleErr=%q)", nCode, oCode, nErr, oErr)
+	}
+	if normalize(nOut, nativeRoot) != normalize(oOut, oracleRoot) {
+		t.Fatalf("status read mismatch after report append\n--- native ---\n%s\n--- oracle ---\n%s",
+			normalize(nOut, nativeRoot), normalize(oOut, oracleRoot))
+	}
+
+	// Discovered as exactly ONE entity: the folder slug appears in a single data
+	// row, never duplicated by the reports/ subdir.
+	if got := strings.Count(nOut, "070-tracker"); got != 1 {
+		t.Fatalf("folder entity '070-tracker' appears %d times, want exactly 1 (misdetected?):\n%s", got, nOut)
+	}
+
+	// issue/source survive the body append byte-for-byte.
+	fm := readFrontmatter(t, filepath.Join(nativeRoot, "070-tracker", "index.md"))
+	for _, line := range []string{"source: kata", "issue: kata:task-xyz789"} {
+		if !strings.Contains(fm, line) {
+			t.Fatalf("report append dropped/reformatted %q from frontmatter:\n%s", line, fm)
+		}
+	}
+}
+
 // stageFixtureWith copies a fixture into a git temp dir and adds/overwrites the
 // given relative files before committing, so extra fixture entities can be
 // injected per-test.
