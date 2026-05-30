@@ -175,7 +175,7 @@ func TestSymlinkStateProfile(t *testing.T) {
 	if afterCode != 0 {
 		t.Fatalf("post-archive default table exit=%d stderr=%q", afterCode, afterErr)
 	}
-	if contains(tableSlugs(t, afterOut), "seed-archive") {
+	if containsSlug(tableSlugs(t, afterOut), "seed-archive") {
 		t.Fatalf("seed-archive still in active table after archive:\n%s", afterOut)
 	}
 
@@ -184,7 +184,7 @@ func TestSymlinkStateProfile(t *testing.T) {
 	if archivedCode != 0 {
 		t.Fatalf("--archived exit=%d stderr=%q", archivedCode, archivedErr)
 	}
-	if !contains(tableSlugs(t, archivedOut), "seed-archive") {
+	if !containsSlug(tableSlugs(t, archivedOut), "seed-archive") {
 		t.Fatalf("--archived omits the archived seed-archive:\n%s", archivedOut)
 	}
 }
@@ -212,7 +212,7 @@ func equalStrings(a, b []string) bool {
 	return true
 }
 
-func contains(haystack []string, needle string) bool {
+func containsSlug(haystack []string, needle string) bool {
 	for _, s := range haystack {
 		if s == needle {
 			return true
