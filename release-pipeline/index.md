@@ -154,4 +154,19 @@ These validate the goreleaser-specific config shape, which the in-sandbox plain-
 
 1. Config lint: `goreleaser check` — expect exit 0 (validates the v2 schema, `builds`/`archives`/`checksum`/`brews` keys).
 2. Full dry-run + stamp re-proof through goreleaser: `goreleaser release --snapshot --clean` then run the emitted arm64 binary — `./dist/spacedock_darwin_arm64*/spacedock --version` should report the snapshot version goreleaser stamped (not `0.1.0-dev`), and `dist/checksums.txt` + `dist/spacedock_*_darwin_{arm64,amd64}.tar.gz` should exist with the bare-`spacedock` payload.
-3. Live release (real GitHub ops, captain/CI only): seed `git tag v0.1.0 && git push origin v0.1.0` on `spacedock-dev/spacedock@next`, set the `HOMEBREW_TAP_TOKEN` repo secret, and let `.github/workflows/release.yml` cut the release + bump the tap formula.
+3. Live release (real GitHub ops, captain/CI only): seed `git tag v0.19.0 && git push origin v0.19.0` on `spacedock-dev/spacedock@next`, set the `HOMEBREW_TAP_TOKEN` repo secret, and let `.github/workflows/release.yml` cut the release + bump the tap formula.
+
+## Stage Report: implementation (cycle 2)
+
+Captain version bump to 0.19.0, folded into the single source of truth.
+
+- DONE: bump default `Version` to 0.19.0 at internal/cli/cli.go, keep it the single source of truth.
+  Commit `cd9a76c` on `spacedock-ensign/release-pipeline`: `var Version = "0.19.0"`. Verified the unstamped build now reports `spacedock 0.19.0 (contract 1)` by RUNNING it. No other version literals exist (grep: 0 hits in `.go`/`.yaml`/`.yml` outside the symbol) — the goreleaser config stamps `{{.Version}}` (tag-derived) and the cli tests read the `Version` symbol, so nothing else needed editing. The tap formula version follows this (rg bumping to 0.19.0 in parallel).
+- DONE: F9 stamp proof still holds after the bump.
+  `go build -ldflags "-X .../internal/cli.Version=$(git describe --tags --always)"` then RAN it → `spacedock e745d4d (contract 1)`, strict full-string equality vs the recomputed git-describe value; the `-X` stamp correctly overrides the 0.19.0 default. First-release tag corrected to `v0.19.0` (was `v0.1.0`) — see Captain-run verification step 3.
+- DONE: gates green after the bump.
+  `go test ./...` exit 0, `go vet ./...` exit 0, `go build ./...` exit 0, `TestVersion`+`TestVersionContractToken` exit 0.
+
+### Summary
+
+Folded the captain's 0.19.0 binary-version bump into the single source of truth at internal/cli/cli.go (commit `cd9a76c`): the unstamped build now reports `spacedock 0.19.0 (contract 1)` (observed by running it), and the F9 git-describe `-X` stamp still overrides it. The first-release tag is corrected to `v0.19.0`. No other version literals exist — the goreleaser config stamps `{{.Version}}` and the tests read the symbol — so this is the only edit, and all gates plus the F9 proof remain green.
