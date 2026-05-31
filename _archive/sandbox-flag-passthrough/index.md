@@ -1,14 +1,15 @@
 ---
 id: 2y7n58x5yx7yn64sy6q3jzmk
 title: Sandbox-flag passthrough — spacedock --safehouse-enable / --safehouse-add-dirs
-status: validation
+status: done
 source: sprint — captain (2026-05-31); closes the safehouse --enable gap (.safehouse config can't carry capabilities)
 started: 2026-05-31T01:51:45Z
-completed:
-verdict:
+completed: 2026-05-31T03:02:09Z
+verdict: PASSED
 score: "0.32"
-worktree: /Users/clkao/git/spacedock-research/spacedock-v1/.worktrees/spacedock-ensign-sandbox-flag-passthrough
+worktree: 
 issue:
+archived: 2026-05-31T03:02:09Z
 ---
 
 Let operators pass sandbox capability/path knobs through `spacedock claude` (and `spacedock codex`) to the underlying sandbox, namespaced by sandbox so future sandboxes get their own namespace.
