@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/clkao/spacedock-v1/internal/status"
+	"github.com/spacedock-dev/spacedock/internal/status"
 )
 
 // TestNativeRunnerSelectableThroughCLI proves the native runner backs the same

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/clkao/spacedock-v1/internal/contract"
+	"github.com/spacedock-dev/spacedock/internal/contract"
 )
 
 // foSharedCore reads the vendored first-officer shared core contract text.

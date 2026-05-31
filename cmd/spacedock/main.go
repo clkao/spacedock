@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"github.com/clkao/spacedock-v1/internal/cli"
+	"github.com/spacedock-dev/spacedock/internal/cli"
 )
 
 func main() {

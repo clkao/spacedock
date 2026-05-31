@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/clkao/spacedock-v1/internal/contract"
+	"github.com/spacedock-dev/spacedock/internal/contract"
 )
 
 func TestHelp(t *testing.T) {

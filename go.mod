@@ -1,3 +1,3 @@
-module github.com/clkao/spacedock-v1
+module github.com/spacedock-dev/spacedock
 
 go 1.22
