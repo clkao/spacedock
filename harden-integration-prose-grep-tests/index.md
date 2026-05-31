@@ -66,3 +66,151 @@ clean, `go vet` clean — with real captured exit codes.
 ## Notes
 Lives entirely in `skills/integration/`. Disjoint from the row-15 entity (which extends
 `internal/ensigncycle`) — safe to run in a parallel worktree.
+
+---
+
+# Ideation design (hardened)
+
+## Disposition rule (from the archived matrix's hx reconciliation)
+
+The archived `behavior-test-skeleton-and-matrix` entity (id `8033qbqdrh4zba10w0d34m4j`)
+reconciles hx P1-vs-P2 and gives the decision rule applied below:
+- **hx-AC-2 → KEEP+label.** A static assertion that, even while it `os.ReadFile`s a `.md`,
+  asserts a genuine *structural* fact the system mechanically depends on, validated against an
+  **oracle** (a compiled constant, a parser, a real build's emitted bytes). Not prose-grep.
+- **hx-AC-3 → PORT (retire bare-Contains).** A static assertion with **NO oracle** that only
+  `strings.Contains` instruction prose for a clause. Passes even if the clause is behaviorally
+  dead. This is the P2 antipattern. Port to its behavioral seam where one exists, retire the
+  bare-Contains; only keep a residue if it is genuinely hx-AC-2 structural.
+
+The load-bearing test: **does the assertion name an oracle?** If the only thing it compares
+against is "the prose says X", it is hx-AC-3 (PORT). If it compares against a build's emitted
+bytes / a compiled constant / a parser verdict / a real binary's observable behavior, it is
+hx-AC-2 (KEEP).
+
+## Per-assertion DISPOSITION table (rows 9/10/11/12/13/14)
+
+Each row: the named test, what it actually asserts (read from `skills/integration/`), the `.md`
+it greps, and the disposition with the named seam (PORT) or named oracle (KEEP).
+
+| # | Test (file::name) | What it asserts today | Disposition | Seam (PORT) / Oracle (KEEP) |
+|---|---|---|---|---|
+| 9a | `contract_gate_test.go::TestStartupStepZeroIsContractGate` | FO `## Startup` step-1 prose `Contains` `spacedock --version` + `contract` + `ABORT`; ordering of gate-before-discover/boot via `strings.Index` over the prose | **PORT** (retire) | Seam: `internal/contract/gate_test.go::TestStartupGateAbortsBeforeDiscover` — drives a real `spacedock` stub `--version`, parses the `contract` token, runs `gateAndMaybeDiscover`, and OBSERVES discover is invoked 0× on out-of-range / exactly 1× on compatible. That is the gate behavior; the `.md` Contains/Index is zero-oracle prose-grep. |
+| 9b | `contract_gate_test.go::TestStartupEmbeddedRangeBracketsContractVersion` | Parses the `>=N,<M` literal embedded in `## Startup` via `contract.ParseRange`, asserts it brackets `contract.CONTRACT_VERSION`, and that exactly 1 such literal exists | **KEEP+label** | Oracle: `contract.ParseRange` (parser) + `contract.CONTRACT_VERSION` (compiled constant). This closes the 4th-source-of-truth drift — the FO prose embeds its own expected range and this proves it brackets the binary's real contract version. hx-AC-2 structural invariant, NOT prose-grep. |
+| 10a | `skill_text_test.go::TestLauncherStatusInvocations` | FO `.md` `Contains` 5 literal `spacedock status …` invocation strings (discover/boot/set/archive/overview), each with `{workflow_dir}`/`{slug}` placeholders | **PORT** (retire) | Seam: `skills/integration/launcher_smoke_test.go::TestLauncherListSetArchive` drives the real status binary for list/set/archive observably; `internal/status/*` covers the surface. The FO-text Contains has no oracle that a *run* consumes those flags — bare prose-grep. |
+| 10b | `contract_status_path_test.go::TestVendoredSkillsCallSpacedockStatus` | FO `.md` `Contains "spacedock status"` (positive) **and** neither FO nor ensign `.md` `Contains` any of 3 plugin-private status paths (negative) | **SPLIT: positive PORT, negative KEEP+label** | Positive half (`Contains "spacedock status"`) is bare prose-grep → covered by the launcher-smoke behavioral seam, retire. Negative half (no `skills/commission/bin/status` / `{spacedock_plugin_dir}` / `commission/bin/status` ref) is a genuine hx-AC-2 **absence invariant** over the vendored on-disk surface — its oracle is "the vendored skill tree must not re-introduce the retired plugin-private path"; a real seam cannot prove an absence. KEEP the negative, label it. |
+| 11 | `skill_text_test.go::TestConcurrencySafeCommitClause` | ensign+FO `.md` `Contains` 4 commit-discipline clauses (`path-scoped`, the `git -C {state_checkout} commit -m` form, `Never a bare git add -A`, `tool-managed atomic state commits`) | **PORT** (retire) | Seam: `skills/integration/concurrency_test.go::TestPathScopedCommitDoesNotSweepSibling` — runs real `git`, stages two siblings, does a path-scoped commit, and OBSERVES the sibling is NOT swept. That is the invariant the prose describes; the 4-clause Contains has no oracle that a commit is actually path-scoped. Bare prose-grep. |
+| 12 | `skill_text_test.go::TestEventLoopReadsUseJSON` | FO runtime `## Event Loop` section: per-line walk asserts every `status --next` / `status --where` read line also `Contains "--json"`, both `--next` reads present, mod-block clear stays bare | **PORT** (retire) | Seam: there is NO v1 behavioral seam yet that proves the FO scheduling loop CONSUMES `--json` (the FO is a live LLM; the `--json` output shape itself is covered by `internal/status` JSON tests). Per the matrix this is a zero-oracle prose-grep with no current behavioral counterpart → retire the bare-Contains; the `--json` *output contract* is owned behaviorally by `internal/status` JSON tests, and the live "FO actually reads --json" half stays GAP (deferred live-runtime, matrix Out-of-scope). Do NOT keep as structural — it has no oracle. |
+| 13 | `skill_text_test.go::TestDispatchBlockUsesNativeBuild` | FO runtime `## Dispatch Adapter` section `Contains` the `… \| spacedock dispatch build --workflow-dir {workflow_dir}` command, does NOT contain the vendored Python build path, and no fenced line `Contains "claude-team"` | **PORT** (retire) | Seam: `internal/dispatch/build_parity_test.go::TestBuildParityCrossProduct` + `cycle2_parity_test.go` — drive the real native `dispatch.Run` build and byte-compare the emitted dispatch body to the oracle. The behavior "the dispatch block runs native build" is proven by native build EXISTING and emitting parity bytes; the `.md` Contains has no oracle. Bare prose-grep. |
+| 14a | `skill_text_test.go::TestSplitRootContractClause` | ensign+FO `.md` `Contains "Split-Root Worktree Contract"` + `Contains "CODE only"` | **PORT** (retire) | Seam: `skills/integration/dispatch_test.go::TestSplitRootFolderWorktreeDispatch` (repointed at native `dispatch.Run` per AC-2) — OBSERVES that a split-root worktree dispatch emits the worktree CODE working-dir while the entity-read + completion-signal point at the state path (no `.worktrees/` segment). That IS the CODE-only split-root behavior; the 2-clause Contains has no oracle. Bare prose-grep. |
+| 14b | `skill_text_test.go::TestNoPRMergeOrModBehaviorIntroduced` | ensign `.md` has no `## Hook:`; FO split-root region has no `## Hook:`; no file `Contains` 3 PR-merge markers (`gh pr merge`, `git merge --no-ff`, `git merge --ff-only main`) | **KEEP+label** | Oracle: this is an hx-AC-2 **absence invariant** over the vendored on-disk surface — "the vendored skill amendments introduce no new lifecycle `## Hook:` and no PR-merge command". A real seam cannot prove an absence of behavior; the oracle is the structural scope-fence over the amendment regions (scoped via `sectionAfter`). KEEP, label as scope-guard structural invariant. |
+| 14c | `contract_gate_test.go::TestStartupEmbeddedRangeBracketsContractVersion` | (same as 9b — the seed lists it under both row 9 and row 14) | **KEEP+label** | Same as 9b: oracle `contract.ParseRange` + `contract.CONTRACT_VERSION`. hx-AC-2 structural. |
+
+### Disposition summary
+
+- **PORT (retire bare-Contains):** 9a, 10a, 11, 12, 13, 14a, and the positive half of 10b. Each
+  (except 12) has a named behavioral seam already in the tree that observes the real behavior; the
+  bare `.md` Contains is redundant zero-oracle prose-grep. Row 12's `--json` *consumption* by the
+  live FO has no v1 seam → its bare-Contains is retired and the residual live half stays GAP
+  (matrix Out-of-scope), with the JSON output-shape contract owned by `internal/status` tests.
+- **KEEP+label (genuine hx-AC-2 structural, oracle named):** 9b/14c (embedded-range brackets
+  `CONTRACT_VERSION`, oracle = `contract.ParseRange` + constant), 14b (no-Hook/no-PR-merge absence
+  invariant over the amendment regions), and the negative absence half of 10b (no plugin-private
+  status path). Each names its oracle and is provably not bare prose-grep.
+
+**Why NOT blindly delete.** 9b, 14b, and 10b-negative read `.md` files but each asserts a
+structural fact with an oracle: a parsed range vs a compiled constant, and absence invariants the
+vendored surface mechanically must not violate (a re-introduced plugin status path or a new
+PR-merge hook would silently break the launcher contract, and no positive behavioral seam can
+catch an absence). Deleting them would lose real coverage.
+
+## AC-2 — `dispatch_test.go` repoint: feasibility CONFIRMED by spike
+
+`skills/integration/dispatch_test.go::runBuild` drives the retired Python helper via
+`exec.Command("python3", vendoredClaudeTeam(t), "build", "--workflow-dir", workflowDir)` (line
+~45). The native seam is the in-process `internal/dispatch.Run([]string{"build","--workflow-dir",
+wd}, stdin, &stdout, &stderr)` — already exercised by `build_parity_test.go::runNative`, which
+byte-compares the native build's stdout JSON and dispatch body against the oracle across the full
+slug/split/worktree cross-product. So native build is a proven byte-for-byte drop-in (modulo the
+one fetch-prefix rewrite, which neither `dispatch_test.go` assertion touches).
+
+**Spike (riskiest path, done FIRST — observed green before committing the design):** I added a
+throwaway `spike_dispatch_native_test.go` in the `integration` package with `runBuildNative`
+(same `buildResult` contract as `runBuild`, but calling `dispatch.Run` in-process) and mirrored
+BOTH affected tests' assertions:
+- `TestSpikeSplitRootNative` — asserts `res.Name == spacedock-ensign-skill-launcher-implementation`,
+  the dispatch-file suffix, no `index` leak, the `spacedock-ensign/skill-launcher` branch line, the
+  worktree working-dir present, and the entity-read + completion-signal lines pointing at the
+  state-checkout path with no `.worktrees/` segment.
+- `TestSpikeFlatNative` — asserts `res.Name == spacedock-ensign-vendor-script-backlog`.
+
+Result: **2 passed**, EXIT=0. Every observable output the current Python path asserts is produced
+identically by native `dispatch.Run`. Spike then removed; integration baseline re-run green (15
+passed). This confirms AC-2 is mechanically feasible with no contract change.
+
+**Repoint plan (implementation stage):** rewrite `runBuild` to drive `dispatch.Run` in-process —
+import `internal/dispatch`, `t.Setenv("HOME", t.TempDir())` for the bare-mode probe hermeticity
+(the Python path used `cmd.Env … HOME=t.TempDir()`), `json.Marshal` the input to stdin, call
+`dispatch.Run`, parse stdout JSON into `buildResult`, read the dispatch body. Delete
+`vendoredClaudeTeam` and the `exec`/`python3` dependency from this file. The two tests'
+assertion bodies stay byte-identical (proven by the spike). After repoint:
+`grep -n 'python3\|claude-team' skills/integration/dispatch_test.go` returns no build-driving
+invocation (AC-2 verification).
+
+## Hardened acceptance criteria (behavior-first)
+
+**AC-1 — Each rows-9/10/11/12/13/14 prose-grep assertion is dispositioned per the table above:
+PORTed (bare-Contains retired, behavior owned by the named seam) or KEPT+labeled as an
+oracle-backed hx-AC-2 structural invariant.** Verified by: the seven PORT assertions
+(9a, 10a, 10b-positive, 11, 12, 13, 14a) have their bare `strings.Contains` over `.md` prose
+removed; a reproducible `grep`/`go test -list` over `skills/integration/` shows no PORTed test
+remains as a bare-Contains-over-prose assertion; the named behavioral seam for each PORTed row
+stays green (`go test ./internal/contract/ ./internal/dispatch/ ./internal/status/
+./skills/integration/`). The four KEPT assertions (9b/14c, 14b, 10b-negative) each carry a
+comment naming their oracle (`contract.ParseRange`+`CONTRACT_VERSION`; the amendment-region
+scope-fence; the plugin-private-path absence invariant) so each is provably not bare prose-grep.
+
+**AC-2 — `dispatch_test.go` exercises native `dispatch.Run`, not the retired Python helper.**
+Verified by: `grep -n 'python3\|claude-team' skills/integration/dispatch_test.go` returns no
+build-driving invocation; `runBuild` calls in-process `dispatch.Run`; both
+`TestSplitRootFolderWorktreeDispatch` and `TestFlatEntitySlugUnchanged` assert the same observable
+dispatch outputs (name, dispatch-file path, branch line, worktree working-dir, state-path
+entity-read + completion-signal) and stay green. Feasibility already proven by the ideation spike
+(2 passed in-process).
+
+**AC-3 — The full suite stays green.** Verified by: `go test ./...` EXIT=0 (modulo the known
+environment-only `TestCodexResolveManifestAgainstInstalledHost` failure), `gofmt -l` clean,
+`go vet` clean — with real captured exit codes.
+
+## Test plan
+
+- **AC-1 dispositions:** Go unit tests at the seam abstraction (`internal/contract/gate_test.go`,
+  `internal/dispatch/build_parity_test.go`, `internal/status/*`, `concurrency_test.go`,
+  `launcher_smoke_test.go`) already exist and stay green — implementation only *removes* the
+  redundant bare-Contains assertions, it adds no new behavioral test. The four KEPT structural
+  assertions are re-labeled (comment naming the oracle), not changed in logic. Cost: low
+  (deletions + comments). Reproducible enumeration: a `go test -list` / grep showing no PORTed
+  test name survives as a prose-Contains.
+- **AC-2 repoint:** rewrite one helper (`runBuild`) + drop the `python3`/`exec` dependency; the
+  two test bodies are unchanged. Cost: low, proven feasible by the ideation spike. CLI/in-process
+  test (no live workflow).
+- **AC-3 gates:** `go test ./...`, `gofmt -l`, `go vet` with real captured exit codes.
+
+## Out of scope (unchanged)
+- Rows 16/17 (team fail-early live name, codex packaged-agent) and the live-e2e CI net.
+- Row 15 (gate/feedback loop) — its own entity.
+- Row 12's live "FO actually consumes `--json`" half — deferred to a live-runtime harness (the
+  `--json` output-shape contract IS covered behaviorally by `internal/status` JSON tests).
+
+## Stage Report: ideation
+
+- DONE: Produce a per-assertion DISPOSITION table for every matrix-named prose-grep assertion (rows 9/10/11/12/13/14): for each, read the real test in skills/integration/ AND the .md file it greps, then classify port-to-behavioral-at-seam-X (name the seam) vs keep-as-legitimate-structural-with-oracle-Y (name the oracle), applying hx-AC-2 vs hx-AC-3
+  Per-assertion table in "Per-assertion DISPOSITION table" — read all four test files (skill_text_test.go, contract_gate_test.go, contract_status_path_test.go, dispatch_test.go) and the seam tests (contract/gate_test.go, build_parity_test.go). 7 PORT (named seam each), 4 KEEP+label (named oracle each), with 10b split positive-PORT/negative-KEEP.
+- DONE: Confirm the dispatch_test.go repoint is feasible: verify the native in-process dispatch.Run seam can produce the same observable outputs the current exec.Command("python3", claude-team, "build") path asserts; spike the minimal repoint and observe it green before committing the design
+  Spiked `runBuildNative` (dispatch.Run in-process) + mirrored both affected tests' asserts: 2 passed EXIT=0; spike removed; integration baseline re-run 15 passed. See "AC-2 — dispatch_test.go repoint".
+- DONE: Harden AC-1/AC-2/AC-3 to behavior-first with the concrete per-test disposition and the dispatch_test.go repoint plan; ensure each retained static assertion names its oracle (so it is provably not bare prose-grep)
+  Hardened ACs in "Hardened acceptance criteria"; AC-1 enumerates the 7 PORT + 4 KEEP with each KEEP naming its oracle; AC-2 carries the proven-feasible repoint plan; AC-3 is the green-gate bar.
+
+### Summary
+
+Ideation dispositioned all six matrix-named prose-grep rows by reading each real test and the `.md` it greps, then applying the archived matrix's hx rule (oracle-backed structural = KEEP; zero-oracle prose-grep = PORT). The load-bearing distinction is whether the assertion names an oracle: seven assertions only `strings.Contains` instruction prose with no oracle and each already has a behavioral seam in the tree (gate stub, build parity, concurrency commit, launcher smoke, native build) — those PORT. Four are genuine hx-AC-2 structural invariants with named oracles — the embedded-range-brackets-`CONTRACT_VERSION` check (`contract.ParseRange` + compiled constant) and three absence invariants (no plugin-private status path, no new `## Hook:`/PR-merge) that no positive behavioral seam can catch — those KEEP+label. The AC-2 repoint was de-risked FIRST with a throwaway spike proving native `dispatch.Run` produces byte-identical observable outputs (2 passed), so the implementation is a low-risk one-helper rewrite + redundant-assertion deletions, not new test authorship.
