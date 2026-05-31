@@ -1,13 +1,13 @@
 ---
 id: k69e2gcvykjrc5354ty7kt3g
 title: Dispatch — inject split-root state-commit guidance for non-worktree (ideation) stages
-status: validation
+status: done
 source: FO dogfooding friction #1 (2026-05-31); root-caused build.go:302 worktree-gating
 started: 2026-05-31T18:40:08Z
-completed:
-verdict:
+completed: 2026-05-31T19:15:57Z
+verdict: PASSED
 score: "0.24"
-worktree: /Users/clkao/git/spacedock-research/spacedock-v1/.worktrees/spacedock-ensign-dispatch-nonworktree-state-guidance
+worktree: 
 issue:
 ---
 
