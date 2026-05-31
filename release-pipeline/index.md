@@ -1,7 +1,7 @@
 ---
 id: jfk8g2h0h1wsbr3qtncsqsbt
 title: Release pipeline — version-stamped darwin binaries + GitHub Release (closes F9)
-status: implementation
+status: validation
 source: sprint — Ship the Launcher slice C (captain, 2026-05-30)
 started: 2026-05-31T01:32:22Z
 completed:
