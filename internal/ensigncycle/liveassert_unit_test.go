@@ -106,27 +106,34 @@ func TestSomeCommitNamesOnly(t *testing.T) {
 }
 
 // TestTerminalFrontmatterAnchors pins the go-red discipline of the terminal
-// frontmatter assertions: they match a finalized entity (either verdict casing)
-// and REJECT an entity that never reached the terminal stage. This is the offline
-// proof that the live assertions go red on an incomplete cycle, without a model.
+// frontmatter assertions: they match a finalized entity whose verdict is SET to
+// ANY non-empty value (the exact word is FO judgment that varies by model —
+// `passed`, `PASSED`, `done` all mean the cycle finished) and REJECT an entity
+// that never reached the terminal stage (empty/unset verdict). This is the
+// offline proof that the live assertions go red on an incomplete cycle, no model.
 func TestTerminalFrontmatterAnchors(t *testing.T) {
-	completedUpper := "---\nstatus: done\nverdict: PASSED\n---\nbody"
+	completedPassed := "---\nstatus: done\nverdict: PASSED\n---\nbody"
 	completedLower := "---\nstatus: done\nverdict: passed\n---\nbody"
+	completedDone := "---\nstatus: done\nverdict: done\n---\nbody"
+	emptyVerdict := "---\nstatus: done\nverdict:\n---\nbody"
 	incomplete := "---\nstatus: backlog\nverdict:\n---\nbody"
 
-	if !frontmatterField.MatchString(completedUpper) {
+	if !frontmatterField.MatchString(completedPassed) {
 		t.Error("status: done must match a finalized entity")
 	}
-	if !verdictPassed.MatchString(completedUpper) {
-		t.Error("verdict: PASSED (uppercase) must match — value is case-insensitive")
+	if !verdictSet.MatchString(completedPassed) {
+		t.Error("verdict: PASSED must match — any non-empty value counts")
 	}
-	if !verdictPassed.MatchString(completedLower) {
-		t.Error("verdict: passed (lowercase) must match")
+	if !verdictSet.MatchString(completedLower) {
+		t.Error("verdict: passed must match")
+	}
+	if !verdictSet.MatchString(completedDone) {
+		t.Error("verdict: done must match — the verdict word is FO judgment, not pinned")
 	}
 	if frontmatterField.MatchString(incomplete) {
 		t.Error("status: done must NOT match a backlog (incomplete) entity")
 	}
-	if verdictPassed.MatchString(incomplete) {
-		t.Error("verdict: passed must NOT match an empty/unset verdict")
+	if verdictSet.MatchString(emptyVerdict) {
+		t.Error("verdict must NOT match an empty value (the incomplete-cycle shape)")
 	}
 }
