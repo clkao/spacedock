@@ -261,3 +261,14 @@ Bumped the formula to the captain's 0.19.0 and verified the B↔C contract again
 ### Summary (cycle 3)
 
 Per the FO's revised plan: the current brew disables path-form `brew audit`, so AC-1 cannot be a loose-file audit — it becomes a captain-run name-based audit (`brew audit --strict spacedock-dev/homebrew-tap/spacedock`) after the FO creates the tap repo and pushes this formula. Formula (0.19.0) + tap README + B↔C contract are committed on `spacedock-ensign/homebrew-tap` (bbdab4d, 31fd552); `ruby -c` is the only in-entity static check I can run (Syntax OK). The AC-1 rc and the AC-2 live `brew install` both flow through the FO/captain post-tap; no fabricated audit pass.
+
+## Stage Report: implementation (cycle 4)
+
+- DONE: AC-1 satisfied — captain ran `brew audit --strict spacedock-dev/homebrew-tap/spacedock` → AUDIT_RC=0.
+  Reported by the FO from the captain's run against the tapped formula; the audit oracle is green.
+- DONE: safehouse docs URL pinned to the captain's canonical link.
+  `https://agent-safehouse.dev` replaces the provisional `github.com/spacedock-dev/safehouse#install` in both the formula `caveats` and the README (commit 1b07d25). String-only, audit-neutral (no re-audit needed). grep confirms the provisional URL is gone and the canonical one appears in both files; `ruby -c` Syntax OK.
+
+### Summary (cycle 4)
+
+AC-1's audit oracle is green: the captain's `brew audit --strict spacedock-dev/homebrew-tap/spacedock` returned 0. Corrected the safehouse docs link to the captain-pinned `https://agent-safehouse.dev` in the formula `caveats` and the README (commit 1b07d25 on `spacedock-ensign/homebrew-tap`) — a string-only, audit-neutral change. The FO re-pushes the corrected formula to the tap and merges. Still pending (external, post-first-release): AC-2 live `brew install`, and jf's `brews.caveats` keeping the safehouse link so released formulas don't drop it.
