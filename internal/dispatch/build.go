@@ -297,7 +297,12 @@ func runBuild(workflowDir string, stdin io.Reader, stdout, stderr io.Writer) int
 			shlexQuote(workflowDir), shlexQuote(stage)),
 	}
 
-	// 3. Worktree instructions (conditional).
+	// 3. Worktree instructions (conditional). Under split root the state-commit
+	// guidance applies to every stage, worktree or not: the worktree branch
+	// prepends CODE-directory/branch lines, a non-worktree stage emits the
+	// standalone guidance. The guidance carries the resolved absolute state
+	// checkout (workflowDir IS the state/entity dir under split root) and entity
+	// path — never literal {state_checkout}/{entity_path} brace tokens.
 	var worktreeEntityPath string
 	if worktreePath != "" {
 		branch := fmt.Sprintf("%s/%s", workerKey, slug)
@@ -308,15 +313,9 @@ func runBuild(workflowDir string, stdin io.Reader, stdout, stderr io.Writer) int
 					"Your git branch for CODE is %s. All CODE commits MUST be on "+
 					"this branch in the worktree. Do NOT switch branches or commit "+
 					"code to main.\n"+
-					"This workflow is split-root: the entity body and your stage report "+
-					"are NOT in the worktree. Write and commit them to the shared state "+
-					"checkout at the entity path below. Commit state path-scoped — "+
-					"`git -C {state_checkout} add {entity_path} && "+
-					"git -C {state_checkout} commit -m \"...\" -- {entity_path}` — "+
-					"never a bare `git add -A` or bare `git commit` in the state "+
-					"checkout (a bare commit cross-attributes a concurrent writer's "+
-					"staged entity). Retry on index.lock contention after a short wait.\n",
-				worktreePath, worktreePath, branch))
+					"%s",
+				worktreePath, worktreePath, branch,
+				stateCommitGuidance(workflowDir, entityPath)))
 		} else {
 			parts = append(parts, fmt.Sprintf(
 				"Your working directory is %s\n"+
@@ -325,6 +324,8 @@ func runBuild(workflowDir string, stdin io.Reader, stdout, stderr io.Writer) int
 					"Do NOT switch branches or commit to main.\n",
 				worktreePath, worktreePath, branch))
 		}
+	} else if splitRoot {
+		parts = append(parts, stateCommitGuidance(workflowDir, entityPath))
 	}
 
 	// 4. Entity-read instruction. Under split root the entity lives in the state
@@ -417,6 +418,26 @@ func runBuild(workflowDir string, stdin io.Reader, stdout, stderr io.Writer) int
 	}
 
 	return emitBuildJSON(stdout, out)
+}
+
+// stateCommitGuidance is the split-root state-commit instruction, shared by the
+// worktree and non-worktree branches so the wording lives in one place. It
+// substitutes the resolved absolute state checkout and entity paths into the
+// path-scoped commit command — never literal {state_checkout}/{entity_path}
+// brace tokens — and carries the concurrency-safe "never a bare git add -A"
+// rule that governs every split-root stage.
+func stateCommitGuidance(stateCheckout, entityPath string) string {
+	return fmt.Sprintf(
+		"This workflow is split-root: the entity body and your stage report "+
+			"live in the shared state checkout, not alongside the code. Write and "+
+			"commit them to the state checkout at the entity path below. Commit "+
+			"state path-scoped — "+
+			"`git -C %s add %s && "+
+			"git -C %s commit -m \"...\" -- %s` — "+
+			"never a bare `git add -A` or bare `git commit` in the state "+
+			"checkout (a bare commit cross-attributes a concurrent writer's "+
+			"staged entity). Retry on index.lock contention after a short wait.\n",
+		stateCheckout, entityPath, stateCheckout, entityPath)
 }
 
 // emitBuildJSON writes out as two-space-indented JSON with HTML escaping off and

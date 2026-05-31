@@ -25,9 +25,9 @@ Read the assignment context provided by the first officer. It defines:
 - `pr:` is the narrow mirrored exception and stays visible on `main` for startup/discovery.
 - Ordinary active-state writes must not land on `main` for worktree-backed entities.
 
-### Split-Root Worktree Contract
+### Split-Root State Contract
 
-When the workflow is split-root — the workflow README declares a `state:` checkout (e.g. `state: .spacedock-state`) — your worktree isolates **CODE only**. The entity body and your stage report do NOT live in the worktree; they live in the separate state checkout that the dispatch hands you as the entity path. Concretely:
+When the workflow is split-root — the workflow README declares a `state:` checkout (e.g. `state: .spacedock-state`) — the entity body and your stage report live in the separate state checkout that the dispatch hands you as the entity path, NOT alongside the code. This applies to every split-root stage. **If your stage has a worktree**, the worktree isolates **CODE only** and the entity/report stay in the state checkout. **If your stage has no worktree** (ideation, backlog), you run from the repo root and still write/commit the entity and report to the state checkout the dispatch named — the concurrency-safe commit rule below governs you too. Concretely:
 
 - Read, write, and commit the entity body and your stage report at the state-checkout entity path the dispatch gave you, never a worktree copy.
 - Code reads, writes, and commits stay under the worktree on its branch, exactly as the worktree instructions say.
