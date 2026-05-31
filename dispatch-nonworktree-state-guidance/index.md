@@ -1,7 +1,7 @@
 ---
 id: k69e2gcvykjrc5354ty7kt3g
 title: Dispatch — inject split-root state-commit guidance for non-worktree (ideation) stages
-status: validation
+status: implementation
 source: FO dogfooding friction #1 (2026-05-31); root-caused build.go:302 worktree-gating
 started: 2026-05-31T18:40:08Z
 completed:
@@ -118,3 +118,17 @@ Lifted the split-root state-commit guidance out of build.go's `if worktreePath !
 ### Summary
 
 PASSED. Independently reproduced both defects' fixes behaviorally via native `dispatch.Run` and confirmed the TDD red→green by re-injecting a literal brace (test went RED on both worktree and non-worktree sub-cases, restored to GREEN). The crux check holds: the parity strip subtracts EXACTLY the one intended state-commit divergence — raw body diff shows that line is the sole difference, the strip regex is line-anchored to a phrase unique in each emitter, and POST-STRIP the bodies are byte-identical, so the cross-product parity is green for the right reason and the strip is not too aggressive to mask a future regression. The contract de-frame matches the entity's exact before/after with the Concurrency-safe paragraph unchanged. Gates green from inside the worktree with real captured exit codes; the only `./...` failure is the pre-existing env-only codex test, not a regression. Worktree clean at 00d3e5b after all mutation/diag testing.
+
+## Feedback Cycles
+
+### Cycle 1 — REJECTED (FO override of validator PASSED; parallel adversarial staff audit + FO reproduction both confirmed a Material bug)
+
+Validation recommended PASSED but its diag test used a fixture where `workflowDir` IS the state checkout (conflated), so it never exercised the real `docs/dev` vs `docs/dev/.spacedock-state` split. The parallel adversarial staff audit (detached checkout) and an independent FO reproduction against the REAL `docs/dev` workflow both confirmed a Material correctness bug. Routing to implementation.
+
+**M1 (Material) — the emitted `git -C` binds `workflowDir`, not the state checkout; the state commit FAILS on both branches.**
+`stateCommitGuidance(workflowDir, entityPath)` (build.go:318 worktree branch, build.go:328 non-worktree branch) binds `stateCheckout = workflowDir`. Under split-root, `workflowDir` is the README/definition root (`docs/dev`); the real state git checkout is `filepath.Join(workflowDir, <state: value>)` = `docs/dev/.spacedock-state`. `workflowIsSplitRoot` (helpers.go:124-128) reads `state:` only as a boolean and discards the value, so build.go never learns the real state root. Reproduced against the real `docs/dev` workflow with the fixed binary — it emits: `git -C <abs>/docs/dev add <abs>/docs/dev/.spacedock-state/.../index.md`. `git -C docs/dev` targets the MAIN repo, where `.spacedock-state` is gitignored, so the command fails (`exit 1`, "paths are ignored") — on BOTH branches. The change converted a literal-placeholder line into a confidently-wrong absolute command, and ensign-shared-core.md tells the worker to TRUST the emitted path. **Fix:** resolve the real state checkout (e.g. `resolveRoots().entityDir` per status/roots.go:55-67, or `filepath.Join(workflowDir, stateValue)`) and bind THAT at both call sites; correct the false comment at build.go:304-305.
+
+**M2 (Material) — the new test conflates `workflowDir` with the state checkout, so it cannot catch M1.**
+build_statecommit_test.go:35-46 declares `state: state-checkout` in its fixture README but places the entity directly under `workflowDir` (not under the declared state checkout) and asserts `git -C <workflowDir>`. The fixture is internally inconsistent with its own README; a faithful fixture (entity at `workflowDir/state-checkout/thing/index.md`, assert `git -C workflowDir/state-checkout`) FAILS against current code. **Fix:** make the fixture place the entity under the declared `state:` checkout and assert the resolved checkout path, so the test actually catches M1; correct the comment at :33-34.
+
+**Cleared (do NOT touch):** the parity-harness `stripStateCommitGuidance` (sound, line-anchored, not over-aggressive) and the ensign-shared-core.md de-frame (correct; its literal `{state_checkout}` placeholders are reference prose, not an emitted command).
