@@ -309,3 +309,18 @@ Resolved the integration surface against tq's in-flight `frontdoor.go`: this lau
 ### Summary
 
 Folded both captain decisions (fixed launch-and-go bootstrap prompt with proposed wording; skip-permissions safehouse-path-only) and the three material staff findings: corrected the `dir`-threading blast radius (signature + call site + 5 test sites, reinforcing serialize-after-tq), recharacterized AC-3 from a redundant gate re-run into the real plugin-gate short-circuit ordering invariant, and moved the missing-safehouse pre-check into `internal/safehouse.Available` so the codex launcher reuses the full gate (Present+Available+Wrap). The verified-correct core (integration surface, salvage, AC-6) is preserved; the proposed bootstrap-prompt wording is the one item still awaiting captain tweak at the gate.
+
+## Stage Report: implementation
+
+- DONE: AC-1/AC-2/AC-5 argv oracles pass against recorded Launch argv — `.safehouse`-present emits `safehouse --trust-workdir-config -- claude --dangerously-skip-permissions --agent spacedock:first-officer <args> <bootstrap-prompt>` (prompt suppressed under `--resume`); no-`.safehouse` emits plain `claude --agent spacedock:first-officer <args> <bootstrap-prompt>` with NO `--dangerously-skip-permissions` and no `safehouse` token.
+  internal/cli/safehouse_frontdoor_test.go (TestClaudeSafehousePresentWrapsArgv, TestClaudeNoSafehouseLaunchesPlain, TestClaudeResumeSuppressesBootstrapPrompt) all green; bootstrap prompt = the captain-approved verbatim string, frontdoor.go `bootstrapPrompt` const. commit 02ec334.
+- DONE: `internal/safehouse` ships the shared inner-argv-agnostic seam Present + Available + Wrap; AC-3 ordering invariant (plugin gate short-circuits before any `.safehouse`/Available logic — neither hint nor Launch fires) and AC-4 (`.safehouse` present + binary absent → pinned install hint, rc≠0, no launch via Available) both pass.
+  internal/safehouse/{safehouse.go,safehouse_test.go} (7 unit tests); TestClaudePluginGateShortCircuitsBeforeSafehouse + TestClaudeSafehousePresentButBinaryMissing green. Codex reuses Present+Available+Wrap unchanged.
+- DONE: Gates green with real captured exit codes; the 5 `frontdoor_test.go` call sites + cli.go:48 updated to runClaude's dir+lookPath-threaded arity (M1 blast radius), no regressions.
+  `go test ./...` 404 passed; `go test -race ./...` rc=0; `gofmt -l .` clean; `go vet ./...` clean. runClaude signature now `(ctx, args, dir, ops, lookPath, stdout, stderr)`; cli.go:48 passes `dir`+`exec.LookPath`. runCodex left untouched (codex launcher's scope).
+
+### Summary
+
+Built the shared `internal/safehouse` seam (Present/Available/Wrap, inner-argv-agnostic) and interposed it into tq's existing `runClaude`/`Launch` path: `.safehouse`-present launches wrap through `safehouse --trust-workdir-config -- claude --dangerously-skip-permissions …`, the no-safehouse path stays plain `claude` with no skip-permissions, and the captain-approved bootstrap prompt is appended last unless `--resume` is forwarded. Threaded `dir`+`lookPath` through `runClaude` (M1 blast radius: cli.go:48 + 5 existing test call sites). The codex resolver path was not touched.
+
+FLAG — AC-6 is CAPTAIN-RUN before the validation gate locks the canonical argv: run `safehouse --trust-workdir-config -- claude --dangerously-skip-permissions --agent spacedock:first-officer --help` OUTSIDE the sandbox (we run inside safehouse, so nested safehouse won't run here). Evidence script + salvaged argv-recording stub are at `docs/dev/_evidence/claude-safehouse-launcher/` in the worktree branch (`ac6-live-safehouse-smoke.sh`, `safehouse-argv-stub.sh`). If the observed flag surface differs, AC-1's expected argv in safehouse_frontdoor_test.go must be corrected before the gate locks it.
