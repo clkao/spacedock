@@ -149,3 +149,38 @@ Hardening + one fact-correction per the independent staff review and captain, di
 ### Summary
 
 Made `next` a complete, self-installable plugin: root marketplace.json (self-referential url+ref:next) + .codex-plugin/plugin.json, three ported+reconciled user skills (commission/debrief/refit) on the Go-binary command surface, carried mods/pr-merge.md, and release-pipeline version steps (AC-4 plugin.json stamp committed to next + AC-2d calendar bump). Wired devBranch=next so `spacedock init` targets `spacedock-dev/spacedock@next`. Fresh-add (AC-2a/2c) and the M-new displayed-version fix proven LIVE against the committed artifacts; AC-2b/3b left to task 38 per scope. Two findings for FO/captain: (1) `bin/status` STAYS — it is a python LIBRARY imported by `claude-team` (removing it broke dispatch tests; restored), not a dead command; (2) `execHost.codexEntryInstalled` greps `<id> (installed` (codex 0.132.0 paren form) but codex 0.135.0 renders a table without the paren, so `doctor --host codex` resolves nothing live — pre-existing resolver/codex-version drift, same root as the pre-existing TestCodexResolveManifestAgainstInstalledHost env failure, out of this entity's scope.
+
+## Stage Report: validation
+
+- DONE: Spot-check before live (build + both doctor --plugin-manifest + go test).
+  `go build` OK; `doctor --plugin-manifest .claude-plugin/plugin.json` and `.codex-plugin/plugin.json` both `OK: binary contract 1 satisfies plugin range >=1,<2` exit 0; full suite green except one env-gated test (below).
+- DONE: AC-1 — full 5-skill surface, integration excluded, reference-closure clean.
+  LIVE `claude --plugin-dir <worktree> plugin details spacedock` → `Skills (5) commission, debrief, ensign, first-officer, refit` + `Agents (2) first-officer, ensign`, integration ABSENT. Audit tests PASS (TestUserSkillsPresentWithFrontmatter / TestIntegrationIsTestOnlyAndExcluded / TestUserSkillReferenceClosureResolves / TestNoPluginPrivateStatusPathInUserSkills). No shipped .md carries `{spacedock_plugin_dir}` / `bin/status` / `.agents/plugins/marketplace.json` (only the test ban-list literals do).
+- DONE: AC-2a — Claude fresh-add → doctor exit 0.
+  Built local bare repo (worktree tree on `next`), test marketplace.json `source:"url"` (committed shape) → file:// bare; fresh isolated CLAUDE_CONFIG_DIR → `marketplace add` → `plugin install spacedock@spacedock` OK → `plugin list --json` shows it → `spacedock doctor --host claude` OK exit 0.
+- DONE: AC-2c — codex manifest + install (with finding).
+  Isolated CODEX_HOME, codex 0.135.0: `codex plugin marketplace add <checkout>` resolved committed marketplace.json; `codex plugin add spacedock@spacedock` (source repointed to bare repo) installed the COMMITTED tree — cache carries `.codex-plugin/plugin.json` + full 5 skills. Manifest+install CORRECT. BUT live `doctor --host codex` → "no installed plugin found" (exit 0): root-caused to `codexEntryInstalled` (host_exec.go:96-103) grepping `<id> (installed` while 0.135.0 renders a table line `spacedock@spacedock  installed, enabled  0.19.0 ...` (0 paren matches). PRE-EXISTING drift — impl did NOT touch the codex resolver (git diff de5bb44..HEAD on host_exec.go shows only marketplaceAddArg+Install). VERDICT: AC-2c MET (manifest correct, install works); the doctor-resolve drift is a separate pre-existing defect, recommend split-to-own-task (do NOT block n1).
+- DONE: AC-2d — calendar-version bump monotonic.
+  TestBumpCalendarVersionStrictlyIncreases + NewDayResetsSequence PASS; BumpCalendarVersion invoked as a real function (no literals). next-publish.yml runs it on push to next with a paths-ignore loop-guard on marketplace.json.
+- DONE: AC-3a — init @next argv + fresh-install green gate.
+  TestInitTargetsNextWhenDevBranchPinned + TestMarketplaceAddArgvCarriesRef PASS (`marketplaceAddArg("spacedock-dev/spacedock","next")=="spacedock-dev/spacedock@next"`); devBranch="next" default + goreleaser ldflag + SPACEDOCK_DEV_BRANCH override. LIVE: installed plugin exposes first-officer/ensign agents, doctor green w/o escape hatch.
+- DONE: AC-4 + M-new — plugin.json stamped to release + `plugin list --json` DISPLAYS it.
+  TestStampVersionRewritesPluginVersion + LeavesMarketplaceCalendarUntouched PASS. LIVE M-new: stamped both plugin.json to 0.19.0 via cmd/spacedock-release, pushed to bare next, fresh reinstall → `plugin list --json` version=`0.19.0` (was 0.1.0-dev); marketplace calendar key stayed `0.0.2026053101`. release.yml stamps+commits to next. Folded cleanup done (release.yml:39 = "homebrew_casks block can push the cask bump").
+- SKIPPED: AC-2b repoint-over-old + AC-3b upgrade-from-stale.
+  Correctly 38-DEFERRED (NOT failures): impl deliberately left execHost.Install's 2-command argv; task 38 owns the uninstall+reinstall 3-command shape. AC-3a argv test asserts the current 2-command shape per spec.
+- FAILED: none in-scope. One PRE-EXISTING env-gated test fails in this runner.
+  TestCodexResolveManifestAgainstInstalledHost (codex_resolve_test.go) hard-fails because the sandboxed test runner cannot read ~/.codex/config.toml (`Operation not permitted`); the test file is byte-identical at base de5bb44 (PRESENT at origin/next), so NOT introduced by this work. Same root as finding (2). The rest of `go test ./...` and `go test ./... -race` are green; gofmt clean.
+
+### Verdict: PASSED
+
+| AC | Method | Result |
+|----|--------|--------|
+| AC-1 (5-skill surface, integration excluded, closure) | live `plugin details` + audit tests | PASS — exactly 5 skills + 2 agents, integration absent, closure clean |
+| AC-2a (Claude fresh-add → doctor 0) | live isolated install + doctor | PASS — exit 0 |
+| AC-2c (codex manifest + install) | live isolated codex install + doctor | PASS (manifest+install); doctor-resolve blocked by PRE-EXISTING paren-vs-table drift → split-to-own-task, not a blocker |
+| AC-2d (calendar bump monotonic) | unit (bump fn ×2) + CI wiring | PASS |
+| AC-3a (init @next argv + green gate) | unit argv + live install | PASS |
+| AC-4 + M-new (stamp + displayed version) | unit + live stamp→reinstall→list | PASS — displays 0.19.0, calendar untouched |
+| AC-2b / AC-3b (repoint/upgrade-from-stale) | n/a | 38-DEFERRED (out of scope, not a failure) |
+
+All in-scope ACs verified with reproduced LIVE evidence against the committed artifacts. Two carried findings stand as documented (bin/status is a real python library; codex doctor-resolve drift). Recommend the codex `codexEntryInstalled` paren-vs-table drift (and the hard-failing-vs-skipping env-gated TestCodexResolveManifestAgainstInstalledHost) be split into its own task — pre-existing, not introduced here, and out of this entity's scope.
