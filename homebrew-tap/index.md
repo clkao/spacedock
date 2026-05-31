@@ -237,3 +237,16 @@ Hardened ideation for the binary-only Homebrew own-tap. The key design decision:
 ### Summary
 
 Authored the binary-only own-tap formula + tap README, staged under `dist/homebrew/` in the v1 repo (the `spacedock-dev/homebrew-tap` repo does not exist yet; captain/FO creates it). Formula uses the migrated release path `github.com/spacedock-dev/spacedock` (the go.mod module name; the ideation body's `clkao/spacedock-v1` predates the migration), per-platform url+sha256 placeholders for jf, `caveats` + README both carrying the safehouse runtime-dep hint (AC-3), and the full B↔C release contract recorded (AC-4). The pinned in-entity oracle — `brew audit --strict` exit 0 — could NOT run here: this sandbox blocks all writes to the read-only `/opt/homebrew` prefix, so brew aborts at vendored-gem bootstrap before evaluating the formula. I refused to fabricate a pass. AC-1's audit is flagged for a captain-run step (exact command in the FAILED line), and is additionally gated on jf cutting a release with real urls + checksums (the all-zero placeholder sha256 will legitimately fail audit until then). `ruby -c` confirms the formula is syntactically valid.
+
+## Stage Report: implementation (cycle 2)
+
+- DONE: Captain version bump to 0.19.0.
+  `version "0.19.0"` (commit 31fd552); single `version` line propagates via `#{version}` to both urls → `.../v0.19.0/spacedock_0.19.0_darwin_{arm64,amd64}.tar.gz`; README contract example bumped to match; `ruby -c` Syntax OK. Url naming kept underscore form per jf's actual goreleaser `name_template` (the loose dash example in the bump request is superseded by jf's config, which is the source of truth).
+- DONE: Cross-checked formula against jf's committed `.goreleaser.yaml` (release-pipeline worktree) — B↔C contract verified, not assumed.
+  jf's `archives.name_template "{{.ProjectName}}_{{.Version}}_{{.Os}}_{{.Arch}}"` + `wrap_in_directory: false` + ldflags `-X github.com/spacedock-dev/spacedock/internal/cli.Version={{.Version}}` all agree with my formula's urls, `bin.install "spacedock"`, and version-stamp seam. desc string matches jf's `brews.description` verbatim.
+- FAILED: AC-3 link survives jf's generated formula.
+  jf's `brews.caveats` block GENERATES the released formula's caveats and DROPS the safehouse docs link (it ends at "...before first launch." with no URL). My staged formula + README carry the link as AC-3 requires, but the per-release goreleaser-generated formula would overwrite mine without it. Flagged to jf so `brews.caveats` keeps the safehouse docs link; otherwise released formulas silently lose AC-3's link.
+
+### Summary (cycle 2)
+
+Bumped the formula to the captain's 0.19.0 and verified the B↔C contract against jf's actual `.goreleaser.yaml` rather than the ideation prose — name_template, wrap_in_directory, ldflags target, and desc all agree. One divergence surfaced for jf: goreleaser's `brews:` block regenerates the formula on each release and its `caveats` drops the safehouse docs link, which would violate AC-3 on released formulas; flagged to jf to add the link to `brews.caveats`. The `brew audit --strict` oracle is still captain-gated (sandbox blocks `/opt/homebrew`) and the bump does not affect that version-neutral structural audit.
