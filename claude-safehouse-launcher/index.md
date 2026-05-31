@@ -1,7 +1,7 @@
 ---
 id: e72ambzmkkt3hp1whpz2tczr
 title: spacedock claude — safehouse launcher (replace the manual invocation)
-status: implementation
+status: validation
 source: sprint — Ship the Launcher slice A (captain, 2026-05-30); harvested from superseded ~/git/spacedock launcher plan 9bt646cz0h4q79g98qz68k9d
 started: 2026-05-30T23:45:55Z
 completed:
