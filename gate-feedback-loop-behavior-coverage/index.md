@@ -196,3 +196,16 @@ they stay live-pytest/out-of-scope, consistent with row-15's framing. AC-1/AC-2 
 behavior-first with the anchored `### Feedback from prior review` form and two named negatives
 (dropped routed payload; Rule 5 missing-context guard), and the test plan extends the shipped
 `internal/ensigncycle` skeleton at the same fixture-only, no-live-LLM altitude.
+
+## Stage Report: implementation
+
+- DONE: Ship `TestFeedbackReflowRoutesFixRequest` in internal/ensigncycle per the Test plan: a real in-process `dispatch.Run` reflow build (is_feedback_reflow=true, concrete feedback_context) dispatched to the gate stage's feedback-to target, asserting the anchored `(?m)^### Feedback from prior review$` routing section + the routed payload present verbatim + a contrast that a plain (non-reflow) dispatch to the SAME target does NOT emit the routing section.
+  internal/ensigncycle/feedback_test.go: real dispatch.Run build to the `validation → feedback-to: implementation` target; asserts anchored routing section, verbatim routed payload, and non-reflow contrast. Commit 1840a01.
+- DONE: Ship `TestFeedbackReflowGoesRedOnBrokenOutput` with BOTH named negatives as in-test guards: NEG-A (strip the routed feedback_context from the real body → context-presence assertion goes RED) and NEG-B (reflow build with EMPTY feedback_context → dispatch.Run Rule 5 exits non-zero with an anchored stderr match of `dispatching to feedback target stage '{stage}' but feedback_context is missing`).
+  NEG-A strips routedFeedback from the real reflow body and proves the context-presence check fails (heading survives, so the context assertion is the guard); NEG-B drives an empty-feedback_context reflow and asserts non-zero exit + anchored Rule 5 stderr. Both verified RED on real build.go mutations (section-6 emission dropped; Rule 5 disabled), then build.go restored pristine (git diff empty).
+- DONE: Gates green with REAL captured exit codes ($?, never | tail): `go test ./...`, `go test -race ./internal/ensigncycle/`, `gofmt -l` (empty), `go vet` — all from inside the worktree.
+  -race ./internal/ensigncycle/ → 8 passed exit 0; gofmt -l . → empty exit 0; go vet ./... → no issues exit 0. `go test ./...` exit 1 only on `TestCodexResolveManifestAgainstInstalledHost` — confirmed PRE-EXISTING on the stashed-clean baseline (host `codex` CLI config-load failure, package internal/cli, untouched by this test-only change).
+
+### Summary
+
+Shipped the gate/feedback rejection-reflow behavioral coverage (matrix row 15) as two tests in internal/ensigncycle, no production code changes. The seam is the real in-process dispatch.Run reflow build (build.go:225 Rule 5 guard + build.go:343 section-6 routing emission): added a README fixture with a worktree gate stage declaring `feedback-to: implementation` and an entity stamped at the gate stage with a worktree value, mirroring internal/dispatch's readmeWorktree. Both negatives are real guards — verified each goes RED on the matching production mutation and confirmed build.go restored pristine. Extracted readDispatchBodyFromStdout to de-duplicate the build-stdout→body parse shared with stageFixture. The lone `go test ./...` failure is a pre-existing environmental codex-host test, not regressed by this change.
