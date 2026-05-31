@@ -30,7 +30,9 @@ Make `spacedock codex` launch a Codex session through safehouse, with the first 
 
 **AC-2 — FO skill invocation.** the emitted codex prompt/mechanism selects `spacedock:first-officer` (observe the prompt token or config the launcher emits).
 
-**AC-3 — missing codex plugin → clear error, rc≠0, no launch.**
+**AC-3 — missing codex plugin → clear error, rc≠0, no launch.** Plugin-gate short-circuits before any safehouse logic.
+
+**AC-3b (captain RATIFIED option (b)) — no-`.safehouse` path.** With no `.safehouse` profile, `spacedock codex` launches plain `codex <fo-prompt>` keeping codex's own sandbox, with NO `--dangerously-bypass-approvals-and-sandbox` (bypass is safehouse-path-only); the FO-skill token is still present.
 
 **AC-4 (captain-run) — live codex smoke** through safehouse yields a working FO session outside the sandbox.
 
@@ -74,18 +76,17 @@ Outer wrap REUSES the merged `internal/safehouse` seam unchanged:
 When `.safehouse` present → `safehouse.Present(dir)` true → gate on `safehouse.Available(lookPath)` →
 `safehouse.Wrap(inner, nil)`. Same dir+lookPath threading as runClaude.
 
-**No-`.safehouse` behavior — DECISION (closes the open question).** Codex self-sandboxes by default.
-The bypass flag is ONLY safe when safehouse provides the sandbox. So when `.safehouse` is ABSENT,
-`spacedock codex` MUST NOT emit `--dangerously-bypass-approvals-and-sandbox` into an unsandboxed
-launch (that would run codex with no sandbox AND no safehouse — the worst case). Two coherent options
-for the no-safehouse path; recommend (a):
-  (a) RECOMMENDED — require `.safehouse`: with no profile, refuse to launch with an actionable error
-      ("`spacedock codex` runs codex under safehouse; this directory has no .safehouse profile").
-      Asymmetric with claude (which has a plain fallback) BECAUSE codex's built-in sandbox is the
-      thing being bypassed — there is no safe unsandboxed codex launch that also bypasses approvals.
-  (b) plain `codex <fo-prompt>` with NO bypass flag (codex keeps its own sandbox). Rejected lean:
-      mixes two sandbox models and the FO/dispatch flow assumes the safehouse-as-sandbox contract.
-Captain to ratify (a) vs (b) at AC-4 smoke; implementation defaults to (a) unless told otherwise.
+**No-`.safehouse` behavior — DECISION (captain RATIFIED option (b)).** Codex self-sandboxes by
+default. The bypass flag is ONLY safe when safehouse provides the sandbox, so when `.safehouse` is
+ABSENT, `spacedock codex` MUST NOT emit `--dangerously-bypass-approvals-and-sandbox`. The captain
+ratified option (b): launch plain `codex <fo-prompt>` keeping codex's OWN sandbox (the bypass flag is
+safehouse-path-only). The FO-skill prompt is still appended. The two options weighed at ideation:
+  (a) require `.safehouse`: refuse to launch with no profile (ideation recommended this).
+  (b) RATIFIED — plain `codex <fo-prompt>` with NO bypass flag (codex keeps its own sandbox). The
+      captain chose (b) over the ideation recommendation: codex's built-in sandbox is a safe default
+      for the unsandboxed path, so refusing to launch is unnecessary.
+Implementation: bypass flag is emitted only when `.safehouse` is present; the no-safehouse path is a
+plain `codex <fo-prompt>` launch with the FO-skill prompt appended.
 
 ### Reuse boundary (AC-1) — confirmed against MERGED main
 
@@ -157,3 +158,20 @@ then the resolver-branch unit tests + the semver fix.
 ### Summary
 
 Hardened the codex launcher from prose-only into a safehouse-wrapped LAUNCH path that mirrors runClaude, superseding the shipped `spacedock-packaging` scoping. The load-bearing resolution: codex has no agent/skill select flag, so the FO is reached via the positional prompt token naming `spacedock:first-officer` (parallel to claude's bootstrapPrompt). Closed the open question with a decision — no `.safehouse` should refuse to launch, since `--dangerously-bypass-approvals-and-sandbox` is only safe when safehouse provides the sandbox (captain to ratify at the AC-4 smoke). No production code written; the two carried resolver-polish items are folded into implementation scope with a TDD-first note.
+
+## Stage Report: implementation
+
+- DONE: `.safehouse`-present codex launch argv (recorded-Launch oracle): `safehouse --trust-workdir-config -- codex --dangerously-bypass-approvals-and-sandbox <fo-prompt>` where <fo-prompt> contains the literal `spacedock:first-officer` skill-name token; reuses the merged internal/safehouse Present/Available/Wrap with the same dir+lookPath threading as runClaude.
+  frontdoor.go runCodex now mirrors runClaude (dir/lookPath/stdout/stderr params); TestCodexSafehousePresentWrapsArgv + TestCodexSafehousePromptNamesFirstOfficerSkill green (commit b91ac0f).
+- DONE: No-`.safehouse` path = captain option (b): plain `codex <fo-prompt>` with NO `--dangerously-bypass-approvals-and-sandbox` (bypass is safehouse-path-only), FO-skill token still present; the archived prose-only runCodex + TestCodexFrontDoorVersionGateThenProse (asserts NO launch) are REPLACED; plugin-gate short-circuits before safehouse logic (AC-3 analog).
+  bypass flag emitted only when safehouse.Present(dir); TestCodexNoSafehouseLaunchesPlainNoBypass + TestCodexPluginGateShortCircuitsBeforeSafehouse green; prose-only test replaced by TestCodexFrontDoorLaunchesOnCompatible. Entity DECISION + AC updated (a)->(b).
+- DONE: Fold the carried codex-resolver polish: host_exec.go `latestVersionDir` lexical→semver fix + unit tests for the codex resolver cache-path/degradation branches. Gates green with REAL captured exit codes (go test ./..., -race, gofmt -l, go vet).
+  compareVersion (self-contained, no new dep) so 0.10.0 > 0.9.0; codex_resolver_unit_test.go covers latestVersionDir/codexEntryInstalled/codexHome + absent/no-subdir degradation. go test ./... 427 passed; -race 427 passed; gofmt -l clean; go vet clean.
+
+### Summary
+
+`spacedock codex` is now a safehouse-wrapped LAUNCH path mirroring runClaude, replacing the prose-only front door. Codex has no `--agent`, so the FO is reached via a positional bootstrap prompt naming the `spacedock:first-officer` skill. Captain ratified no-`.safehouse` option (b): plain `codex <fo-prompt>` keeping codex's own sandbox with NO bypass flag (bypass is safehouse-path-only) — the entity DECISION/AC were updated from the ideation's (a) recommendation. Folded both carried resolver-polish items (latestVersionDir lexical→semver + resolver-branch unit tests). AC-4 live smoke is captain-run outside the sandbox: exact command + evidence script at docs/dev/_evidence/codex-safehouse-launcher/ (FLAGGED below).
+
+**AC-4 CAPTAIN ACTION REQUIRED (before the validation gate):** run, OUTSIDE the sandbox, in a dir WITH `.safehouse` and the spacedock plugin installed in codex:
+    spacedock codex
+Expected exec argv: `safehouse --trust-workdir-config -- codex --dangerously-bypass-approvals-and-sandbox "Invoke the spacedock:first-officer skill: run your startup sequence and work the event loop."`. Confirm: (1) codex banner shows `sandbox: danger-full-access` + `approval: never`; (2) the FO skill is invoked and startup begins; (3) FO can run `spacedock status` inside the safehouse sandbox. Evidence harness: docs/dev/_evidence/codex-safehouse-launcher/ac4-live-codex-smoke.sh (Part A is a non-hanging argv check; Part B is the interactive launch).
