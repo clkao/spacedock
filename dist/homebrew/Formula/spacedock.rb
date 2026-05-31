@@ -1,7 +1,7 @@
 class Spacedock < Formula
   desc "Workflow launcher and first-officer dispatch for agentic dev"
   homepage "https://github.com/spacedock-dev/spacedock"
-  version "0.1.0"
+  version "0.19.0"
   license "Apache-2.0"
 
   on_macos do

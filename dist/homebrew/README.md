@@ -45,7 +45,7 @@ The formula and the release pipeline must agree on three things:
    `https://github.com/spacedock-dev/spacedock/releases/download/v{version}/spacedock_{version}_darwin_{arch}.tar.gz`
    with `{arch}` ∈ {`arm64`, `amd64`}. goreleaser's default name template
    `{{.ProjectName}}_{{.Version}}_{{.Os}}_{{.Arch}}` produces exactly this
-   (`spacedock_0.1.0_darwin_arm64`); pin `name_template` to that shape.
+   (`spacedock_0.19.0_darwin_arm64`); pin `name_template` to that shape.
 2. **Checksum injection point.** Per-asset sha256 written into the formula's
    `on_arm`/`on_intel` `sha256` lines on each release. The committed skeleton
    ships an all-zero placeholder so an unfilled formula is detectably wrong, not
