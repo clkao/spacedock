@@ -1,9 +1,9 @@
 ---
 id: z0epv5b79qcs83w24acd1fnd
 title: CLI redesign — cobra migration, install rename, Option-2 passthrough, jargon-free grouped help
-status: backlog
+status: ideation
 source: captain brainstorm (2026-05-31) — `spacedock --help` readability; design APPROVED via superpowers:brainstorming
-started:
+started: 2026-05-31T22:25:41Z
 completed:
 verdict:
 score: "0.34"
