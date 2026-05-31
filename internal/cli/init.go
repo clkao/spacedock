@@ -13,7 +13,7 @@ import (
 // marketplaceSource is the marketplace add source for the Spacedock plugin. The
 // default release path resolves the published marketplace repo; a pre-release
 // dev branch is pinned via devBranch in the emitted/issued commands.
-const marketplaceSource = "clkao/spacedock"
+const marketplaceSource = "spacedock-dev/spacedock"
 
 // runInit installs/updates the per-host plugin (claude) or emits the documented
 // add command pair (codex), then runs doctor. `--check` runs the report without
