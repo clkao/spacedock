@@ -1,13 +1,13 @@
 ---
 id: 5an0s2dqb0nh18n7nn6x07vx
 title: Land launcher on next + document the fresh-install user journey
-status: ideation
+status: implementation
 source: sprint — Ship the Launcher slice D (captain, 2026-05-30)
 started: 2026-05-31T03:20:03Z
 completed:
 verdict:
 score: "0.26"
-worktree:
+worktree: /Users/clkao/git/spacedock-research/spacedock-v1/.worktrees/spacedock-ensign-fresh-install-journey
 issue:
 ---
 
