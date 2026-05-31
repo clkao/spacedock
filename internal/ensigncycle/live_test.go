@@ -15,22 +15,27 @@ import (
 )
 
 // This is the live analog of TestEnsignCycleMechanicalOutputs (cycle_test.go).
-// Where the skeleton stubs the LLM with a scripted Go ensign, this test shells
-// the v1 binary's REAL front door so an actual model drives the
-// dispatch->ensign->stage protocol end to end, then asserts the SAME anchored
-// on-disk mechanical outputs the skeleton pins (stageReportHeading, doneMarker,
-// `### Summary`, NOT checkboxBullet, commitNameOnly == [the entity]). Only the
-// producer changes (real runtime vs scripted ensign); the assertion vocabulary
-// is reused verbatim from the skeleton's package-level regexes/helpers.
+// Where the skeleton stubs the LLM with a scripted Go ensign that works ONE stage
+// in place, this test shells the v1 binary's REAL front door so an actual model
+// drives the whole dispatch->ensign->stage protocol all the way to the terminal
+// `done` stage. A real full-cycle FO makes MULTIPLE commits and ARCHIVES the
+// terminal entity to `_archive/`, so the assertions target the REAL
+// completed-and-archived end-state: the entity (located in place OR under
+// `_archive/`) carries the skeleton's anchored stage-report shape
+// (stageReportHeading, doneMarker, `### Summary`, NOT checkboxBullet) AND the
+// FO's terminal frontmatter (`status: done`, `verdict: passed`), and SOME commit
+// in the history is path-scoped to the entity. The stage-report regexes are
+// reused verbatim from the skeleton; the producer is the real runtime.
 //
 // The `//go:build live` tag keeps this out of the default `go test ./...` suite
 // (the secret-free offline job). It compiles and runs ONLY under
 // `go test -tags live`, the gated job's invocation that spends the live
 // credential behind the CI-E2E approval gate.
 
-// liveTimeout caps the single live dispatch->cycle run. A haiku/low run of one
-// flat-entity backlog stage is well inside this; the cap turns a hung model run
-// into a red FAIL with output rather than a silent CI hang.
+// liveTimeout caps the single live dispatch->cycle run. A sonnet/opus run driving
+// the flat entity to the terminal stage is well inside this (the FO live runs
+// landed at ~350s); the cap turns a hung model run into a red FAIL with output
+// rather than a silent CI hang.
 const liveTimeout = 12 * time.Minute
 
 // TestLiveEnsignCycle stages the skeleton's flat-entity backlog fixture, shells
@@ -48,7 +53,7 @@ const liveTimeout = 12 * time.Minute
 func TestLiveEnsignCycle(t *testing.T) {
 	binary := spacedockBinary(t)
 	repoRoot := repoRoot(t)
-	model := envOr("SPACEDOCK_LIVE_MODEL", "haiku")
+	model := envOr("SPACEDOCK_LIVE_MODEL", "sonnet")
 
 	// Resolve the isolated child env (clean HOME + the authoritative credential)
 	// or skip when no auth mechanism is available. The empty home argument means
@@ -103,13 +108,20 @@ func TestLiveEnsignCycle(t *testing.T) {
 		t.Fatalf("spacedock claude failed: %v", err)
 	}
 
-	// Read back the fixture entity + git log and run the SAME anchored assertions
-	// the skeleton uses. The real cycle must have produced the protocol-shaped
-	// stage report and a path-scoped commit naming only the entity.
-	entity := readFile(t, entityPath)
+	// Locate the entity at the REAL completed-cycle end-state. A full FO-to-done
+	// cycle ARCHIVES the terminal entity: the flat `make-it-work.md` moves to
+	// `_archive/make-it-work.md`. locateEntity searches the original path AND both
+	// archive spellings; a missing entity everywhere is a hard FAIL (the cycle
+	// neither completed nor left the entity in place).
+	entity, where, found := locateEntity(root, "make-it-work")
+	if !found {
+		t.Fatalf("entity make-it-work not found in place or under _archive/ after the cycle")
+	}
+	t.Logf("located entity at %s", where)
 
 	// (a) the appended stage-report section has the protocol shape: heading, a
-	// DONE accounting marker, a Summary, and NO checkbox-bullet form.
+	// DONE accounting marker, a Summary, and NO checkbox-bullet form. An
+	// INCOMPLETE cycle (the haiku run) appends no stage report, so these go red.
 	if !stageReportHeading.MatchString(entity) {
 		t.Errorf("entity missing anchored stage-report heading\n%s", entity)
 	}
@@ -123,11 +135,27 @@ func TestLiveEnsignCycle(t *testing.T) {
 		t.Errorf("entity contains forbidden checkbox-bullet stage-report markers\n%s", entity)
 	}
 
-	// (b) a commit landed and named ONLY the entity (path-scoped, no sibling
-	// sweep) — the concurrency-safe state-commit invariant at the cycle level.
-	named := commitNameOnly(t, root)
-	if len(named) != 1 || filepath.Base(named[0]) != "make-it-work.md" {
-		t.Errorf("HEAD commit must name only the entity; named=%v", named)
+	// (b) the FO finalized the cycle: the entity carries the terminal frontmatter
+	// `status: done` and `verdict: passed`. The value match is case-insensitive
+	// (the fixture workflow does not pin the verdict casing — `PASSED` and
+	// `passed` both mean accepted). An incomplete cycle never reaches the terminal
+	// stage, so these go red.
+	if !frontmatterField.MatchString(entity) {
+		t.Errorf("entity missing terminal `status: done`\n%s", entity)
+	}
+	if !verdictPassed.MatchString(entity) {
+		t.Errorf("entity missing finalized `verdict: passed`\n%s", entity)
+	}
+
+	// (c) SOME commit in the history is path-scoped to the entity (names only the
+	// entity), the concurrency-safe state-commit invariant at the cycle level.
+	// HEAD itself is the FO's archive/finalize commit on a full cycle, so this
+	// scans the whole log rather than pinning HEAD (the strict single-file HEAD
+	// invariant is pinned deterministically by the skeleton's
+	// TestEnsignCycleMechanicalOutputs). The haiku incomplete cycle's only
+	// entity-touching commit swept a sibling, so this goes red on it.
+	if !someCommitNamesOnly(t, root, "make-it-work") {
+		t.Errorf("no path-scoped commit named only the entity in the cycle history")
 	}
 }
 

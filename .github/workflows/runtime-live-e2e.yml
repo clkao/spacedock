@@ -7,10 +7,12 @@
 #
 # The offline job carries NO environment and NO secret: it builds + runs the
 # default Go suite (the live-tagged test compiles out) as the secret-free gate.
-# Only the claude-live job declares `environment: CI-E2E` (a required-reviewer
-# approval gate, reviewer = clkao) and reads ANTHROPIC_API_KEY. Every run pauses
-# the claude-live job in `waiting` until a maintainer approves the deployment, so
-# the live model dispatch that spends API budget cannot start unapproved.
+# Only the live job declares an `environment:` (a required-reviewer approval gate,
+# reviewer = clkao) and reads ANTHROPIC_API_KEY. The live job is a matrix over two
+# variants — sonnet (the Python-land floor) on CI-E2E and claude-opus-4-8 on
+# CI-E2E-OPUS — each its own separately-approved deployment. Every variant pauses
+# in `waiting` until a maintainer approves its environment, so the live model
+# dispatch that spends API budget cannot start unapproved.
 
 name: Runtime Live E2E
 
@@ -22,11 +24,6 @@ on:
         required: false
         type: string
         default: ""
-      model:
-        description: "Model passed to the live cycle (sonnet, opus, haiku). Default haiku — cheapest live proof."
-        required: false
-        type: string
-        default: "haiku"
       effort:
         description: "Effort hint for the live run (low, high, xhigh). Default low."
         required: false
@@ -55,11 +52,24 @@ jobs:
       - name: Run offline test suite
         run: go test ./...
 
+  # Live job: a matrix over two separately-approved variants. sonnet is the
+  # Python-land floor (CI-E2E); claude-opus-4-8 is the upper tier (CI-E2E-OPUS).
+  # Each leg pins its own model and its own approval-gated environment, so each
+  # spends ANTHROPIC_API_KEY only after a maintainer approves THAT deployment.
+  # fail-fast is off so one model's red does not cancel the other's run.
   claude-live:
     needs: offline
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - model: sonnet
+            environment: CI-E2E
+          - model: claude-opus-4-8
+            environment: CI-E2E-OPUS
     environment:
-      name: CI-E2E
+      name: ${{ matrix.environment }}
     env:
       DISABLE_AUTOUPDATER: "1"
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -113,12 +123,12 @@ jobs:
           echo "### Tool versions" >> "$GITHUB_STEP_SUMMARY"
           echo "- \`claude --version\`: \`$(claude --version)\`" >> "$GITHUB_STEP_SUMMARY"
           echo "- \`go version\`: \`$(go version)\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Model: \`${{ inputs.model }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Model: \`${{ matrix.model }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "- Effort: \`${{ inputs.effort }}\`" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Run live ensign cycle
         env:
-          SPACEDOCK_LIVE_MODEL: ${{ inputs.model }}
+          SPACEDOCK_LIVE_MODEL: ${{ matrix.model }}
         run: |
           go test -tags live -run TestLiveEnsignCycle ./internal/ensigncycle/ -v
 
@@ -126,7 +136,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: runtime-live-e2e-claude-live
+          name: runtime-live-e2e-claude-live-${{ matrix.model }}
           path: |
             ./spacedock
           if-no-files-found: warn
