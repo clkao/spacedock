@@ -49,7 +49,7 @@ func run(ctx context.Context, args []string, env []string, dir string, stdin io.
 		return runClaude(ctx, args[1:], dir, execHost{}, exec.LookPath, stdout, stderr)
 	case "codex":
 		devBranch = envValue(env, "SPACEDOCK_DEV_BRANCH")
-		return runCodex(ctx, args[1:], execHost{}, stdout, stderr)
+		return runCodex(ctx, args[1:], dir, execHost{}, exec.LookPath, stdout, stderr)
 	case "init":
 		devBranch = envValue(env, "SPACEDOCK_DEV_BRANCH")
 		return runInit(ctx, args[1:], execHost{}, stdout, stderr)
@@ -110,7 +110,7 @@ func printUsage(w io.Writer) {
 
 Usage:
   spacedock claude [args...]                          version-gate then launch claude --agent spacedock:first-officer
-  spacedock codex [args...]                           version-gate then print the documented Codex launch prose
+  spacedock codex [args...]                           version-gate then launch codex with the spacedock:first-officer skill
   spacedock init [--host claude|codex] [--check]      install the per-host plugin, then run doctor
   spacedock doctor [--host claude|codex] [--plugin-manifest PATH]
   spacedock status [args...]

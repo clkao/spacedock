@@ -154,36 +154,40 @@ func TestClaudeFrontDoorSkipContractCheckBootstrap(t *testing.T) {
 	}
 }
 
-// TestCodexFrontDoorVersionGateThenProse: codex is version-gate + documented
-// prose only — NO --agent launch. On compatible it emits the documented
-// first-officer-skill prose and does not invoke a launch seam.
-func TestCodexFrontDoorVersionGateThenProse(t *testing.T) {
+// TestCodexFrontDoorLaunchesOnCompatible: on a compatible contract the codex
+// front door invokes the launch seam with argv beginning `codex
+// --dangerously-bypass-approvals-and-sandbox` (under .safehouse) and passes
+// through the operator's trailing args before the FO-skill prompt.
+func TestCodexFrontDoorLaunchesOnCompatible(t *testing.T) {
+	dir := safehouseFixtureDir(t)
 	fake := &fakeHost{manifest: compatibleManifest(t)}
 	var stdout, stderr bytes.Buffer
 
-	code := runCodex(context.Background(), nil, fake, &stdout, &stderr)
+	code := runCodex(context.Background(), []string{"--", "-m", "gpt-x"}, dir, fake, lookFound, &stdout, &stderr)
 
 	if code != 0 {
 		t.Fatalf("exit = %d, want 0 (stderr=%q)", code, stderr.String())
 	}
-	if fake.launchedArg != nil {
-		t.Fatalf("codex front door must not invoke an agent-launch seam: %v", fake.launchedArg)
-	}
-	if !strings.Contains(stdout.String(), "spacedock:first-officer") {
-		t.Fatalf("codex prose missing the first-officer skill instruction: %q", stdout.String())
+	want := []string{"safehouse", "--trust-workdir-config", "--",
+		"codex", "--dangerously-bypass-approvals-and-sandbox", "-m", "gpt-x", wantCodexBootstrapPrompt}
+	if !equalArgv(fake.launchedArg, want) {
+		t.Fatalf("launch argv = %v, want %v", fake.launchedArg, want)
 	}
 }
 
-// TestCodexFrontDoorFailFastOnMismatch: codex still fails fast on a mismatch
-// verdict with the pinned remedy.
+// TestCodexFrontDoorFailFastOnMismatch: codex fails fast on a mismatch verdict
+// with the pinned remedy and does NOT launch.
 func TestCodexFrontDoorFailFastOnMismatch(t *testing.T) {
 	fake := &fakeHost{manifest: tooOldBinaryManifest(t)}
 	var stdout, stderr bytes.Buffer
 
-	code := runCodex(context.Background(), nil, fake, &stdout, &stderr)
+	code := runCodex(context.Background(), nil, t.TempDir(), fake, lookFound, &stdout, &stderr)
 
 	if code == 0 {
 		t.Fatalf("exit = 0, want non-zero on mismatch")
+	}
+	if fake.launchedArg != nil {
+		t.Fatalf("launch seam invoked on mismatch: %v", fake.launchedArg)
 	}
 	if !strings.Contains(stderr.String(), "too-old-binary") {
 		t.Fatalf("stderr missing pinned remedy: %q", stderr.String())

@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 )
@@ -114,10 +115,11 @@ func codexHome() string {
 	return filepath.Join(home, ".codex")
 }
 
-// latestVersionDir returns the lexically-greatest immediate subdirectory of root
+// latestVersionDir returns the semver-greatest immediate subdirectory of root
 // (the installed plugin's version dir). Returns "" (no error) when root is absent
 // or has no subdirectories. Codex installs a single version, but a stale cache
-// may hold several; the greatest name is the most recent install.
+// may hold several; a semver compare picks the most recent install — a lexical
+// compare would wrongly order `0.10.0` before `0.9.0`.
 func latestVersionDir(root string) (string, error) {
 	entries, err := os.ReadDir(root)
 	if err != nil {
@@ -128,7 +130,7 @@ func latestVersionDir(root string) (string, error) {
 	}
 	latest := ""
 	for _, e := range entries {
-		if e.IsDir() && e.Name() > latest {
+		if e.IsDir() && (latest == "" || compareVersion(e.Name(), latest) > 0) {
 			latest = e.Name()
 		}
 	}
@@ -136,6 +138,41 @@ func latestVersionDir(root string) (string, error) {
 		return "", nil
 	}
 	return filepath.Join(root, latest), nil
+}
+
+// compareVersion orders dotted plugin version names (e.g. `0.12.1`) numerically
+// per component, so `0.10.0` sorts after `0.9.0`. It returns -1, 0, or 1. A
+// component that does not parse as an integer falls back to a lexical compare of
+// that component, so non-numeric names still order deterministically.
+func compareVersion(a, b string) int {
+	as, bs := strings.Split(a, "."), strings.Split(b, ".")
+	for i := 0; i < len(as) || i < len(bs); i++ {
+		var av, bv string
+		if i < len(as) {
+			av = as[i]
+		}
+		if i < len(bs) {
+			bv = bs[i]
+		}
+		an, aerr := strconv.Atoi(av)
+		bn, berr := strconv.Atoi(bv)
+		if aerr == nil && berr == nil {
+			if an != bn {
+				if an < bn {
+					return -1
+				}
+				return 1
+			}
+			continue
+		}
+		if av != bv {
+			if av < bv {
+				return -1
+			}
+			return 1
+		}
+	}
+	return 0
 }
 
 // manifestSubpath returns the per-host manifest location under an install root.
