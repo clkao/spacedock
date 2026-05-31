@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/clkao/spacedock-v1/internal/contract"
+	"github.com/spacedock-dev/spacedock/internal/contract"
 )
 
 // marketplaceSource is the marketplace add source for the Spacedock plugin. The

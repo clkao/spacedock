@@ -9,9 +9,9 @@ import (
 	"os"
 	"os/exec"
 
-	"github.com/clkao/spacedock-v1/internal/contract"
-	"github.com/clkao/spacedock-v1/internal/dispatch"
-	"github.com/clkao/spacedock-v1/internal/status"
+	"github.com/spacedock-dev/spacedock/internal/contract"
+	"github.com/spacedock-dev/spacedock/internal/dispatch"
+	"github.com/spacedock-dev/spacedock/internal/status"
 )
 
 const Version = "0.1.0-dev"

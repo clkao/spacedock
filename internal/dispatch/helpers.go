@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/clkao/spacedock-v1/internal/status"
+	"github.com/spacedock-dev/spacedock/internal/status"
 )
 
 // teamEvidenceWindow is the lookback for the bare-mode TeamCreate-evidence probe.

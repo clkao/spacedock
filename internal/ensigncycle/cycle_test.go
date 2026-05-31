@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/clkao/spacedock-v1/internal/dispatch"
+	"github.com/spacedock-dev/spacedock/internal/dispatch"
 )
 
 // The cycle exercises the deterministic seams on both sides of the LLM: the

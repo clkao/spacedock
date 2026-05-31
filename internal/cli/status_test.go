@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/clkao/spacedock-v1/internal/status"
+	"github.com/spacedock-dev/spacedock/internal/status"
 )
 
 // fakeRunner records the request it received and returns a canned result. It

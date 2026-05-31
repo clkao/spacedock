@@ -8,8 +8,8 @@ import (
 	"io"
 	"strings"
 
-	"github.com/clkao/spacedock-v1/internal/contract"
-	"github.com/clkao/spacedock-v1/internal/safehouse"
+	"github.com/spacedock-dev/spacedock/internal/contract"
+	"github.com/spacedock-dev/spacedock/internal/safehouse"
 )
 
 // bootstrapPrompt is the fixed launch-and-go message appended as the last inner

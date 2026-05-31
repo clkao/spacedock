@@ -156,7 +156,7 @@ func tooOldBinaryRemedy(c int, rangeStr, branch string) string {
 	}
 	return fmt.Sprintf(
 		"too-old-binary: your spacedock binary (contract %d) predates this plugin (needs %s). "+
-			"Rebuild/upgrade spacedock: go install github.com/clkao/spacedock-v1/cmd/spacedock%s "+
+			"Rebuild/upgrade spacedock: go install github.com/spacedock-dev/spacedock/cmd/spacedock%s "+
 			"(or pull and 'go build').",
 		c, rangeStr, suffix)
 }

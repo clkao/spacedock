@@ -29,7 +29,7 @@ func spacedockBinary(t *testing.T) string {
 			return
 		}
 		bin := filepath.Join(dir, "spacedock")
-		cmd := exec.Command("go", "build", "-o", bin, "github.com/clkao/spacedock-v1/cmd/spacedock")
+		cmd := exec.Command("go", "build", "-o", bin, "github.com/spacedock-dev/spacedock/cmd/spacedock")
 		if out, err := cmd.CombinedOutput(); err != nil {
 			launcherErr = err
 			t.Logf("go build spacedock failed:\n%s", out)
