@@ -1,7 +1,7 @@
 ---
 id: k69e2gcvykjrc5354ty7kt3g
 title: Dispatch — inject split-root state-commit guidance for non-worktree (ideation) stages
-status: implementation
+status: validation
 source: FO dogfooding friction #1 (2026-05-31); root-caused build.go:302 worktree-gating
 started: 2026-05-31T18:40:08Z
 completed:
