@@ -150,3 +150,19 @@ GAPS the ps reveals (NOT yet covered — the remaining "replace all custom launc
 5. **add-dirs multiplicity.** Captain uses MANY `--add-dirs` per launch — `--safehouse-add-dirs=` must translate to repeated `--add-dirs` (or safehouse's multi-path form).
 6. **No-`--agent` claude lines (2,4) are NON-spacedock** (plain claude for other repos) — OUT of scope for `spacedock claude`.
 Disposition: fold these into a comprehensive launch-parity entity (expand 2y sandbox-flag-passthrough, or a sibling). The prompt-override UX is the one open design decision.
+
+## Recalibrated sprint goal (captain, 2026-05-31, authoritative)
+1. **Replace my custom launcher** — `spacedock claude/codex` replace the hand-typed safehouse invocations (launch-parity 2y, in implementation; fence convention for the task).
+2. **Install path off `next`** — fresh install works from `spacedock-dev/spacedock@next` (migration + jf/rg/D + plugin-install-from-next + `requires-contract`).
+3. **Skeleton behavior test** + **coverage matrix** (should-test × python-covers × v1-implements) — `behavior-test-skeleton-and-matrix` (8033…). NOT full port/CI; CI deferred ("when we get there").
+FO has the conn for approval+merges (captain, 2026-05-31): drive autonomously, escalate only genuine forks.
+
+## hx disposition (FO, 2026-05-31)
+hx code-guards P1 (self-reference ACs) only; P2 (prose-grep tests) is the behavior-test-skeleton-and-matrix entity's job — they compose. hx adds skills/integration static invariants (AC-2 legitimate-structural; AC-3 zero-oracle = low-stakes prose-grep). hx is NOT on the launcher/install critical path; sequence LAST (it self-declares this; coordinates with zs/packaging on the FO contract) — likely next session.
+
+## FRICTION / IMPROVEMENT log — FO dogfooding the new spacedock binary + skills (2026-05-31)
+1. **State-commit confusion (RECURRING ~6×).** `.spacedock-state` is git-excluded from the main checkout (`.git/info/exclude` `**/.spacedock-state/`), but it is its OWN git repo. EVERY ensign tried to commit its stage report, hit the exclusion, and reported "no commit — gitignored" confusion; the FO then commits via `git -C docs/dev/.spacedock-state`. FIX: the ensign contract must state plainly that the split-root state checkout is a separate repo — ensigns either commit there (`git -C <state>`) or the contract says "FO owns state commits, just write the file." This is the #1 recurring friction.
+2. **Contract-gate bootstrap UX is rough.** `spacedock claude` fail-fasts (malformed-range) on the installed manifest lacking `requires-contract` — captain hit it on first real use, needed `--skip-contract-check`. The `--plugin-dir`-relaxes-gate (launch-parity) + shipping `requires-contract` (D) fix it, but first-install before requires-contract ships is a cliff. Consider a friendlier "no requires-contract yet → warn+continue in bootstrap" vs hard fail.
+3. **Read-then-status--set staleness echo.** FO Read of a large entity file followed by `status --set` on it triggers the full-file cache-write echo (big context cost). The Probe discipline warns about it; Grep-only helps but entity files are large. Improvement: a `status --set` that doesn't trip staleness, or smaller entity files.
+4. **dispatch build JSON via file.** `spacedock dispatch build` input must be written to a file (backticks/`<>` break heredocs) — minor but a per-dispatch step; a `--stdin-safe` or arg form could help.
+5. **Worktree `spacedock` binary blocks removal.** Ensigns `go build -o ./spacedock` in the worktree → untracked binary → `git worktree remove` refuses (needs `--force` after audit). Improvement: ensigns build to a gitignored path, or the worktree gitignores `/spacedock`.
