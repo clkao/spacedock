@@ -87,21 +87,8 @@ func stageFixture(t *testing.T) cycleFixture {
 		t.Fatalf("dispatch build exit=%d stderr=%s", code, stderr.String())
 	}
 
-	var out struct {
-		DispatchFilePath string `json:"dispatch_file_path"`
-	}
-	if err := json.Unmarshal([]byte(stdout.String()), &out); err != nil {
-		t.Fatalf("build stdout is not JSON: %v\n%s", err, stdout.String())
-	}
-	if out.DispatchFilePath == "" {
-		t.Fatalf("no dispatch_file_path in build stdout:\n%s", stdout.String())
-	}
-	bodyBytes, err := os.ReadFile(out.DispatchFilePath)
-	if err != nil {
-		t.Fatalf("read dispatch body %s: %v", out.DispatchFilePath, err)
-	}
-
-	return cycleFixture{root: root, entityPath: entityPath, body: string(bodyBytes)}
+	body := readDispatchBodyFromStdout(t, stdout.String())
+	return cycleFixture{root: root, entityPath: entityPath, body: body}
 }
 
 // scriptedEnsign is the LLM stand-in. It parses the checklist items out of the
@@ -389,4 +376,24 @@ func mustJSON(t *testing.T, v any) string {
 		t.Fatal(err)
 	}
 	return string(b)
+}
+
+// readDispatchBodyFromStdout parses the dispatch_file_path out of a build's JSON
+// stdout and reads back the dispatch body file dispatch.Run wrote.
+func readDispatchBodyFromStdout(t *testing.T, stdout string) string {
+	t.Helper()
+	var out struct {
+		DispatchFilePath string `json:"dispatch_file_path"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &out); err != nil {
+		t.Fatalf("build stdout is not JSON: %v\n%s", err, stdout)
+	}
+	if out.DispatchFilePath == "" {
+		t.Fatalf("no dispatch_file_path in build stdout:\n%s", stdout)
+	}
+	bodyBytes, err := os.ReadFile(out.DispatchFilePath)
+	if err != nil {
+		t.Fatalf("read dispatch body %s: %v", out.DispatchFilePath, err)
+	}
+	return string(bodyBytes)
 }
