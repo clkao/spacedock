@@ -1,13 +1,13 @@
 ---
 id: m6h1tyyen9z9g7cm830wcpzq
 title: Behavioral coverage for the gate/feedback approval loop (matrix row 15)
-status: validation
+status: done
 source: FO/captain (2026-05-31) — comprehensive-behavior-coverage sprint; coverage matrix row 15 (largest pure GAP)
 started: 2026-05-31T18:06:58Z
-completed:
-verdict:
+completed: 2026-05-31T18:27:27Z
+verdict: PASSED
 score: "0.34"
-worktree: /Users/clkao/git/spacedock-research/spacedock-v1/.worktrees/spacedock-ensign-gate-feedback-loop-behavior-coverage
+worktree: 
 issue:
 ---
 
