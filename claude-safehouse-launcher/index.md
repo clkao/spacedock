@@ -80,32 +80,58 @@ provisional AC text ("safehouse stub on PATH") assumed.
 launcher threads the already-resolved `dir` (the same value `run()` passes to the
 status path) into `runClaude` and on into the shared helper. No new cwd lookup.
 
+Blast radius of threading `dir` (NOT a body-only change — flagged for the
+implementation TDD so it is not surprised): adding a `dir` parameter changes
+`runClaude`'s SIGNATURE, so it cascades to:
+- its call site `cli.go:48` — currently `runClaude(ctx, args[1:], execHost{}, stdout, stderr)`;
+- all 5 existing `frontdoor_test.go` call sites (lines 66, 83, 103, 126, 146),
+  which use the old arity and must be updated to pass a `dir`.
+This is part of the same tq-shared-surface conflict: the signature edit touches
+the exact lines tq authored, reinforcing the serialize-after-tq requirement.
+`runCodex` (codex launcher) takes the same `dir`-threading change when it lands.
+
 ### Shared helper factoring (the codex launcher reuses this verbatim)
 
 New package `internal/safehouse`:
 
 ```
-// Wrap detects a .safehouse profile in workdir. When present it returns the
-// inner argv wrapped as `safehouse --trust-workdir-config [extra...] -- <inner>`
-// and wrapped=true. When absent it returns inner unchanged and wrapped=false.
-func Wrap(workdir string, inner []string, extra []string) (argv []string, wrapped bool)
-
-// Present reports whether a .safehouse profile exists in workdir (for the
-// pre-launch missing-binary gate).
+// Present reports whether a .safehouse profile exists in workdir.
 func Present(workdir string) bool
+
+// Available reports whether the safehouse binary is resolvable via lookPath
+// (default exec.LookPath; injected as a seam so tests pin not-found). When
+// absent it returns ok=false and a pinned install-hint string for stderr.
+func Available(lookPath func(string) (string, error)) (ok bool, hint string)
+
+// Wrap returns the inner argv wrapped as
+// `safehouse --trust-workdir-config [extra...] -- <inner>`. Callers gate on
+// Present (and Available) first; Wrap itself only composes the prefix.
+func Wrap(inner []string, extra []string) (argv []string)
 ```
 
 `Wrap` is inner-command-agnostic: `runClaude` passes
-`inner = {"claude", "--dangerously-skip-permissions", "--agent", "spacedock:first-officer", passthrough...}`;
+`inner = {"claude", "--dangerously-skip-permissions", "--agent", "spacedock:first-officer", passthrough+prompt...}`;
 `codex-safehouse-launcher`'s `runCodex` passes
 `inner = {"codex", "--dangerously-bypass-approvals-and-sandbox", <fo-skill-prompt>}`.
-Host-specific inner-argv assembly and prompt/`--resume` policy stay in the
-respective `runX` functions; only `.safehouse` detection + the safehouse prefix
-is shared. This is the reuse boundary the codex launcher's "Dependencies" calls
-for.
 
-`.safehouse` detection = `os.Stat(filepath.Join(workdir, ".safehouse"))` is nil
-(a file OR directory both count as present; pinned by oracle, see AC-1 notes).
+Complete reuse boundary (so the codex launcher reuses the WHOLE safehouse gate,
+not just argv composition): `Present`, `Available`, and `Wrap` are ALL shared.
+Only the host-specific inner-argv assembly and the prompt/`--resume` policy stay
+in the respective `runX` functions. This closes the M3 concern that "codex reuses
+Wrap verbatim" would otherwise leave AC-4's missing-binary gate unshared — the
+missing-safehouse pre-check lives in `Available`, which codex's AC-3-analog
+reuses directly.
+
+`.safehouse` detection (`Present`) = `os.Stat(filepath.Join(workdir, ".safehouse"))`
+is nil (a file OR directory both count as present; pinned by oracle, see AC-1
+notes).
+
+Two distinct `--` tokens, never conflated: the safehouse `--` is EMITTED by
+`Wrap` to separate safehouse's own flags from the inner command. The operator
+`--` is a DIFFERENT token, consumed and stripped upstream by tq's
+`splitFrontDoorArgs` (`frontdoor.go:115`) before passthrough ever reaches `Wrap`.
+So the `--` that lands in the final argv is always Wrap's safehouse separator,
+not the operator's.
 
 ### Salvage call (explicit harvest vs rebuild)
 
@@ -123,18 +149,28 @@ NOT salvaged (confirmed pre-this-model): run.go's `buildSafehouseArgv` (no
 `--dangerously-skip-permissions`, no prompt/`--resume` handling) and its
 `plugin.Detect` gate (superseded by tq's contract gate `gateHost`).
 
-### Initial-prompt decision (PENDING captain — see open question)
+### Initial-prompt decision (captain-decided: FIXED bootstrap prompt)
 
-The `spacedock:first-officer` agent self-bootstraps on launch via its Startup
-sequence (discover root → `spacedock status --discover` → read README → `--boot`),
-so a synthetic default initial-prompt is redundant with the agent definition.
-Recommended: NO default injected prompt — operator-supplied trailing args pass
-through verbatim; `--resume` is just one such forwarded flag. Under this choice
-AC-5 reframes to: "no synthetic prompt is ever injected; `--resume` and any
-operator args forward verbatim." If the captain instead wants a fixed bootstrap
-prompt (option B), AC-5 keeps its original "prompt appended unless `--resume`"
-shape. Oracles below are written for the recommended no-default choice and noted
-where option B diverges.
+Captain decision: `spacedock claude` launches AND GOES — a no-prompt launch opens
+an idle agent session, which is not the goal. So a short FIXED bootstrap prompt is
+appended as the final inner-argv token UNLESS `--resume` is among the forwarded
+args (a resume already carries its own session intent, so the bootstrap prompt
+would fight it).
+
+Proposed exact wording (captain reviews/tweaks at the gate):
+
+    Begin as the Spacedock first officer: run your startup sequence and work the event loop.
+
+Rationale for this wording: it names the role (`first officer`) and explicitly
+triggers the two things the agent must do on a fresh session — its Startup
+sequence (discover root → `spacedock status --discover` → README → `--boot`) and
+then the dispatch/event loop — rather than leaving the agent idle waiting for the
+captain. It is short (one line, no embedded quotes that complicate argv) and
+host-neutral enough that the codex launcher can adopt a parallel phrasing.
+
+The prompt token is the LAST element of the inner argv (after the operator
+passthrough), so it sits where `claude` treats a trailing positional as the
+initial user message. When `--resume` is present, the token is omitted entirely.
 
 ### Sequencing
 
@@ -152,61 +188,72 @@ grep-the-source proofs. Test home: `internal/cli/safehouse_frontdoor_test.go`
 (extends the existing `fakeHost` from `frontdoor_test.go`) + `internal/safehouse`
 unit tests.
 
-**AC-1 — `.safehouse` present emits the canonical safehouse-wrapped argv.**
+**AC-1 — `.safehouse` present emits the canonical safehouse-wrapped argv (with bootstrap prompt appended).**
 Exercise: `runClaude` with a fixture dir containing a `.safehouse` file and
-args `{"--", "--foo"}`, backed by a `fakeHost` whose `Launch` records argv.
-Observe: recorded argv equals
-`["safehouse","--trust-workdir-config","--","claude","--dangerously-skip-permissions","--agent","spacedock:first-officer","--foo"]`
-and rc==0. (Also pin: `.safehouse` as a directory is detected identically — one
-extra case asserting `os.Stat` truthiness covers file-vs-dir.)
+args `{"--", "--foo"}` (no `--resume`), backed by a `fakeHost` whose `Launch`
+records argv. Observe: recorded argv equals
+`["safehouse","--trust-workdir-config","--","claude","--dangerously-skip-permissions","--agent","spacedock:first-officer","--foo","<bootstrap-prompt>"]`
+and rc==0, where `<bootstrap-prompt>` is the fixed token from the Initial-prompt
+decision — appended LAST, after the operator passthrough. (Also pin: `.safehouse`
+as a directory is detected identically — one extra case asserting `os.Stat`
+truthiness covers file-vs-dir.)
 
-**AC-2 — no `.safehouse` launches plain claude, safehouse never named.**
-Exercise: same harness, fixture dir with NO `.safehouse`, args `{"--","--foo"}`.
-Observe: recorded argv equals
-`["claude","--dangerously-skip-permissions","--agent","spacedock:first-officer","--foo"]`
-— argv[0] is `claude`, the token `safehouse` appears nowhere in argv, rc==0.
-(NOTE: this pins that the no-safehouse path also carries
-`--dangerously-skip-permissions`; confirm with captain — the provisional AC-2
-text omitted it. If the captain wants the skip-permissions flag ONLY under
-safehouse, AC-2's expected argv drops that token. Flagged as open question 2.)
+**AC-2 — no `.safehouse` launches plain claude (no skip-permissions, no safehouse named).**
+Exercise: same harness, fixture dir with NO `.safehouse`, args `{"--","--foo"}`
+(no `--resume`). Observe: recorded argv equals
+`["claude","--agent","spacedock:first-officer","--foo","<bootstrap-prompt>"]`
+— argv[0] is `claude`, the token `safehouse` appears nowhere in argv, AND
+`--dangerously-skip-permissions` appears NOWHERE in argv (captain decision:
+skip-permissions is safehouse-path-only; never skip permissions in an
+unsandboxed launch), rc==0. The bootstrap prompt is still appended on this path
+(it is a launch-and-go concern, independent of safehouse).
 
-**AC-3 — missing plugin → clear error, rc≠0, no launch.**
-Exercise: `runClaude` with a `fakeHost` returning `manifest:""` (no plugin) —
-the gate fails before any safehouse logic. Observe: rc≠0, stderr contains an
-actionable remedy (`spacedock init`/`spacedock doctor`), and `fakeHost.Launch`
-was never called (`launchedArg == nil`). This exercises tq's `gateHost` through
-the launcher path; the safehouse interposition is downstream of the gate.
+**AC-3 — plugin-gate failure SHORT-CIRCUITS before any safehouse logic (ordering invariant).**
+Exercise: `runClaude` with `.safehouse` PRESENT in the fixture dir AND the
+safehouse binary ABSENT (lookPath seam returns not-found) AND a `fakeHost`
+returning `manifest:""` (no plugin). Observe: rc≠0, stderr carries the
+PLUGIN-gate remedy (`spacedock init`/`spacedock doctor`), stderr does NOT carry
+the safehouse install hint, and `Launch` was never called. This proves the
+NEW ordering the feature introduces: the contract gate runs first and
+short-circuits, so neither the `.safehouse`/`Available` pre-check nor the launch
+fires when the plugin is missing — even though a missing safehouse binary would
+also be an error if reached. (This is the real ordering invariant, not a re-run
+of tq's existing `manifest:""` gate test.)
 
-**AC-4 — `.safehouse` present but `safehouse` binary absent → install hint, rc≠0, no claude launch.**
-Exercise: fixture dir WITH `.safehouse`; the launcher's pre-launch
-`exec.LookPath("safehouse")` (or an injected `lookPath` seam returning
-not-found) reports absent. Observe: rc≠0, stderr contains a pinned safehouse
-install hint, and `Launch` was never called. Decision: the launcher pre-checks
-safehouse presence and emits the pinned hint ITSELF rather than deferring to
+**AC-4 — `.safehouse` present, plugin OK, but `safehouse` binary absent → install hint, rc≠0, no claude launch.**
+Exercise: fixture dir WITH `.safehouse`, a COMPATIBLE `fakeHost` manifest (gate
+passes), and `safehouse.Available` driven by an injected `lookPath` returning
+not-found. Observe: rc≠0, stderr contains the pinned safehouse install hint
+(the `hint` string `Available` returns), and `Launch` was never called.
+Decision: the missing-safehouse pre-check lives in `internal/safehouse.Available`
+and the launcher emits its pinned hint ITSELF rather than deferring to
 `execHost.Launch`'s generic LookPath error — so the error is testable without a
-real exec and the message is actionable. The LookPath check is injected as a
-seam (default = `exec.LookPath`) so the test pins not-found deterministically.
+real exec, the message is actionable, AND the codex launcher reuses the same
+gate (M3). `lookPath` is injected (default `exec.LookPath`) so the test pins
+not-found deterministically.
 
-**AC-5 — operator args (incl. `--resume`) forward verbatim; no synthetic prompt injected.**
-(Recommended no-default-prompt choice.) Exercise: `runClaude` with `.safehouse`
-present and args `{"--","--resume"}`. Observe: recorded argv ends with the
-operator's `--resume` and contains NO synthetic initial-prompt token; argv ==
+**AC-5 — `--resume` suppresses the bootstrap prompt; operator args still forward verbatim.**
+Exercise: `runClaude` with `.safehouse` present and args `{"--","--resume"}`.
+Observe: recorded argv forwards the operator's `--resume` and contains NO
+bootstrap-prompt token; argv ==
 `["safehouse","--trust-workdir-config","--","claude","--dangerously-skip-permissions","--agent","spacedock:first-officer","--resume"]`.
-DIVERGENCE under option B (default prompt): two cases — without `--resume` the
-argv ends with the bootstrap-prompt token; with `--resume` the prompt token is
-absent.
+Companion case (the AC-1 positive already covers it): WITHOUT `--resume` the
+argv ends with the bootstrap-prompt token. The two cases together pin the
+"appended unless `--resume`" rule from both sides.
 
 **AC-6 (captain-run, closes F3 / Risk A) — live safehouse smoke.**
-Captain runs, OUTSIDE the sandbox, in a real unsandboxed shell:
+Captain runs, OUTSIDE the sandbox, in a real unsandboxed shell (the command
+matches the canonical AC-1 argv it gates, including `--dangerously-skip-permissions`):
 
-    safehouse --trust-workdir-config -- claude --agent spacedock:first-officer --help
+    safehouse --trust-workdir-config -- claude --dangerously-skip-permissions --agent spacedock:first-officer --help
 
 Observed evidence that closes F3 and unblocks the implementation argv-lock:
 - claude's own `--help` text appears on stdout (NOT a `safehouse: unknown flag`
   or `safehouse: unrecognized argument` error, and NOT a claude
-  "unknown flag --trust-workdir-config" — i.e. safehouse consumed
+  "unknown flag --trust-workdir-config" / "unknown flag
+  --dangerously-skip-permissions" — i.e. safehouse consumed
   `--trust-workdir-config` and the `--` correctly handed the remainder to
-  claude).
+  claude, which accepts both `--dangerously-skip-permissions` and `--agent`).
 - rc == 0.
 Recorded as evidence (paste of the command + the observed stdout head + rc) under
 the entity's evidence trail before implementation pins the canonical argv. If the
@@ -214,25 +261,24 @@ observed flag surface differs (e.g. safehouse spells the trust flag differently,
 or rejects `--`), the AC-1 expected argv is corrected to match reality BEFORE
 implementation — this is the gate F3 guards.
 
-## Open questions for captain
+## Captain decisions (resolved at ideation)
 
-1. **Initial prompt**: confirm NO default injected prompt (recommended, option A),
-   vs a fixed bootstrap prompt (option B). Drives AC-5's exact shape.
-2. **`--dangerously-skip-permissions` scope**: AC-1 (safehouse path) clearly
-   carries it per the target behavior. Does the NO-safehouse path (AC-2) also
-   carry `--dangerously-skip-permissions`? The provisional target behavior for
-   the no-`.safehouse` case said only `claude --agent spacedock:first-officer
-   [forwarded args]` (no skip-permissions). If that's intended, AC-2's expected
-   argv must DROP `--dangerously-skip-permissions`. Current oracle draft assumes
-   it is safehouse-path-only (matching the provisional text); confirm.
+1. **Initial prompt**: FIXED bootstrap prompt, appended unless `--resume` is
+   forwarded (launch-and-go, no idle session). Proposed wording in the
+   Initial-prompt decision section; captain reviews/tweaks at the gate.
+2. **`--dangerously-skip-permissions` scope**: SAFEHOUSE-PATH ONLY. The
+   no-`.safehouse` path stays plain `claude --agent spacedock:first-officer
+   [args]` — never skip permissions in an unsandboxed launch. Reflected in AC-2.
 
 ## Complexity flag
 
 This touches the front-door launch contract (shared with tq, reused by the codex
-launcher) and pins a process-exec argv that gates a captain-run live smoke. Per
-the assignment's note, a staff review may precede the ideation gate. Recommend it:
-the argv shape and the two open questions above are the load-bearing decisions and
-benefit from a second read before implementation locks them.
+launcher) and pins a process-exec argv that gates a captain-run live smoke. A
+staff review was run and its three material findings (M1 dir-threading blast
+radius, M2 AC-3 ordering-invariant recharacterization, M3 `Available` gate for
+codex reuse) are folded in above. The remaining load-bearing items for the gate:
+the canonical argv shape (locked only after AC-6's live smoke) and the proposed
+bootstrap-prompt wording (captain tweaks at the gate).
 
 ## Stage Report: ideation
 
@@ -246,3 +292,20 @@ benefit from a second read before implementation locks them.
 ### Summary
 
 Resolved the integration surface against tq's in-flight `frontdoor.go`: this launcher interposes a shared `internal/safehouse` helper (`Wrap`/`Present`, inner-argv-agnostic so codex reuses it) into the existing `runClaude`/`Launch` seam rather than rebuilding exec plumbing; the argv oracles are pure Go unit tests on the recorded `Launch` argv. Two captain decisions are open and flagged: (1) no-default-vs-fixed initial prompt, (2) whether the no-safehouse path also carries `--dangerously-skip-permissions`. Flagged complexity (shared front-door contract + captain-run argv-gating smoke) and recommended a staff review before the ideation gate; implementation MUST serialize after tq merges.
+
+## Stage Report: ideation (cycle 2 — captain decisions + staff findings folded)
+
+- DONE: The `.safehouse`-present and `.safehouse`-absent launch argv contracts are pinned as behavioral exercise-and-observe oracles, with the `--resume`-suppresses-injected-prompt case and the missing-safehouse error case each enumerated as their own oracle — no prose-only ACs.
+  AC-1 (safehouse argv + bootstrap prompt appended), AC-2 (plain claude, NO skip-permissions per captain), AC-5 (`--resume` suppresses prompt), AC-4 (missing safehouse via `Available`).
+- DONE: Salvage call made explicit; helper factors so the codex launcher reuses it.
+  Reuse boundary drawn COMPLETE per M3: `Present`+`Available`+`Wrap` all shared in `internal/safehouse`; only inner-argv assembly + prompt/`--resume` policy stay per-host.
+- DONE: Riskiest-unknown spike scoped: AC-6 live safehouse smoke is captain-run with the exact command + evidence that closes F3 before argv-lock.
+  AC-6 command updated to match canonical argv (now includes `--dangerously-skip-permissions`).
+- DONE: Captain decisions folded — fixed bootstrap prompt (proposed wording for gate review) appended unless `--resume`; skip-permissions is safehouse-path-only.
+  "Captain decisions" + "Initial-prompt decision" sections; AC-1/AC-2/AC-5 reshaped accordingly.
+- DONE: Staff findings folded — M1 (dir-threading blast radius: `runClaude` signature + `cli.go:48` + 5 `frontdoor_test.go` call sites), M2 (AC-3 recharacterized to the plugin-gate short-circuit ordering invariant), M3 (`Available` lookPath gate in `internal/safehouse` for codex reuse); polish (AC-6 argv parity, two-`--` distinction).
+  Integration surface (M1), AC-3 (M2), helper factoring + AC-4 (M3), helper factoring two-`--` note (polish).
+
+### Summary
+
+Folded both captain decisions (fixed launch-and-go bootstrap prompt with proposed wording; skip-permissions safehouse-path-only) and the three material staff findings: corrected the `dir`-threading blast radius (signature + call site + 5 test sites, reinforcing serialize-after-tq), recharacterized AC-3 from a redundant gate re-run into the real plugin-gate short-circuit ordering invariant, and moved the missing-safehouse pre-check into `internal/safehouse.Available` so the codex launcher reuses the full gate (Present+Available+Wrap). The verified-correct core (integration surface, salvage, AC-6) is preserved; the proposed bootstrap-prompt wording is the one item still awaiting captain tweak at the gate.
