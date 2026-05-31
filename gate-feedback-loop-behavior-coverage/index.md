@@ -35,27 +35,164 @@ The gate/feedback flow's mechanical contract lives in:
   its shape and the 3-cycle escalation boundary are byte-observable.
 - the **validation stage's PASSED/REJECTED recommendation** parsing into the gate decision.
 
-## Acceptance criteria (provisional — ideation hardens)
+## Acceptance criteria (hardened)
 
 Each AC names a property of the finished entity, not a stage action, and how it is verified.
 
-**AC-1 — A behavioral test exercises the gate/feedback rejection-reflow deterministic seam.**
-Verified by: a new test (extending the `internal/ensigncycle` scripted-ensign pattern, or a
-sibling package) drives the real `dispatch.Run` feedback-reflow build (`is_feedback_reflow: true`)
-and/or the `### Feedback Cycles` record, asserting the mechanical outputs of the routed fix
-request — runnable in `go test`.
+**AC-1 — A behavioral test exercises the gate/feedback rejection-reflow deterministic seam:
+a real `dispatch.Run` feedback-reflow build that routes the fix request to the `feedback-to`
+target stage.** The finished entity contains a test that drives the in-process
+`dispatch.Run(["build", ...])` with `is_feedback_reflow: true` + a `feedback_context` payload,
+dispatched to the gate stage's `feedback-to` target, and asserts the dispatch body's mechanical
+outputs: (a) an anchored `### Feedback from prior review` routing section, (b) the routed
+rejection context carried inside it (the FO-mode requirement that the routed message carry the
+concrete fix work, not a bare acknowledgment), and (c) a contrast assertion that a plain
+(non-reflow) dispatch to the *same* target stage does NOT emit the routing section.
+Verified by: `go test ./internal/ensigncycle/` runs the test green; it calls the real build seam
+in-process (no live LLM), reusing the `internal/ensigncycle` scripted-cycle fixture pattern.
 
-**AC-2 — The test FAILS when the gate/feedback mechanical output breaks, via anchored forms.**
-Verified by: a negative control (regress the production seam — e.g. drop the routed assignment,
-or break the reflow body's target-stage line) turns the test RED; the assertion is an anchored
-emit-form regex, not a bare `strings.Contains` a prose warning could satisfy.
+**AC-2 — The test FAILS when the gate/feedback mechanical output breaks, via anchored emit-form
+assertions (never a bare `strings.Contains` a prose warning could satisfy).** The finished
+entity's test is a real guard: a named negative control that regresses the production reflow
+seam turns it RED. Concretely, the entity ships TWO negatives: **NEG-A** — strip the routed
+`feedback_context` payload from the emitted body → the context-presence assertion goes RED
+(proves the test catches a dropped/empty fix request, the FO-mode "not just an acknowledgment"
+failure); **NEG-B** — a missing-`feedback_context` reflow build → `dispatch.Run` Rule 5 exits
+non-zero with `dispatching to feedback target stage '{stage}' but feedback_context is missing`,
+asserted by an anchored stderr-message match, proving the build-side guard fires. Both are
+encoded as in-test guards (the negative paths are exercised, not described). The routing-section
+assertion is the anchored `(?m)^### Feedback from prior review$` form, not a bare substring; the
+spike confirmed the heading string is emitted exactly once in `build.go` (no warning-prose
+duplicate), so the trap here is a *dropped routed payload*, which the context-presence assertion
+catches.
 
 ## Out of scope
-- Live-LLM gate compliance (does a *real* FO/ensign honor the loop) — stays live-pytest /
-  deferred to a live-runtime harness (matrix rows 16/17/CI).
+- Live-LLM gate compliance (does a *real* FO/ensign honor the loop, self-approve, or count
+  cycles) — stays live-pytest / deferred to a live-runtime harness (matrix rows 16/17/CI).
+- **The `### Feedback Cycles` 3-cycle escalation boundary** — confirmed during ideation to have
+  NO in-process Go seam: it is FO-owned entity-body prose, written and counted by a live LLM,
+  with no `internal/status` parser that reads or acts on it (`grep` of `internal/status/*.go`
+  for `Feedback Cycles` is empty). Asserting its shape would be either prose-grep (the antipattern
+  this entity exists to replace) or would require inventing a production parser (scope creep,
+  YAGNI). The cycle-counting behavior is the same live-LLM class as gate compliance above.
 - The merge-hook guardrail (this workflow has no merge hooks).
 
 ## Notes
 Test-infra surface (extends `internal/ensigncycle` or a sibling). Likely disjoint from the
 prose-grep retirement entity (`harden-integration-prose-grep-tests`), which lives in
 `skills/integration/` — the two can run in parallel worktrees.
+
+---
+
+# Ideation design (hardened)
+
+## The pinned deterministic seam
+
+The gate/feedback loop's mechanical contract reduces to ONE byte-observable, no-live-LLM seam:
+the **feedback-reflow dispatch body** built by `internal/dispatch.Run(["build", ...])` when
+`is_feedback_reflow: true`. Reading `build.go`:
+
+- Rule 5 (`build.go:225`): `is_feedback_reflow && feedback_context == ""` → exit non-zero with
+  `dispatching to feedback target stage '{stage}' but feedback_context is missing`. This is the
+  build-side guard that a reflow MUST carry a routed payload.
+- Section 6 (`build.go:343-345`): when `feedback_context != ""`, the body emits
+  `### Feedback from prior review\n\n{feedback_context}\n`. This is the routed fix request the
+  FO's Feedback Rejection Flow (`first-officer-shared-core.md:199-214`) requires: step 5 says
+  "the routed message must carry the concrete next-stage assignment and requested fix work, not
+  just an acknowledgment." The reflow is dispatched to the rejected gate stage's `feedback-to`
+  target (e.g. `validation → feedback-to: implementation`), not to the reviewer.
+
+The other two candidate seams from the seed do NOT survive as in-process targets:
+- **`### Feedback Cycles` / 3-cycle escalation** — no Go seam (see Out of scope). Live-LLM only.
+- **validation PASSED/REJECTED → gate decision** — the recommendation parse + the gate hold are
+  FO-LLM behaviors (the FO reads the stage report and decides). No deterministic Go function
+  "is" the gate. Live-pytest covers it (`test_gate_guardrail.py`, `live`). Out of scope here.
+
+So the test targets the reflow-build seam: the deterministic half of the loop, on the dispatch
+side of the LLM, exactly mirroring how the shipped skeleton targets `dispatch.Run` rather than a
+live ensign.
+
+## Spike result (riskiest unknown — done FIRST, per entity-80 discipline)
+
+Built a throwaway `TestSpikeFeedbackReflowSeam` in `internal/dispatch/` (reusing the parity
+harness's `runNative` + `readDispatchBody` + `readmeWorktree`/`entityFM` fixtures, whose README
+already declares `validation → feedback-to: implementation`) and ran it:
+
+- **Positive:** two real `dispatch.Run` builds from the same fixture — one
+  `is_feedback_reflow:true` + `feedback_context:"REJECTED: ..."` dispatched to `implementation`
+  (the feedback-to target), one plain to the same stage. Asserted (a) the reflow body matches the
+  anchored `(?m)^### Feedback from prior review$`, (b) it contains the routed `REJECTED: ...`
+  context, (c) the plain body does NOT match the routing heading. **PASS in ~1s, no live agent.**
+- **Negative control (REAL production mutation):** guarded `build.go:343` behind `if false &&`
+  (dropping the section-6 emission). The spike went **RED** at both the anchored-heading and the
+  context-presence assertions (`reflow body missing anchored feedback-routing section`). Restored
+  `build.go`; spike removed; `go test ./internal/dispatch/ ./internal/ensigncycle/` green.
+
+**Lesson confirmed:** the seam is scriptable in `go test` against the real build, and the
+anchored routing-section assertion + context-presence assertion together catch a regressed/dropped
+fix request. The heading string is emitted exactly once in `build.go` (verified by grep), so unlike
+the completion-signal case there is no warning-prose duplicate; the live trap here is a *dropped
+routed payload*, caught by the context-presence assertion — which is why AC-2's NEG-A strips the
+payload rather than renaming a call.
+
+## Test plan
+
+**Home:** extend `internal/ensigncycle` (the skeleton's home — test-infra, disjoint from
+`frontdoor.go`). Add `feedback_test.go` reusing the existing `stageFixture` helpers, OR add a
+worktree-stage fixture (the package's current `readmeNonWorktree` has no gate stage, so the new
+test needs a README with a `feedback-to` stage like the parity harness's `readmeWorktree`). No new
+production code — reuses the in-process `dispatch.Run` build seam.
+
+**`TestFeedbackReflowRoutesFixRequest`** (runnable `go test ./internal/ensigncycle/`):
+1. Stage a git-init'd fixture whose README declares a gate stage with `feedback-to:` (e.g.
+   `validation → feedback-to: implementation`); a `{slug}.md` entity stamped at the gate stage
+   with a `worktree:` value (reflow rides the existing worktree).
+2. Build the reflow dispatch: `dispatch.Run(["build", "--workflow-dir", root], stdinJSON, ...)`
+   with `is_feedback_reflow:true`, a concrete `feedback_context` (the routed REJECTED findings),
+   `stage` = the `feedback-to` target. Read back the dispatch body.
+3. Build a plain dispatch to the same target stage (no reflow) for the contrast assertion.
+4. **Assert (anchored, behavior-first):**
+   - (a) reflow body matches `(?m)^### Feedback from prior review$` (the routing section).
+   - (b) reflow body `strings.Contains` the routed `feedback_context` payload verbatim (the
+     concrete fix request — NOT a bare acknowledgment).
+   - (c) plain body does NOT match the routing-section regex (the seam is reflow-specific).
+
+**`TestFeedbackReflowGoesRedOnBrokenOutput`** (the AC-2 verification — named negative controls):
+- **NEG-A (dropped payload):** take the real reflow body and strip the `feedback_context`
+  substring; assert the context-presence check fails on it — the in-test encoding of the spike's
+  production-mutation negative (proves a dropped fix request is caught).
+- **NEG-B (build-side guard):** call `dispatch.Run` with `is_feedback_reflow:true` and EMPTY
+  `feedback_context`; assert exit code != 0 AND an anchored stderr match of
+  `dispatching to feedback target stage '{stage}' but feedback_context is missing` (Rule 5 fires;
+  the build refuses an unrouted reflow). Asserts the message form, not a bare substring.
+
+**Cost/complexity:** Go unit test, fixture-only, ~1s, no live runtime — same tier and harness as
+the shipped skeleton. No CLI or live-workflow test needed (those are the out-of-scope live rows).
+
+**Why proof is at the right altitude:** the claim is "the dispatch build routes a fix request to
+the feedback-to target on reflow." That is a `dispatch.Run` command behavior → a Go unit test
+asserting the real body is the matching altitude (not a live-workflow smoke test, which would be
+testing the LLM's compliance, the explicitly out-of-scope row).
+
+## Stage Report: ideation
+
+- DONE: Pin the deterministic seam(s): read internal/dispatch dispatch.Run's feedback-reflow path (is_feedback_reflow=true) and the FO `### Feedback Cycles` contract; name the exact in-process / byte-observable seam the test will target (not a live LLM).
+  Pinned the ONE real seam: the `dispatch.Run` reflow build (`build.go:225` Rule 5 guard + `build.go:343` section-6 routing emission), dispatched to the gate stage's `feedback-to` target. Confirmed `### Feedback Cycles` (FO prose, no `internal/status` parser — grep empty) and the PASSED/REJECTED gate decision (FO-LLM) are NOT in-process seams; scoped them out with rationale. See "The pinned deterministic seam".
+- DONE: Spike the riskiest unknown FIRST: build the smallest scripted test against that seam and observe it PASS plus a negative control go RED, before committing the design (per the entity-80 spike discipline).
+  Built+ran throwaway `TestSpikeFeedbackReflowSeam` in internal/dispatch: positive PASS (~1s, no live agent, real `dispatch.Run`); negative control = REAL production mutation (`if false &&` at build.go:343) → spike RED at the anchored routing + context assertions. Restored build.go, removed spike, baseline `go test ./internal/dispatch/ ./internal/ensigncycle/` green. See "Spike result".
+- DONE: Harden AC-1/AC-2 to behavior-first with anchored emit-form assertions (never bare strings.Contains) and a concrete test plan that names the negative control.
+  AC-1 now pins the reflow-build property (routing section + routed payload + plain-dispatch contrast) verified by `go test`; AC-2 names TWO negatives — NEG-A (strip the routed payload → context assertion RED) and NEG-B (missing feedback_context → Rule 5 anchored-stderr non-zero exit). Anchored `(?m)^### Feedback from prior review$` form; the heading is emitted once (grep-verified) so the live trap is a dropped payload. Concrete test plan with home, fixture, assertions, cost, and altitude rationale. See "Test plan".
+
+### Summary
+
+Ideation pinned the gate/feedback loop's single byte-observable seam — the `dispatch.Run`
+feedback-reflow build that routes the fix request to the `feedback-to` target stage — and
+grounded it in a run spike rather than on paper: a real build + anchored routing assertion
+PASSED, and a real production mutation (dropping the section-6 emission) turned it RED. The
+load-bearing scoping decision: the `### Feedback Cycles` 3-cycle escalation and the PASSED/REJECTED
+gate decision are live-LLM behaviors with NO in-process Go seam (grep of `internal/status` for the
+cycle section is empty), so asserting them would be either prose-grep or production scope creep;
+they stay live-pytest/out-of-scope, consistent with row-15's framing. AC-1/AC-2 are hardened
+behavior-first with the anchored `### Feedback from prior review` form and two named negatives
+(dropped routed payload; Rule 5 missing-context guard), and the test plan extends the shipped
+`internal/ensigncycle` skeleton at the same fixture-only, no-live-LLM altitude.
