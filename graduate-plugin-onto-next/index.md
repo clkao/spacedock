@@ -1,9 +1,9 @@
 ---
 id: n15ga31s6dbs3xxbhbz4at8s
 title: Graduate the full plugin surface onto next (released-lane completion, next-as-source)
-status: backlog
+status: ideation
 source: sprint — captain 2026-05-31 ("next-as-source is fine"); released-lane follow-up to fresh-install-journey (dev-lane)
-started:
+started: 2026-05-31T16:07:11Z
 completed:
 verdict:
 score: "0.30"
