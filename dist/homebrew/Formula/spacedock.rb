@@ -25,7 +25,7 @@ class Spacedock < Formula
       sandbox called "safehouse". safehouse is a runtime dependency and is NOT
       installed by brew; install it through the host tooling before first launch.
       See the safehouse install docs:
-        https://github.com/spacedock-dev/safehouse#install
+        https://agent-safehouse.dev
     EOS
   end
 

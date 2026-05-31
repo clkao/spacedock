@@ -20,7 +20,7 @@ installed by brew — it ships with the host tooling, not as a brew formula.
 Install it through the host tooling before first launch. See the safehouse
 install docs:
 
-<https://github.com/spacedock-dev/safehouse#install>
+<https://agent-safehouse.dev>
 
 The formula surfaces the same hint via `brew install`'s caveats output.
 
