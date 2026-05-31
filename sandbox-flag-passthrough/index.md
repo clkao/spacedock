@@ -224,3 +224,242 @@ Captain expanded scope: explicit `--safehouse` force-on flag + OR wrap-trigger +
 
 ### Summary
 Folded the captain's scope expansion into the spec: added the explicit `--safehouse` force-on front-door flag, revised the wrap-decision in both launchers from `.safehouse`-presence-only to an OR of {profile, `--safehouse`, any `--safehouse-*` knob}, and REVERSED the old fail-fast AC-4 into imply-on (a knob auto-turns the sandbox on, so `spacedock claude --safehouse-enable=docker` works in a no-profile dir). Resolved the small open question: `safehouse.Wrap` keeps `--trust-workdir-config` unconditional (harmless no-op without a profile; signature stays stable). ACs renumbered to AC-1..AC-8 with claude+codex forced-wrap oracles; codex bypass flag is emitted only inside the wrap (safety rule preserved). `--no-safehouse` force-off left out of scope (YAGNI). Implementation still serializes after `codex-safehouse-launcher` (shared files) and now also revises that worktree's wrap-trigger. No production code written.
+
+## Scope expansion (captain, 2026-05-31): COMPREHENSIVE launch parity
+
+This entity becomes the comprehensive **launch-parity** vehicle: `spacedock claude`
+/ `spacedock codex` must REPLACE every hand-typed safehouse launch in the captain's
+real `ps` (full source in `_sprint-notes.md` → "Launch-parity spec from captain's
+real ps"). The cycle-1/2 sandbox knobs (AC-1..AC-8) are retained verbatim; this
+cycle adds the launch-arg-assembly gaps the `ps` revealed. Both launchers ship today
+with a FIXED bootstrap prompt + `.safehouse` auto-detect; this cycle revises the
+launch-arg assembly in `runClaude` + `runCodex` as ONE coherent pass.
+
+Captain decisions feeding this cycle:
+- **(a) prompt UX = trailing positional.** The launch prompt is `base + " " + task`
+  (bare → base only; resume → no prompt). `base` is the existing `bootstrapPrompt`
+  / `codexBootstrapPrompt` const.
+- **(b) both launchers** get the task-prompt override.
+- Multiple `--add-dirs` and multiple `--plugin-dir` must be supported.
+- The `--plugin-dir`/gate interaction and the codex-bare decision are
+  brainstorm-friendly (captain may steer).
+
+Implementation sequences on `frontdoor.go` (no concurrent migration). All cycle-3
+gaps land in the same `runClaude` + `runCodex` revision that threads the cycle-2
+`extra` slot through.
+
+### Design: trailing-positional task prompt (LP-1)
+
+**The grammar problem.** Today `splitFrontDoorArgs` routes EVERYTHING that is not
+`--skip-contract-check`/`--` into host passthrough. A trailing task must be told
+apart from (i) the front-door flags (`--safehouse*`, `--skip-contract-check`),
+(ii) the host passthrough (`--model x`, `--plugin-dir P`, `resume <id>`). The
+captain's real lines put `--plugin-dir P` BEFORE the task with no `--` separator
+(`claude --plugin-dir /…/spacedock "<base + task>"`), so a naive "first bare
+positional" rule would mis-assign a host flag's value as the task.
+
+**Decision — the task is the SINGLE trailing bare (non-`-`) positional, scanned
+right-to-left, and only the LAST token qualifies.** The front-door parser, after
+pulling its own flags, treats the args as: zero-or-more host tokens, then an
+OPTIONAL final bare positional = the task. Concretely:
+
+- Scan the post-front-door-flag args. If the LAST token does not start with `-`
+  AND is not the value-half of a known host flag that takes a value, it is the
+  task; everything before it is host passthrough.
+- A `--` separator forces ALL following tokens to host passthrough (escape hatch:
+  `spacedock claude -- "a literal claude positional"` sends the positional to
+  claude, no task). This preserves the existing `--` contract.
+- Bare `spacedock claude` (no trailing positional) → no task → base prompt only.
+
+**Why right-to-left / last-token-only, not "first bare positional":** the captain's
+lines interleave host flags (`--plugin-dir P`, `--model M`) whose VALUES are bare
+tokens. Claiming the first bare token would steal `P` from `--plugin-dir`. The task
+is always the human sentence at the very end of the line, so anchoring on the LAST
+token (and requiring no `--` shadow) is the rule that matches every real `ps` line.
+
+**The value-half ambiguity (`--model gpt-x` with no task).** `spacedock claude
+--model gpt-x` — is `gpt-x` the task or the value of `--model`? Resolution: the
+front-door parser does NOT know claude's/codex's full flag vocabulary (we forward
+host flags verbatim by design — see cycle-2's "unknown safehouse key errors but
+host flags pass through"). So we cannot reliably know `--model` consumes a value.
+Two sub-options:
+
+- **LP-1a (recommended): the task is ONLY recognized when it is unambiguous —
+  i.e. the args contain NO host flags, OR the operator used `--` to fence the
+  passthrough and put the task before it.** Forms that work:
+  `spacedock claude "task"` (pure task) → base+task;
+  `spacedock claude "task" -- --model gpt-x` (task fenced before passthrough) →
+  base+task with `--model gpt-x` forwarded;
+  `spacedock claude -- --model gpt-x` (all passthrough, no task) → base only.
+  A trailing bare token that FOLLOWS host flags with no `--` fence
+  (`spacedock claude --plugin-dir P "task"`) is the captain's primary line, so it
+  MUST work — see LP-1b.
+- **LP-1b (captain's real-line shape): allow `--plugin-dir`/`--model`-style host
+  flags BEFORE the trailing task without a `--`, by making the trailing-task rule
+  "last token is bare AND the token before it is not a known value-taking host
+  flag we recognize."** Since we don't model the full host vocabulary, the safe
+  set is small: recognize the handful of value-taking host flags the captain
+  actually uses (`--model`/`-m`, `--plugin-dir`, `--resume`/`-r` non-`=` form,
+  `--add-dir`) only for the purpose of NOT mis-claiming their value as the task.
+  This is a heuristic and is brittle.
+
+**RECOMMENDATION (needs captain confirm): LP-1a + a leading-task convention.**
+Make the trailing task the LAST token only when there is no `--` fence; require the
+operator to put host flags AFTER a `--` fence when combining with a task. BUT the
+captain's `--plugin-dir P "task"` line has the flag BEFORE the task. To honor it
+WITHOUT a host-flag vocabulary, flip the convention: **the task is the FIRST bare
+positional, and host flags follow.** No — `--plugin-dir`'s value is bare and would
+be stolen. There is no vocabulary-free rule that handles `--plugin-dir P "task"`
+unambiguously. **Therefore the cleanest contract is: the task is the trailing
+positional and host flags that take values must be fenced after `--`** — i.e.
+`spacedock claude --safehouse-enable=docker "task" -- --model gpt-x --plugin-dir P`.
+This is a small ask of the operator and is the ONLY vocabulary-free, unambiguous
+rule. The captain's muscle-memory line (`--plugin-dir P "task"`) would need the
+fence: `spacedock claude "task" -- --plugin-dir P`. **OPEN-LP1: captain confirms
+the fence convention vs. paying for a small recognized-host-flag table (LP-1b).**
+
+**Codex symmetry:** identical rule. `spacedock codex "task"` → `codexBase + " " +
+task`; bare → base only; resume → none (LP-2).
+
+### Design: codex resume subcommand + bare codex (LP-2)
+
+Codex's resume is a SUBCOMMAND (`codex resume <uuid>`), not a flag — unlike claude's
+`--resume`. The real `ps` line is `safehouse … codex --dangerously-bypass… resume
+<uuid>` with NO prompt appended.
+
+- **Detect resume as the first host-passthrough token being `resume`.** When the
+  post-front-door passthrough begins with `resume`, forward `resume <rest>` verbatim
+  and append NO prompt (mirrors claude's `containsResume` suppression, but codex's
+  trigger is the leading subcommand token, not a flag anywhere in the args).
+- **Bare codex (no task, no resume): pick base-prompt, NOT truly-bare.** The `ps`
+  shows BOTH (line 9 truly-bare `codex --dangerously-bypass…`; line 10 base prompt).
+  **DECISION: bare `spacedock codex` → base prompt** (the FO-skill bootstrap), for
+  symmetry with `spacedock claude` (which always appends base when not resuming) and
+  because the launcher's PURPOSE is to start the first officer — a truly-bare codex
+  opens an idle agent with no FO selection, defeating the launcher. The truly-bare
+  interactive form is still reachable via `spacedock codex resume` semantics or by
+  running `codex` directly outside the launcher; we do not add a flag for it (YAGNI).
+  Rationale pinned in LP-AC-2.
+
+### Design: `--plugin-dir` dev-mode + contract-gate interaction (LP-3)
+
+Almost every real claude line carries `--plugin-dir /Users/clkao/git/spacedock`
+(and sometimes a 2nd `--plugin-dir …/noteplan-plugin`) — the captain's PRIMARY dev
+workflow, loading the LOCAL plugin checkout. Two requirements:
+
+1. **Passthrough verbatim, multiplicity preserved.** One or more `--plugin-dir
+   <path>` forward unchanged into the inner `claude` argv in operator order. This is
+   already true (they ride the host-passthrough channel); LP-3 only PINS it with an
+   oracle and confirms the trailing-task rule (LP-1) does not steal a `--plugin-dir`
+   value.
+2. **The contract gate must NOT block a `--plugin-dir` dev launch.** The gate
+   resolves the INSTALLED plugin's manifest and compares `requires-contract`. But a
+   `--plugin-dir` launch loads the LOCAL checkout, whose contract is whatever the
+   dev tree is — the installed-plugin verdict is irrelevant (and may fail-fast on a
+   stale or absent install, blocking the captain's core loop).
+
+   **DECISION (recommended): detecting any `--plugin-dir` in passthrough relaxes the
+   gate — equivalent to an implicit `--skip-contract-check`.** Rationale: a
+   `--plugin-dir` launch BYPASSES the installed plugin entirely, so gating on the
+   installed plugin's contract is meaningless. The local checkout is the source of
+   truth; if it is contract-incompatible the dev will see it at runtime. This is the
+   narrowest rule (detect-and-relax), needs no new flag, and matches the existing
+   `--skip-contract-check` escape exactly. The operator can still pass
+   `--skip-contract-check` explicitly; `--plugin-dir` simply implies it.
+
+   **Alternative considered (rejected): auto-bootstrap** (have the gate point the
+   local `--plugin-dir` at a contract check of the dev tree). Rejected as
+   over-engineering — there is no installed manifest at the `--plugin-dir` path to
+   verify in the gate's vocabulary, and YAGNI: the dev who passes `--plugin-dir`
+   already owns the local tree's correctness.
+
+   **Codex parity:** codex has a `--plugin-dir` analog only if the captain uses it;
+   the `ps` shows `--plugin-dir` on claude lines only. **DECISION: apply the same
+   relax rule symmetrically in `runCodex`** (cheap, consistent, no extra cost) so
+   `spacedock codex --plugin-dir P` also relaxes the gate. Pinned in LP-AC-3.
+
+   Interaction with cycle-2: the `--safehouse*` design is UNCHANGED. `--plugin-dir`
+   rides the host-passthrough channel (it IS a host flag); only its presence is
+   inspected to relax the gate. It does not affect the wrap-trigger OR.
+
+## Acceptance criteria (cycle 3 — launch parity; additive to AC-1..AC-8)
+
+**LP-AC-1 — trailing-positional task → base + " " + task (claude & codex).**
+`spacedock claude "do the thing"` (no `.safehouse`, compatible plugin) produces an
+inner claude argv whose LAST token is `bootstrapPrompt + " " + "do the thing"`;
+bare `spacedock claude` produces an inner argv whose last token is `bootstrapPrompt`
+exactly (no trailing space). Same shape for codex with `codexBootstrapPrompt`. A
+`--`-fenced host flag (`spacedock claude "task" -- --model gpt-x`) forwards
+`--model gpt-x` to claude AND appends `base + " " + task` as the last token.
+Verified by: recorded-`Launch` oracles asserting the exact last token equals the
+concatenation, plus a fenced-passthrough oracle asserting both the host flag and
+the concatenated prompt appear.
+(Pending OPEN-LP1: if the captain picks the recognized-host-flag table LP-1b, add
+an oracle for `spacedock claude --plugin-dir P "task"` with no fence → `P` forwarded
+and `base + " " + task` last.)
+
+**LP-AC-2 — codex resume subcommand suppresses the prompt; bare codex gets base.**
+`spacedock codex resume <uuid>` (passthrough begins with `resume`) forwards
+`resume <uuid>` into the inner codex argv and appends NO prompt (no `codexBootstrapPrompt`
+token anywhere). Bare `spacedock codex` (no task, no resume) appends
+`codexBootstrapPrompt` exactly (the base-prompt decision, NOT truly-bare).
+Verified by: a recorded-`Launch` oracle for `resume <uuid>` asserting `resume`,
+`<uuid>` present and NO prompt token; a bare-codex oracle asserting the last token
+is `codexBootstrapPrompt`.
+
+**LP-AC-3 — `--plugin-dir` passes through (multiplicity) AND relaxes the gate.**
+`spacedock claude --plugin-dir /a --plugin-dir /b` forwards both `--plugin-dir /a`
+and `--plugin-dir /b` verbatim into the inner claude argv in order, AND launches
+even when the installed-plugin gate would FAIL (e.g. a too-old-binary or
+no-plugin-found manifest) — `--plugin-dir` presence relaxes the gate like an
+implicit `--skip-contract-check`. Same relax rule for `spacedock codex --plugin-dir
+/a`. Without `--plugin-dir` (and without `--skip-contract-check`) the gate still
+fails fast (the cycle-1/2 gate oracles continue to pass unchanged).
+Verified by: a recorded-`Launch` oracle with a failing manifest + `--plugin-dir`
+asserting rc=0 and both `--plugin-dir` tokens in order; a regression assertion that
+a failing manifest WITHOUT `--plugin-dir` still returns rc≠0 with no Launch.
+
+## Test plan (cycle 3 additions)
+- **Level:** same Go unit level — recorded-`Launch` oracles in
+  `internal/cli/safehouse_frontdoor_test.go` (or a sibling `frontdoor` test file)
+  via the existing `fakeHost`/`equalArgv`/`safehouseFixtureDir` harness. The task
+  concatenation, codex-resume suppression, and gate-relax are all argv-shape +
+  rc-shape claims fully observable at unit level.
+- **Cost:** low; reuses the existing harness. A handful of new test funcs per LP-AC.
+- **Parser tests:** the trailing-task split logic (LP-1) gets a focused table test
+  over `splitFrontDoorArgs` (or its successor) — inputs → (passthrough, task,
+  forceSafehouse, safehouseFlags, skipCheck) — covering: pure task, fenced task,
+  bare, `--`-only-passthrough, resume.
+
+## Notes / sequencing (cycle 3)
+- All cycle-3 work lands in the SAME `runClaude` + `runCodex` revision as the
+  cycle-2 `extra`-slot threading and OR wrap-trigger. `splitFrontDoorArgs` grows the
+  task return (and the cycle-2 `forceSafehouse`/`safehouseFlags` returns) in one
+  coherent pass. No concurrent migration; the `codex-safehouse-launcher` worktree
+  has merged (per assignment: claude merged, codex merged), so this is now a single
+  serialized revision of `frontdoor.go`, not a post-merge rebase.
+- OPEN-LP1 (trailing-task grammar: fence convention vs. recognized-host-flag table)
+  is the one design decision left for the captain. Recommendation: ship the
+  vocabulary-free fence convention (LP-1a) first; add the small recognized-flag
+  table (LP-1b) only if the captain's muscle-memory `--plugin-dir P "task"` line is
+  worth the brittleness. Both are observable at unit level; the AC text flags the
+  conditional oracle.
+- The `--plugin-dir`-relaxes-gate rule (LP-3) reuses the existing `skipCheck`
+  plumbing — no new gate path, just an additional trigger for the existing bypass.
+
+## Stage Report: ideation (cycle 3)
+
+Captain expanded scope to COMPREHENSIVE launch parity: the cycle-2 sandbox knobs PLUS
+the three launch-arg gaps from the captain's real `ps` (custom task prompt, codex
+resume/bare, `--plugin-dir` dev-mode + gate), as one coherent `runClaude`+`runCodex`
+revision.
+
+- DONE: Custom-task-prompt as recorded-Launch oracles (captain UX = trailing positional): `spacedock claude "task"` → claude prompt = base + ' ' + task; bare `spacedock claude` → base only; resume (family) → NO prompt. Same shape for codex. Pin how the trailing task is distinguished from the existing front-door flags + claude/codex passthrough.
+  LP-1 + LP-AC-1. Decision: task = SINGLE TRAILING bare (non-`-`) positional, not shadowed by a `--` fence; host value-taking flags fence after `--`. The vocabulary-free rule (we forward host flags verbatim, so cannot model their value-arity). OPEN-LP1 left for captain: fence convention (recommended) vs. a small recognized-host-flag table to honor the muscle-memory `--plugin-dir P "task"` line.
+- DONE: codex resume + bare: detect codex's `resume` SUBCOMMAND (forward `resume <id>`, NO prompt); resolve bare `spacedock codex` (base vs truly-bare) with rationale + oracle.
+  LP-2 + LP-AC-2. Resume = leading passthrough token `resume` (codex's subcommand, distinct from claude's `--resume` flag) → forward verbatim, suppress prompt. Bare codex DECISION: base prompt (not truly-bare) — symmetric with claude, and the launcher's purpose is to start the FO; a truly-bare codex opens an idle no-FO agent. Truly-bare not given a flag (YAGNI).
+- DONE: `--plugin-dir` dev-mode + contract-gate: forward one or MORE `--plugin-dir <path>` verbatim (passthrough), AND the contract gate must NOT block a `--plugin-dir` dev launch. Design the gate interaction with a behavioral oracle. Keep cycle-2 --safehouse design intact.
+  LP-3 + LP-AC-3. Decision: presence of any `--plugin-dir` in passthrough RELAXES the gate = implicit `--skip-contract-check` (a `--plugin-dir` launch loads the LOCAL checkout, so the installed-plugin verdict is irrelevant). Narrowest rule, reuses existing `skipCheck` plumbing, no new flag. Auto-bootstrap alternative rejected (over-engineering/YAGNI). Applied symmetrically in `runCodex`. Multiplicity preserved; cycle-2 `--safehouse*` wrap-trigger unchanged.
+
+### Summary
+Expanded the entity from sandbox-knob passthrough to comprehensive launch parity, folding the three `ps`-revealed gaps into one `runClaude`+`runCodex` revision additive to AC-1..AC-8. Key decisions: (1) trailing task = single trailing bare positional, vocabulary-free, with host value-flags fenced after `--`; the one captain-facing open question (OPEN-LP1) is the fence convention vs. a small recognized-host-flag table for the muscle-memory `--plugin-dir P "task"` line. (2) codex `resume` is detected as the leading passthrough subcommand token (distinct from claude's `--resume` flag) and suppresses the prompt; bare codex gets the base prompt, not truly-bare, for symmetry and because the launcher exists to start the FO. (3) any `--plugin-dir` in passthrough relaxes the contract gate (implicit `--skip-contract-check`) since the local checkout supersedes the installed plugin — reusing existing `skipCheck` plumbing, applied symmetrically to codex, rejecting an auto-bootstrap alternative as over-engineering. Three new ACs (LP-AC-1..3) pinned as recorded-`Launch`/rc oracles on the existing `fakeHost` harness plus a parser table test. No production code written. Implementation is a single serialized `frontdoor.go` revision (codex-safehouse-launcher merged); no concurrent migration.
