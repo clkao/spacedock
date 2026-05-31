@@ -1,7 +1,7 @@
 ---
 id: 5an0s2dqb0nh18n7nn6x07vx
 title: Land launcher on next + document the fresh-install user journey
-status: implementation
+status: validation
 source: sprint — Ship the Launcher slice D (captain, 2026-05-30)
 started: 2026-05-31T03:20:03Z
 completed:
