@@ -1,13 +1,13 @@
 ---
 id: rgsk9fyka3s5ah87rb773a2f
 title: Homebrew own-tap — spacedock-dev/homebrew-tap formula
-status: ideation
+status: implementation
 source: sprint — Ship the Launcher slice B (captain, 2026-05-30)
 started: 2026-05-31T01:32:22Z
 completed:
 verdict:
 score: "0.28"
-worktree:
+worktree: /Users/clkao/git/spacedock-research/spacedock-v1/.worktrees/spacedock-ensign-homebrew-tap
 issue:
 ---
 
