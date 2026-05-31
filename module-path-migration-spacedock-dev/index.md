@@ -29,3 +29,16 @@ Verified by: `git diff` is import-path-only (no logic edits); the full suite gre
 
 ## Notes
 - 13 `*.go` files + `go.mod` reference the path. Sequence: all launcher/test work is merged on main (clean tree) — safe to rewrite whole-tree now. Coordinates with the queued dispatch-fix (k69e…) which also touches build.go — sequence them, not concurrent.
+
+## Stage Report: implementation
+
+- DONE: Rewrite the module path `github.com/clkao/spacedock-v1` → `github.com/spacedock-dev/spacedock` in go.mod AND every `*.go` import (13 files). Confirm ZERO remaining refs.
+  `grep -rl clkao/spacedock-v1 --include='*.go' .` == 0; go.mod declares `module github.com/spacedock-dev/spacedock`. 14 files rewritten via `grep -rl | while read; sed`.
+- DONE: Gates green with REAL captured exit codes, then a binary smoke.
+  build/vet exit 0; gofmt -l clean; `go test ./...` 470 passed (exit 0); `go test -race ./...` 470 passed (exit 0); binary rebuilt, `./spacedock --version` → `spacedock 0.1.0-dev (contract 1)`, `./spacedock status --workflow-dir docs/dev --json` → `{"command":"status","entities":[]}` (both exit 0).
+- DONE: Diff is import-path-only — NO logic changes. Commit on the worktree branch.
+  Commit 6364a8b on `spacedock-ensign/module-path-migration`: 14 files, 17 insertions / 17 deletions, every hunk a path-string substitution.
+
+### Summary
+
+Pure mechanical module-path rename `github.com/clkao/spacedock-v1` → `github.com/spacedock-dev/spacedock` across go.mod + 13 `*.go` files. No logic touched; the diff is 17/17 line-for-line path swaps. All gates green (build, vet, gofmt, 470 tests, 470 race tests) and the rebuilt binary runs `--version` and `status --json` cleanly. Per scope: no plugin.json, no marketplace, no remote/push — those belong to fresh-install-journey (D) and the FO's post-merge push.
