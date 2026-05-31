@@ -105,6 +105,30 @@ func TestSomeCommitNamesOnly(t *testing.T) {
 	})
 }
 
+// TestLiveStageReportHeading pins the stage-agnostic heading anchor the live test
+// uses. The real full FO cycle finishes at the TERMINAL stage, so the ensign that
+// completes it writes `## Stage Report: done` — the backlog-specific skeleton regex
+// would never match. This proves the live regex matches ANY named stage heading and
+// still goes RED when there is no `## Stage Report:` section at all (the
+// incomplete-cycle shape).
+func TestLiveStageReportHeading(t *testing.T) {
+	if !liveStageReportHeading.MatchString("## Stage Report: done\n- DONE: x") {
+		t.Error("must match the terminal `## Stage Report: done` heading")
+	}
+	if !liveStageReportHeading.MatchString("## Stage Report: backlog\n- DONE: x") {
+		t.Error("must still match the backlog heading — any named stage counts")
+	}
+	if !liveStageReportHeading.MatchString("body\n\n## Stage Report: implementation\n") {
+		t.Error("must match a stage-report heading appended mid-body")
+	}
+	if liveStageReportHeading.MatchString("---\nstatus: done\n---\nbody with no stage report") {
+		t.Error("must NOT match an entity with no `## Stage Report:` section")
+	}
+	if liveStageReportHeading.MatchString("## Stage Report: \n") {
+		t.Error("must NOT match a heading with no named stage after the colon")
+	}
+}
+
 // TestTerminalFrontmatterAnchors pins the go-red discipline of the terminal
 // frontmatter assertions: they match a finalized entity whose verdict is SET to
 // ANY non-empty value (the exact word is FO judgment that varies by model —

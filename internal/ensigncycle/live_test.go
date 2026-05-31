@@ -21,11 +21,13 @@ import (
 // `done` stage. A real full-cycle FO makes MULTIPLE commits and ARCHIVES the
 // terminal entity to `_archive/`, so the assertions target the REAL
 // completed-and-archived end-state: the entity (located in place OR under
-// `_archive/`) carries the skeleton's anchored stage-report shape
-// (stageReportHeading, doneMarker, `### Summary`, NOT checkboxBullet) AND the
+// `_archive/`) carries the anchored stage-report shape
+// (liveStageReportHeading, doneMarker, `### Summary`, NOT checkboxBullet) AND the
 // FO's terminal frontmatter (`status: done`, `verdict: passed`), and SOME commit
-// in the history is path-scoped to the entity. The stage-report regexes are
-// reused verbatim from the skeleton; the producer is the real runtime.
+// in the history is path-scoped to the entity. The heading regex is stage-agnostic
+// (the real cycle finishes at the TERMINAL stage, so the ensign writes
+// `## Stage Report: done`); the remaining regexes are reused verbatim from the
+// skeleton and the producer is the real runtime.
 //
 // The `//go:build live` tag keeps this out of the default `go test ./...` suite
 // (the secret-free offline job). It compiles and runs ONLY under
@@ -63,9 +65,9 @@ func TestLiveEnsignCycle(t *testing.T) {
 
 	// Stage the SAME flat-entity backlog fixture the skeleton builds: a
 	// git-init'd root with a non-worktree workflow README and a flat entity in
-	// the initial (backlog) stage. The produced stage-report heading is
-	// `## Stage Report: backlog`, matching the package-level stageReportHeading
-	// regex exactly.
+	// the initial (backlog) stage. The real FO drives it to the TERMINAL stage,
+	// so the ensign that finishes the cycle writes `## Stage Report: done`, which
+	// the stage-agnostic liveStageReportHeading regex matches.
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, "README.md"), readmeNonWorktree())
 	entityPath := filepath.Join(root, "make-it-work.md")
@@ -122,7 +124,7 @@ func TestLiveEnsignCycle(t *testing.T) {
 	// (a) the appended stage-report section has the protocol shape: heading, a
 	// DONE accounting marker, a Summary, and NO checkbox-bullet form. An
 	// INCOMPLETE cycle (the haiku run) appends no stage report, so these go red.
-	if !stageReportHeading.MatchString(entity) {
+	if !liveStageReportHeading.MatchString(entity) {
 		t.Errorf("entity missing anchored stage-report heading\n%s", entity)
 	}
 	if !doneMarker.MatchString(entity) {

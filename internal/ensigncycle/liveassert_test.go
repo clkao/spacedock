@@ -11,6 +11,15 @@ import (
 )
 
 var (
+	// liveStageReportHeading anchors the appended stage-report heading for ANY
+	// stage. The deterministic skeleton drives the fixture ONE stage in place so it
+	// can pin the exact `## Stage Report: backlog` heading, but a real full FO cycle
+	// runs the entity all the way to the TERMINAL stage, so the ensign that finishes
+	// the cycle writes `## Stage Report: done`. The live test gates on the protocol
+	// SHAPE (a stage-report section exists), not the stage word — `\S` after the
+	// colon requires a named stage while rejecting an entity with no stage report at
+	// all (the incomplete-cycle shape, which goes red).
+	liveStageReportHeading = regexp.MustCompile(`(?m)^## Stage Report: \S`)
 	// frontmatterField anchors the terminal `status: done` frontmatter line the
 	// FO writes when the entity reaches the terminal stage. Anchored at the line
 	// start so a `status:` mention in prose cannot satisfy it.
