@@ -1,0 +1,43 @@
+# Bumps the marketplace entry's calendar version on each `next` publish (AC-2d).
+# The calendar key (`0.0.YYYYMMDDNN`) is the `claude plugin update` re-pull key:
+# bumping it is the ONLY thing that makes `update` re-pull the moving `next`
+# branch. Tied to the CI that publishes `next` so it cannot be forgotten.
+name: next-publish
+
+on:
+  push:
+    branches:
+      - next
+    # The bump commit only touches marketplace.json; ignoring that path stops the
+    # bump from re-triggering itself in a loop.
+    paths-ignore:
+      - ".claude-plugin/marketplace.json"
+
+permissions:
+  contents: write
+
+jobs:
+  bump-calendar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Bump marketplace calendar version
+        run: |
+          set -euo pipefail
+          go run ./cmd/spacedock-release bump-calendar .claude-plugin/marketplace.json
+          if git diff --quiet -- .claude-plugin/marketplace.json; then
+            echo "calendar version unchanged; nothing to commit"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git commit -m "next: bump marketplace calendar version" \
+            -- .claude-plugin/marketplace.json
+          git push origin next

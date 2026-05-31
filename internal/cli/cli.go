@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strings"
 
 	"github.com/spacedock-dev/spacedock/internal/contract"
 	"github.com/spacedock-dev/spacedock/internal/dispatch"
@@ -51,16 +52,16 @@ func run(ctx context.Context, args []string, env []string, dir string, stdin io.
 	case "dispatch":
 		return dispatch.Run(args[1:], stdin, stdout, stderr)
 	case "claude":
-		devBranch = envValue(env, "SPACEDOCK_DEV_BRANCH")
+		applyDevBranchOverride(env)
 		return runClaude(ctx, args[1:], dir, execHost{}, exec.LookPath, stdout, stderr)
 	case "codex":
-		devBranch = envValue(env, "SPACEDOCK_DEV_BRANCH")
+		applyDevBranchOverride(env)
 		return runCodex(ctx, args[1:], dir, execHost{}, exec.LookPath, stdout, stderr)
 	case "init":
-		devBranch = envValue(env, "SPACEDOCK_DEV_BRANCH")
+		applyDevBranchOverride(env)
 		return runInit(ctx, args[1:], execHost{}, stdout, stderr)
 	case "doctor":
-		devBranch = envValue(env, "SPACEDOCK_DEV_BRANCH")
+		applyDevBranchOverride(env)
 		return runDoctor(ctx, args[1:], execHost{}, stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "unknown command: %s\n", args[0])
@@ -90,15 +91,17 @@ func runStatus(ctx context.Context, args []string, env []string, dir string, std
 	return code
 }
 
-// envValue returns the value of key in a KEY=VALUE env slice, or "" when absent.
-func envValue(env []string, key string) string {
-	prefix := key + "="
+// applyDevBranchOverride lets SPACEDOCK_DEV_BRANCH override the pinned devBranch
+// default (and the linker stamp). An UNSET env var leaves the default in place —
+// the released binary keeps targeting `@next` — while an explicit value (including
+// empty, to force the no-ref release path) wins.
+func applyDevBranchOverride(env []string) {
 	for _, kv := range env {
-		if len(kv) >= len(prefix) && kv[:len(prefix)] == prefix {
-			return kv[len(prefix):]
+		if strings.HasPrefix(kv, "SPACEDOCK_DEV_BRANCH=") {
+			devBranch = strings.TrimPrefix(kv, "SPACEDOCK_DEV_BRANCH=")
+			return
 		}
 	}
-	return ""
 }
 
 // cwd returns the working directory, falling back to "" so a getwd failure does

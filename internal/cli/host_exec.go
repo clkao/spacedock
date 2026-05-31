@@ -183,6 +183,16 @@ func manifestSubpath(host string) string {
 	return filepath.Join(".claude-plugin", "plugin.json")
 }
 
+// marketplaceAddArg composes the `claude plugin marketplace add` target: the
+// bare source, or `source@branch` when a branch is pinned (the @ref shorthand the
+// host resolves against the repo-root marketplace.json on that ref).
+func marketplaceAddArg(source, branch string) string {
+	if branch != "" {
+		return source + "@" + branch
+	}
+	return source
+}
+
 // Launch replaces the current process with argv via execve, so the host CLI
 // owns the terminal (interactive `claude --agent …`). It returns only when exec
 // itself fails.
@@ -201,10 +211,7 @@ func (execHost) Install(host, source, branch string) (string, error) {
 	if host != "claude" {
 		return "", fmt.Errorf("programmatic install is only supported for claude; codex install is documented prose")
 	}
-	marketplaceArg := source
-	if branch != "" {
-		marketplaceArg = source + "@" + branch
-	}
+	marketplaceArg := marketplaceAddArg(source, branch)
 	var sb strings.Builder
 	for _, args := range [][]string{
 		{"plugin", "marketplace", "add", marketplaceArg},

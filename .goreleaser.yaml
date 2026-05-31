@@ -25,9 +25,15 @@ builds:
     # const, for the linker to write it. {{.Version}} is goreleaser's
     # git-describe-derived version (the tag on a release, a snapshot string on
     # --snapshot).
+    # devBranch pins the marketplace @ref the released binary installs from. Until
+    # `next` is the repository's default branch, the root marketplace.json lives on
+    # `next`, so `spacedock init` must target `spacedock-dev/spacedock@next`. The
+    # source default is already `next`; the stamp makes the pin explicit at build
+    # time, mirroring the Version stamp (var, not const, for -X to write it).
     ldflags:
       - -s -w
       - -X github.com/spacedock-dev/spacedock/internal/cli.Version={{ .Version }}
+      - -X github.com/spacedock-dev/spacedock/internal/cli.devBranch=next
 
 archives:
   # Asset name template is the B<->C contract with the homebrew-tap formula:
