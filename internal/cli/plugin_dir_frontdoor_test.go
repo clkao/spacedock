@@ -37,19 +37,21 @@ func (h *resolveErrHost) ResolveManifest(string) (string, error) {
 	return "", errors.New("ResolveManifest must not be called on the --plugin-dir dev lane")
 }
 
-// TestDevLanePluginDirReachesLaunchSeam locks AC-2(a): `spacedock claude
-// --plugin-dir <vendored-repo> -- "task"` reaches the launch seam with the inner
-// argv beginning `claude --agent spacedock:first-officer`, the fenced task
-// appended, and NO contract-gate rejection — proving the manifest this entity
-// vendors flows through the dev lane. The host's ResolveManifest is wired to
-// fail; a launch on exit 0 with the FO seam present proves the gate was relaxed
-// (ResolveManifest never consulted).
+// TestDevLanePluginDirReachesLaunchSeam locks AC-2(a) under the Option-2 grammar:
+// `spacedock claude "task" -- --plugin-dir <vendored-repo>` reaches the launch
+// seam with the inner argv beginning `claude --agent spacedock:first-officer`, the
+// task-bearing prompt appended LAST, and NO contract-gate rejection — proving the
+// manifest this entity vendors flows through the dev lane. The host's
+// ResolveManifest is wired to fail; a launch on exit 0 with the FO seam present
+// proves the gate was relaxed (ResolveManifest never consulted). Because the
+// prompt is always the last spacedock-built token and --plugin-dir rides in the
+// post-`--` passthrough, the prompt is structurally unswallowable (AC-3).
 func TestDevLanePluginDirReachesLaunchSeam(t *testing.T) {
 	repo := vendoredRepoRoot(t)
 	host := &resolveErrHost{}
 	var stdout, stderr bytes.Buffer
 
-	code := runClaude(context.Background(), []string{"--plugin-dir", repo, "--", "do the thing"}, t.TempDir(), host, lookFound, &stdout, &stderr)
+	code := runClaude(context.Background(), []string{"do the thing", "--", "--plugin-dir", repo}, t.TempDir(), host, lookFound, &stdout, &stderr)
 
 	if code != 0 {
 		t.Fatalf("exit = %d, want 0 (--plugin-dir <repo> must relax the gate); stderr=%q", code, stderr.String())
@@ -64,5 +66,10 @@ func TestDevLanePluginDirReachesLaunchSeam(t *testing.T) {
 	}
 	if !equalArgv(host.launchedArg, want) {
 		t.Fatalf("launch argv = %v, want %v", host.launchedArg, want)
+	}
+	// The last token is the spacedock-built prompt, and --plugin-dir <repo> rides
+	// before it in passthrough — no dangling host flag is adjacent to the prompt.
+	if last := host.launchedArg[len(host.launchedArg)-1]; last != wantBootstrapPrompt+" do the thing" {
+		t.Fatalf("last token = %q, want the spacedock prompt (must be unswallowable)", last)
 	}
 }

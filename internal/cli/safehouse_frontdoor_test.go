@@ -40,7 +40,7 @@ func TestClaudeSafehousePresentWrapsArgv(t *testing.T) {
 	fake := &fakeHost{manifest: compatibleManifest(t)}
 	var stdout, stderr bytes.Buffer
 
-	code := runClaude(context.Background(), []string{"--foo"}, dir, fake, lookFound, &stdout, &stderr)
+	code := runClaude(context.Background(), []string{"--", "--foo"}, dir, fake, lookFound, &stdout, &stderr)
 
 	if code != 0 {
 		t.Fatalf("exit = %d, want 0 (stderr=%q)", code, stderr.String())
@@ -79,7 +79,7 @@ func TestClaudeNoSafehouseLaunchesPlain(t *testing.T) {
 	fake := &fakeHost{manifest: compatibleManifest(t)}
 	var stdout, stderr bytes.Buffer
 
-	code := runClaude(context.Background(), []string{"--foo"}, dir, fake, lookFound, &stdout, &stderr)
+	code := runClaude(context.Background(), []string{"--", "--foo"}, dir, fake, lookFound, &stdout, &stderr)
 
 	if code != 0 {
 		t.Fatalf("exit = %d, want 0 (stderr=%q)", code, stderr.String())
@@ -156,7 +156,7 @@ func TestCodexSafehousePresentWrapsArgv(t *testing.T) {
 	fake := &fakeHost{manifest: compatibleManifest(t)}
 	var stdout, stderr bytes.Buffer
 
-	code := runCodex(context.Background(), []string{"--foo"}, dir, fake, lookFound, &stdout, &stderr)
+	code := runCodex(context.Background(), []string{"--", "--foo"}, dir, fake, lookFound, &stdout, &stderr)
 
 	if code != 0 {
 		t.Fatalf("exit = %d, want 0 (stderr=%q)", code, stderr.String())
@@ -201,7 +201,7 @@ func TestCodexNoSafehouseLaunchesPlainNoBypass(t *testing.T) {
 	fake := &fakeHost{manifest: compatibleManifest(t)}
 	var stdout, stderr bytes.Buffer
 
-	code := runCodex(context.Background(), []string{"--foo"}, dir, fake, lookFound, &stdout, &stderr)
+	code := runCodex(context.Background(), []string{"--", "--foo"}, dir, fake, lookFound, &stdout, &stderr)
 
 	if code != 0 {
 		t.Fatalf("exit = %d, want 0 (stderr=%q)", code, stderr.String())
@@ -285,7 +285,7 @@ func TestClaudeResumeFamilySuppressesBootstrapPrompt(t *testing.T) {
 			fake := &fakeHost{manifest: compatibleManifest(t)}
 			var stdout, stderr bytes.Buffer
 
-			code := runClaude(context.Background(), []string{tc.arg}, dir, fake, lookFound, &stdout, &stderr)
+			code := runClaude(context.Background(), []string{"--", tc.arg}, dir, fake, lookFound, &stdout, &stderr)
 
 			if code != 0 {
 				t.Fatalf("exit = %d, want 0 (stderr=%q)", code, stderr.String())

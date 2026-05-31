@@ -8,6 +8,8 @@ import (
 	"io"
 	"strings"
 
+	"github.com/spf13/pflag"
+
 	"github.com/spacedock-dev/spacedock/internal/contract"
 	"github.com/spacedock-dev/spacedock/internal/safehouse"
 )
@@ -93,7 +95,7 @@ func gateHost(ops hostOps, host string, stderr io.Writer) (ok bool) {
 // the installed plugin). `lookPath` resolves the safehouse binary (default
 // exec.LookPath; injected so tests pin not-found).
 func runClaude(ctx context.Context, args []string, dir string, ops hostOps, lookPath func(string) (string, error), stdout, stderr io.Writer) int {
-	fd, err := splitFrontDoorArgs(args)
+	fd, err := parseFrontDoorArgs(args)
 	if err != nil {
 		fmt.Fprintf(stderr, "spacedock claude: %v\n", err)
 		return 1
@@ -199,7 +201,7 @@ const codexBootstrapPrompt = "You totally got this. Take your time. I love you. 
 // `--plugin-dir`. `lookPath` resolves the safehouse binary (default exec.LookPath;
 // injected so tests pin not-found).
 func runCodex(ctx context.Context, args []string, dir string, ops hostOps, lookPath func(string) (string, error), stdout, stderr io.Writer) int {
-	fd, err := splitFrontDoorArgs(args)
+	fd, err := parseFrontDoorArgs(args)
 	if err != nil {
 		fmt.Fprintf(stderr, "spacedock codex: %v\n", err)
 		return 1
@@ -268,38 +270,81 @@ type frontDoorArgs struct {
 	skipCheck bool
 }
 
-const safehouseKnobPrefix = "--safehouse-"
+// frontDoorFlags binds the spacedock-owned front-door flags onto a pflag.FlagSet
+// so cobra owns their vocabulary natively: the three value-taking safehouse knobs
+// are StringArray (accept both `--flag value` and `--flag=value`, accumulate on
+// repeat), and the bare `--safehouse`/`--skip-contract-check` are Bool. The
+// returned pointers are read back by parseFrontDoorArgs after Parse. The same
+// binding feeds the per-command cobra help (AC-4), so the help and the parser
+// never drift.
+type frontDoorFlags struct {
+	safehouse *bool
+	skipCheck *bool
+	enable    *[]string
+	addDirs   *[]string
+	addDirsRO *[]string
+}
 
-// splitFrontDoorArgs parses the front-door grammar in one pass. Front-door flags
-// (`--skip-contract-check`, the bare `--safehouse`, and `--safehouse-<key>=…`
-// knobs) are consumed wherever they appear and never forwarded to the host. The
-// `--` fence convention (captain decision on OPEN-LP1) splits the rest: tokens
-// BEFORE the fence are host passthrough (value-taking host flags ride here and
-// forward verbatim); the bare text AFTER the fence is the launch-prompt task.
-// Without a fence everything is host passthrough and there is no task. The
-// `--safehouse-` knob keys are validated by safehouse.TranslateFlags at launch;
-// here a knob is only de-prefixed and collected.
-func splitFrontDoorArgs(args []string) (fd frontDoorArgs, err error) {
-	fenced := false
-	var taskTokens []string
-	for _, a := range args {
-		switch {
-		case a == "--skip-contract-check":
-			fd.skipCheck = true
-		case a == "--safehouse":
-			fd.forceSafehouse = true
-		case strings.HasPrefix(a, safehouseKnobPrefix):
-			fd.safehouseFlags = append(fd.safehouseFlags, strings.TrimPrefix(a, safehouseKnobPrefix))
-		case a == "--" && !fenced:
-			// The first `--` is the fence: host flags end, the task begins.
-			fenced = true
-		case fenced:
-			taskTokens = append(taskTokens, a)
-		default:
-			fd.passthrough = append(fd.passthrough, a)
-		}
+func bindFrontDoorFlags(fs *pflag.FlagSet) frontDoorFlags {
+	return frontDoorFlags{
+		safehouse: fs.Bool("safehouse", false,
+			"Force the safehouse sandbox wrap even without a .safehouse profile in the directory"),
+		skipCheck: fs.Bool("skip-contract-check", false,
+			"Bypass the contract gate and launch without resolving the installed plugin (bootstrap)"),
+		enable: fs.StringArray("safehouse-enable", nil,
+			"Enable a safehouse capability (KEY[,KEY]); repeatable; e.g. --safehouse-enable ssh,docker"),
+		addDirs: fs.StringArray("safehouse-add-dirs", nil,
+			"Grant safehouse read-write access to a directory; repeatable"),
+		addDirsRO: fs.StringArray("safehouse-add-dirs-ro", nil,
+			"Grant safehouse read-only access to a directory; repeatable"),
 	}
-	if fenced {
+}
+
+// parseFrontDoorArgs parses the Option-2 front-door grammar in one pass via a
+// pflag.FlagSet. cobra owns the spacedock flags wherever they appear before `--`;
+// the non-flag positionals before `--` join (single space) into the launch task;
+// everything after `--` forwards verbatim to the host as passthrough. This is the
+// grammar inversion: host flags now ride AFTER `--`, the task before — the prompt
+// is always spacedock-constructed and never adjacent to a value-taking host flag,
+// so no dangling host flag can swallow it. The collected safehouse-knob values are
+// re-prefixed to the `key=value` token form safehouse.TranslateFlags owns, so the
+// safehouse vocabulary (the comma-split on enable, the unknown-key error) is
+// unchanged — the space-form bug dies because cobra consumes the value as the
+// flag's argument instead of leaking it to passthrough.
+func parseFrontDoorArgs(args []string) (fd frontDoorArgs, err error) {
+	fs := pflag.NewFlagSet("spacedock-front-door", pflag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	flags := bindFrontDoorFlags(fs)
+	if err := fs.Parse(args); err != nil {
+		return frontDoorArgs{}, err
+	}
+
+	fd.forceSafehouse = *flags.safehouse
+	fd.skipCheck = *flags.skipCheck
+	for _, v := range *flags.enable {
+		fd.safehouseFlags = append(fd.safehouseFlags, "enable="+v)
+	}
+	for _, v := range *flags.addDirs {
+		fd.safehouseFlags = append(fd.safehouseFlags, "add-dirs="+v)
+	}
+	for _, v := range *flags.addDirsRO {
+		fd.safehouseFlags = append(fd.safehouseFlags, "add-dirs-ro="+v)
+	}
+
+	// ArgsLenAtDash is the count of positionals seen before `--` (or -1 when no
+	// `--` was given). Without a `--`, every positional is the task and nothing
+	// forwards. With a `--`, the pre-dash positionals join into the task and the
+	// post-dash positionals forward verbatim as host passthrough.
+	positionals := fs.Args()
+	dash := fs.ArgsLenAtDash()
+	var taskTokens []string
+	if dash < 0 {
+		taskTokens = positionals
+	} else {
+		taskTokens = positionals[:dash]
+		fd.passthrough = positionals[dash:]
+	}
+	if len(taskTokens) > 0 {
 		fd.task = strings.Join(taskTokens, " ")
 		fd.hasTask = true
 	}

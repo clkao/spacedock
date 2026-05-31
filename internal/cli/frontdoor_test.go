@@ -63,7 +63,7 @@ func TestClaudeFrontDoorLaunchesOnCompatible(t *testing.T) {
 	fake := &fakeHost{manifest: compatibleManifest(t)}
 	var stdout, stderr bytes.Buffer
 
-	code := runClaude(context.Background(), []string{"-p", "do the thing"}, t.TempDir(), fake, lookFound, &stdout, &stderr)
+	code := runClaude(context.Background(), []string{"--", "-p", "do the thing"}, t.TempDir(), fake, lookFound, &stdout, &stderr)
 
 	if code != 0 {
 		t.Fatalf("exit = %d, want 0 (stderr=%q)", code, stderr.String())
@@ -163,7 +163,7 @@ func TestCodexFrontDoorLaunchesOnCompatible(t *testing.T) {
 	fake := &fakeHost{manifest: compatibleManifest(t)}
 	var stdout, stderr bytes.Buffer
 
-	code := runCodex(context.Background(), []string{"-m", "gpt-x"}, dir, fake, lookFound, &stdout, &stderr)
+	code := runCodex(context.Background(), []string{"--", "-m", "gpt-x"}, dir, fake, lookFound, &stdout, &stderr)
 
 	if code != 0 {
 		t.Fatalf("exit = %d, want 0 (stderr=%q)", code, stderr.String())
