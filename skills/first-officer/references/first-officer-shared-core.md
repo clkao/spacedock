@@ -4,14 +4,15 @@ This file captures the shared first-officer semantics. Keep it aligned with `age
 
 ## Startup
 
-1. Discover the project root with `git rev-parse --show-toplevel`.
-2. Discover the workflow directory. Prefer an explicit user-provided path. Otherwise run `spacedock status --discover`: one path → use it, zero → report no workflow found, multiple → present the list to the operator (or, in single-entity mode, fail with an ambiguity error).
-3. Read `{workflow_dir}/README.md` to extract:
+1. **Contract version gate (per-session safety net).** Before any discovery or boot read, run `spacedock --version` and parse the `contract <N>` token from its output. Confirm `<N>` satisfies the contract range this FO contract was authored against: `>=1,<2`. The range is a literal in this contract so the gate does not depend on the installed plugin manifest being readable from inside the agent. If the token is outside the range (binary too old: `<N>` below the lower bound; plugin too old: `<N>` at or above the upper bound), or `spacedock --version` is unavailable, ABORT startup with the actionable mismatch message and run `spacedock doctor` for the per-class remedy — do NOT proceed to discovery or `--boot`. This catches the case where the binary on PATH at session time differs from the one present at install time.
+2. Discover the project root with `git rev-parse --show-toplevel`.
+3. Discover the workflow directory. Prefer an explicit user-provided path. Otherwise run `spacedock status --discover`: one path → use it, zero → report no workflow found, multiple → present the list to the operator (or, in single-entity mode, fail with an ambiguity error).
+4. Read `{workflow_dir}/README.md` to extract:
    - mission
    - entity labels
    - stage ordering and defaults from `stages.defaults` / `stages.states`
    - stage properties such as `initial`, `terminal`, `gate`, `worktree`, `concurrency`, `feedback-to`, `agent`
-4. Run `spacedock status --boot` for all startup information in one call. Parse the output sections:
+5. Run `spacedock status --boot` for all startup information in one call. Parse the output sections:
    - **MODS** — registered mod hooks by lifecycle point (startup, idle, merge). Run startup hooks before normal dispatch.
    - **ID_STYLE** — the workflow identity strategy: `sequential`, `sd-b32`, or `slug`.
    - **NEXT_ID** — strategy-dependent ID candidate. For `sequential`, this is the next numeric ID. For `sd-b32`, this is a full 24-character SD-B32 stored ID candidate and is not a reservation. For `slug`, this is `n/a (id-style: slug)`.
