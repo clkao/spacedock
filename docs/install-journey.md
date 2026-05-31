@@ -130,7 +130,10 @@ yield a stamped version.
    ./spacedock doctor --plugin-manifest .claude-plugin/plugin.json
    ```
 
-   Prints `OK: binary contract 1 satisfies plugin range >=1,<2.` exit 0.
+   Prints `OK: binary contract 1 satisfies plugin range >=1,<2.` followed by a
+   `Note: hosts emit a load-time warning for the 'requires-contract' field; this
+   is expected — the host ignores the field and spacedock reads it itself.` line,
+   exit 0.
 
 5. **Launch.**
 
