@@ -127,3 +127,8 @@ Also: a detached audit checkout .worktrees/audit-spacedock-packaging is removabl
 ## Debrief notes
 - external-tracker-checkpoint shipped PASSED but AC-6 was a prose self-oracle (the
   doc-only antipattern) — kept as the live example that motivated the principles.
+
+## Polish carried from tq (spacedock-packaging) validation audit (2026-05-31) — fold into codex-safehouse-launcher (be)
+The cycle-2 staff audit was CLEAN (no material); two Polish items, both in the codex resolver path (`internal/cli/host_exec.go`), to address when the codex launcher (A′) touches that file:
+1. LATENT BUG — `latestVersionDir` (host_exec.go ~:121-139) picks the LEXICALLY greatest cache dir name, not semver-greatest, so with stale dirs `0.9.0` + `0.10.0` it picks `0.9.0` (older), contradicting its own comment. Not a launch hole (still routes through ManifestVerdict→gate) and currently UNREACHABLE (real codex keeps one version dir). Bites only once `requires-contract` ships AND a 9→10 rollover leaves a stale dir. Fix: semver-aware compare or a doc note.
+2. TEST GAP — no unit tests for `latestVersionDir` / `codexEntryInstalled` / `codexHome` / the cache-path + degradation branches of `resolveCodexManifest`; the sole codex resolver test is a single-version happy-path integration test. The lexical bug above has no guarding test.
