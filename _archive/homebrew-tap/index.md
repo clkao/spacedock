@@ -1,14 +1,15 @@
 ---
 id: rgsk9fyka3s5ah87rb773a2f
 title: Homebrew own-tap — spacedock-dev/homebrew-tap formula
-status: validation
+status: done
 source: sprint — Ship the Launcher slice B (captain, 2026-05-30)
 started: 2026-05-31T01:32:22Z
-completed:
-verdict:
+completed: 2026-05-31T03:36:01Z
+verdict: PASSED
 score: "0.28"
-worktree: /Users/clkao/git/spacedock-research/spacedock-v1/.worktrees/spacedock-ensign-homebrew-tap
+worktree: 
 issue:
+archived: 2026-05-31T03:36:01Z
 ---
 
 Ship a Homebrew own-tap so `brew install` puts `spacedock` on PATH on a fresh Mac.
