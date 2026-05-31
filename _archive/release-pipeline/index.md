@@ -1,14 +1,15 @@
 ---
 id: jfk8g2h0h1wsbr3qtncsqsbt
 title: Release pipeline — version-stamped darwin binaries + GitHub Release (closes F9)
-status: validation
+status: done
 source: sprint — Ship the Launcher slice C (captain, 2026-05-30)
 started: 2026-05-31T01:32:22Z
-completed:
-verdict:
+completed: 2026-05-31T04:10:28Z
+verdict: PASSED
 score: "0.30"
-worktree: /Users/clkao/git/spacedock-research/spacedock-v1/.worktrees/spacedock-ensign-release-pipeline
+worktree: 
 issue:
+archived: 2026-05-31T04:10:28Z
 ---
 
 Build and publish version-stamped `spacedock` release artifacts so the brew formula has real `url` + `sha256`.
