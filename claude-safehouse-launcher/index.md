@@ -43,8 +43,8 @@ Verified by: temp HOME with no plugin; assert install-hint on stderr and neither
 **AC-4 — Missing safehouse (when `.safehouse` present) → clear error + install hint, rc≠0.**
 Verified by: a Go test with `.safehouse` present and `safehouse` absent from PATH observes a pinned install-hint on stderr, rc≠0, and no claude launch.
 
-**AC-5 — `--resume` suppresses the injected initial prompt.**
-Verified by: the stub harness observes that forwarding `--resume` produces argv WITHOUT the initial-prompt token.
+**AC-5 — a resume-family arg suppresses the injected initial prompt.**
+Verified by: the stub harness observes that forwarding any of claude's session-resume forms (`--resume`, `--resume=<id>`, `-r`, `--continue`, `-c`) produces argv WITHOUT the initial-prompt token.
 
 **AC-6 (captain-run, closes F3) — live safehouse smoke.**
 `safehouse --trust-workdir-config -- claude --agent spacedock:first-officer --help` yields claude's help (not a safehouse flag error) in a real unsandboxed shell. Run by the captain outside the sandbox; recorded as evidence. This is the riskiest unknown (Risk A) and gates implementation lock.
@@ -232,14 +232,18 @@ real exec, the message is actionable, AND the codex launcher reuses the same
 gate (M3). `lookPath` is injected (default `exec.LookPath`) so the test pins
 not-found deterministically.
 
-**AC-5 — `--resume` suppresses the bootstrap prompt; operator args still forward verbatim.**
-Exercise: `runClaude` with `.safehouse` present and args `{"--","--resume"}`.
-Observe: recorded argv forwards the operator's `--resume` and contains NO
-bootstrap-prompt token; argv ==
+**AC-5 — any resume-family arg suppresses the bootstrap prompt; operator args still forward verbatim.**
+The resume family is claude's full set of session-resume forms: `--resume`,
+`--resume=<id>`, `-r`, `--continue`, `-c`. A resume already carries its own
+session intent, so the bootstrap prompt would fight it.
+Exercise (table-driven): `runClaude` with `.safehouse` present and args
+`{"--", <resume-form>}` for each form above.
+Observe: recorded argv forwards the operator's resume arg verbatim and contains
+NO bootstrap-prompt token; e.g. for `--resume` argv ==
 `["safehouse","--trust-workdir-config","--","claude","--dangerously-skip-permissions","--agent","spacedock:first-officer","--resume"]`.
-Companion case (the AC-1 positive already covers it): WITHOUT `--resume` the
-argv ends with the bootstrap-prompt token. The two cases together pin the
-"appended unless `--resume`" rule from both sides.
+Companion case (the AC-1 positive already covers it): WITHOUT a resume-family arg
+the argv ends with the bootstrap-prompt token. The two together pin the
+"appended unless a resume-family arg is forwarded" rule from both sides.
 
 **AC-6 (captain-run, closes F3 / Risk A) — live safehouse smoke.**
 Captain runs, OUTSIDE the sandbox, in a real unsandboxed shell (the command
@@ -345,3 +349,16 @@ Validator recommended PASSED; the parallel staff audit flagged ONE material inte
 - **`--resume` suppression is under-broad** (`frontdoor.go:96,125-132`). `containsResume` matches only the literal token `--resume`, so the bootstrap prompt is NOT suppressed for claude's other resume forms — `-r` (short alias), `--resume=<id>` (equals form), and `-c`/`--continue`. With any of those the operator resumes a prior session AND the injected bootstrap prompt lands as a fresh user turn — the exact "prompt fights the resumed session" failure the suppression exists to prevent. Code satisfied the literal "unless --resume" + AC-5, but not the captain's launch-and-go-UNLESS-resuming intent. **Captain decision: widen.**
 
 Fix: widen `containsResume` to the resume family — `--resume`, `--resume=<id>`, `-r`, `--continue`, `-c` — and expand the AC-5 oracle to assert prompt suppression for each form. Then re-validate (fresh) + re-audit the widening. Polish items (redundant exec-time safehouse LookPath; test-side bootstrapPrompt duplication) are non-blocking and left as-is.
+
+## Stage Report: implementation (cycle 2)
+
+- DONE: Widen `containsResume` to suppress the bootstrap prompt for claude's full session-resume family — `--resume`, `--resume=<id>`, `-r`, `--continue`, `-c` — not just the literal `--resume` token (audit finding).
+  frontdoor.go containsResume now switches on `--resume`/`-r`/`--continue`/`-c` plus a `--resume=` prefix check; commit 04c7d30.
+- DONE: Expand the AC-5 oracle to assert prompt suppression for EACH resume form (table-driven) and update the entity AC-5 text + Hardened-oracle AC-5 to name the family.
+  safehouse_frontdoor_test.go TestClaudeResumeFamilySuppressesBootstrapPrompt (5 subtests, one per form) all green; provisional AC-5 (line ~46) and Hardened AC-5 both renamed to the resume family.
+- DONE: Gates re-run green with real captured exit codes; no regressions, codex path untouched.
+  `go test ./...` 409 passed (was 404 — +5 subtests); `go test -race ./...` rc=0; `gofmt -l .` clean; `go vet ./...` clean.
+
+### Summary
+
+Addressed the single material audit finding: `containsResume` only matched the literal `--resume`, leaking the bootstrap prompt into `--resume=<id>`, `-r`, `--continue`, and `-c` launches. Widened it to the full resume family and made the AC-5 oracle table-driven over all five forms (entity AC-5 text + Hardened-oracle AC-5 renamed to match). The two audit-CLEAN polish items (redundant exec-time LookPath, test-side prompt duplication) were left as-is per the feedback; the codex path was not touched. AC-6 remains captain-run before the validation gate locks the canonical argv.
