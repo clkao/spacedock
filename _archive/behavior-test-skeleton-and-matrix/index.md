@@ -1,14 +1,15 @@
 ---
 id: 8033qbqdrh4zba10w0d34m4j
 title: Behavior-test skeleton + coverage matrix (replace the prose-grep antipattern)
-status: validation
+status: done
 source: sprint — captain (2026-05-31); prereq to cutting the ensign contract
 started: 2026-05-31T02:36:17Z
-completed:
-verdict:
+completed: 2026-05-31T03:07:39Z
+verdict: PASSED
 score: "0.36"
-worktree: /Users/clkao/git/spacedock-research/spacedock-v1/.worktrees/spacedock-ensign-behavior-test-skeleton-and-matrix
+worktree: 
 issue:
+archived: 2026-05-31T03:07:39Z
 ---
 
 Establish a behavioral test footing for the ensign/FO/launcher contract so the contract can be cut/trimmed safely. Two deliverables: a **skeleton behavior test** and a **coverage matrix**.
