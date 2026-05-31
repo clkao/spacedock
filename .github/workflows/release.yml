@@ -35,8 +35,33 @@ jobs:
           args: release --clean
         env:
           # GITHUB_TOKEN creates the release on this repo. HOMEBREW_TAP_TOKEN is a
-          # PAT with write access to spacedock-dev/homebrew-tap so the brews block
-          # can push the formula bump cross-repo (the default GITHUB_TOKEN cannot
-          # write to another repository).
+          # PAT with write access to spacedock-dev/homebrew-tap so the
+          # homebrew_casks block can push the cask bump cross-repo (the default
+          # GITHUB_TOKEN cannot write to another repository).
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+
+      # AC-4: stamp the plugin manifests' `version` to the release so the host
+      # plugin panel (`claude plugin list --json`) displays a version that tracks
+      # the binary instead of the frozen placeholder. The displayed version is
+      # pulled from plugin.json on the `next` ref (the marketplace source), so the
+      # stamp must commit to `next` — not goreleaser's transient working tree. The
+      # marketplace-entry calendar key is a DIFFERENT file (marketplace.json) and
+      # is left untouched here; it is the moving-branch re-pull key (AC-2d).
+      - name: Stamp plugin manifests to the release version
+        run: |
+          set -euo pipefail
+          RELEASE_VERSION="${GITHUB_REF_NAME#v}"
+          git fetch origin next
+          git switch next
+          go run ./cmd/spacedock-release stamp-version "$RELEASE_VERSION" \
+            .claude-plugin/plugin.json .codex-plugin/plugin.json
+          if git diff --quiet -- .claude-plugin/plugin.json .codex-plugin/plugin.json; then
+            echo "plugin manifests already at $RELEASE_VERSION; nothing to commit"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git commit -m "release: stamp plugin manifests to $RELEASE_VERSION" \
+            -- .claude-plugin/plugin.json .codex-plugin/plugin.json
+          git push origin next

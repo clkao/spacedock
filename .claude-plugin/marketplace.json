@@ -1,0 +1,19 @@
+{
+  "name": "spacedock",
+  "owner": {
+    "name": "CL Kao"
+  },
+  "plugins": [
+    {
+      "name": "spacedock",
+      "source": {
+        "source": "url",
+        "url": "https://github.com/spacedock-dev/spacedock.git",
+        "ref": "next"
+      },
+      "description": "Turn directories of markdown files into structured workflows operated by AI agents",
+      "version": "0.0.2026053101",
+      "category": "workflow"
+    }
+  ]
+}

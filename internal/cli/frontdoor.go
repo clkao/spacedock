@@ -35,10 +35,13 @@ type hostOps interface {
 	Install(host, source, branch string) (string, error)
 }
 
-// devBranch is the pre-release dev branch woven into remedy/install hints. Empty
-// is the default release path (no @branch suffix). Production wiring may set it
-// from the environment; it stays a package var so tests pin "".
-var devBranch = ""
+// devBranch is the pre-release branch woven into the install/remedy commands as
+// the marketplace `@ref` (and Codex `--ref`). The default is `next`: until `next`
+// is the repository's default branch, the released binary installs the plugin
+// from `spacedock-dev/spacedock@next`, where the root marketplace.json lives. It
+// is a var (not a const) so the linker can stamp it, mirroring Version, and so
+// `SPACEDOCK_DEV_BRANCH` can override it; tests save/restore it.
+var devBranch = "next"
 
 // gateHost resolves the installed manifest for host and compares it against
 // CONTRACT_VERSION. It returns whether launch is permitted. Only a Compatible
