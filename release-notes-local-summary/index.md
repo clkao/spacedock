@@ -1,13 +1,13 @@
 ---
 id: 7havdt4r7mett5q13tcxaxdj
 title: Local release script — LLM-summarized release notes (reuse old release.sh prompt), CI builds on tag push
-status: ideation
+status: implementation
 source: captain (2026-05-31) — "refine the release script, use the python-based release prompt to simplify the release notes; local so I can tweak, build still triggers on tag push"
 started: 2026-05-31T22:45:17Z
 completed:
 verdict:
 score: "0.32"
-worktree:
+worktree: .worktrees/spacedock-ensign-release-notes-local-summary
 issue:
 ---
 
