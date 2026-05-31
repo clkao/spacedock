@@ -1,11 +1,14 @@
 ---
 id: tq66yjc7sqbhyc52eg8h2ecx
 title: Spacedock packaging and distribution
-status: validation
+status: done
 source: handoff self-hosting gap
 score: "0.35"
-worktree: /Users/clkao/git/spacedock-research/spacedock-v1/.worktrees/spacedock-ensign-spacedock-packaging
+worktree: 
 started: 2026-05-30T19:18:28Z
+completed: 2026-05-31T00:15:50Z
+verdict: PASSED
+archived: 2026-05-31T00:15:50Z
 ---
 
 Define and build the v1 distribution model so a fresh Claude Code or Codex session runs the Spacedock first officer from the repo's own native binary + a version-gated plugin — no Python in the dispatch path, and no contract files copied into per-agent skill folders.
