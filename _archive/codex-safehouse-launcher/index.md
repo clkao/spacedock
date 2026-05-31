@@ -1,14 +1,15 @@
 ---
 id: bey37wn2zh5mf2gj01d2a05h
 title: spacedock codex — safehouse launcher (codex via skill, no --agent)
-status: validation
+status: done
 source: sprint — Ship the Launcher slice A' (captain, 2026-05-30); codex reachable via safehouse --enable all-agents
 started: 2026-05-31T01:32:22Z
-completed:
-verdict:
+completed: 2026-05-31T02:19:19Z
+verdict: PASSED
 score: "0.30"
-worktree: /Users/clkao/git/spacedock-research/spacedock-v1/.worktrees/spacedock-ensign-codex-safehouse-launcher
+worktree: 
 issue:
+archived: 2026-05-31T02:19:19Z
 ---
 
 Make `spacedock codex` launch a Codex session through safehouse, with the first officer reached via the `spacedock:first-officer` SKILL (Codex has no `--agent` analog).
