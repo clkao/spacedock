@@ -133,3 +133,24 @@ Implemented the `notes` subcommand and the local↔CI seam. The testable core (F
 ### Summary
 
 REJECTED. The core (filtering, prompt, no-claude fallback) and the confirm-then-tag gate are sound, and the release.yml wiring (extract-before-goreleaser, empty-body guard, `--release-notes`, unchanged `v*` trigger/builder) is correct. But the local↔CI seam is broken at the tag-cutting end: `cutAnnotatedTag` (main.go:233) writes the whole notes block as `git tag -a -m <body>` with no leading subject + blank line, so git folds it all into the tag SUBJECT and `%(contents:body)` — what CI extracts — is empty. CI then fails the release on its own empty-body guard rather than publishing. The committed `TestAnnotatedTagBodyRoundTrips` masks this by manually inserting a `Release X\n\n` subject that production never produces. Fix direction (for the implementation ensign): prepend a subject line + blank line before the notes when cutting the tag (e.g. `git tag -a v$VERSION -m "Release $VERSION" -m "$notes"`, which git joins with a blank line so the notes become the body), and update `TestAnnotatedTagBodyRoundTrips` to exercise the actual `cutAnnotatedTag` output rather than a hand-built string. Out-of-scope codex test failure confirmed pre-existing/unrelated.
+
+## Feedback Cycles
+
+### Cycle 1 — validation REJECTED on AC-3 (tag-body seam empty + masking test)
+
+The seam was broken at the tag-cutting end: a single `git tag -a -m <notes>` folds the whole notes block into the tag SUBJECT, so CI's `git tag -l --format='%(contents:body)'` extracted an EMPTY body and release.yml's empty-body guard would fail the release. The committed `TestAnnotatedTagBodyRoundTrips` masked the bug by hand-building a `"Release X\n\n"+body` string the production code never emitted.
+
+Fix (commit `576bd2b`): centralized the tag-cut shape in `release.AnnotatedTagArgs(tag, version, body)` returning `["tag","-a",tag,"-m","Release "+version,"-m",body]` — two `-m` flags give git a subject + the notes as the body, so `%(contents:body)` returns exactly the notes. `cutAnnotatedTag` now takes `version` and uses that builder; the round-trip test was rewritten to cut a tag THROUGH `AnnotatedTagArgs` (the real path) and assert the extracted body is non-empty and equals the notes. Verified live with the real binary in a throwaway repo: `notes 1.2.3` (confirm `y`, no claude) → `%(contents:body)` = the filtered notes, NON-EMPTY; subject = `Release 1.2.3`.
+
+## Stage Report: implementation (cycle 2)
+
+- DONE: Cut the tag with a SUBJECT + BODY so the notes land in the BODY (`git tag -a $TAG -m "Release $VERSION" -m "$notes"`); `%(contents:body)` returns the notes.
+  Added `release.AnnotatedTagArgs(tag, version, body)` (single source of truth, two `-m` flags) and rewired `cutAnnotatedTag(tag, version, body)` to use it (commit `576bd2b`).
+- DONE: Rewrite `TestAnnotatedTagBodyRoundTrips` to exercise the ACTUAL `cutAnnotatedTag` output (cut via the real arg builder; assert `%(contents:body)` == notes and NON-EMPTY).
+  `notes_extract_test.go` now cuts the tag via `AnnotatedTagArgs(...)` (no hand-built subject string) and asserts non-empty body == notes and no subject leak. PASS.
+- DONE: Re-run `go test ./...` + gofmt/vet; live scratch-repo check (real `cutAnnotatedTag` → `%(contents:body)` non-empty == notes).
+  `go test ./...` green except the pre-existing env-gated `internal/cli/TestCodexResolveManifestAgainstInstalledHost` (out of scope); gofmt clean; vet clean. Live: real binary `notes 1.2.3` in a temp repo → `%(contents:body)` = `886e083 feat: a real user-facing change` (NON_EMPTY_OK), subject `Release 1.2.3`, `dispatch:` noise filtered out.
+
+### Summary
+
+Fixed the AC-3 seam bug the validator reproduced. The notes now land in the annotated tag's BODY (subject `Release <version>` + notes via two `-m` flags), centralized in `release.AnnotatedTagArgs` as the single source of truth the CLI and the round-trip test share — so the test exercises the real code path instead of a hand-built fixture. Verified end-to-end with the actual binary: `%(contents:body)` is non-empty and equals the filtered notes, which is what release.yml extracts and feeds goreleaser. Scope unchanged (only `cmd/spacedock-release` + `internal/release`; release.yml's extract step was already correct). Code on `576bd2b`; tag/push still deferred to the 0.19.2 checkpoint.
