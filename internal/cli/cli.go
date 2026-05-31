@@ -120,7 +120,11 @@ Usage:
   spacedock --help
 
 claude/codex are the host front doors: they version-gate against the installed
-plugin's requires-contract and fail fast on a mismatch before launching.
+plugin's requires-contract and fail fast on a mismatch before launching. Append a
+task with a -- fence (spacedock claude -- "the task"); host flags go before the
+fence and forward verbatim. Sandbox knobs: --safehouse forces the safehouse wrap,
+--safehouse-enable=KEY[,KEY], --safehouse-add-dirs=PATH, --safehouse-add-dirs-ro=PATH.
+A --plugin-dir launch loads the local checkout and relaxes the contract gate.
 init installs the per-host plugin via the host plugin mechanism (no skill-file copies).
 doctor reports the compatibility verdict against the binary's CONTRACT_VERSION.
 status forwards its arguments to the workflow status command.

@@ -3,8 +3,10 @@
 package safehouse
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // installHint is the pinned, actionable stderr message emitted when a workdir
@@ -27,6 +29,36 @@ func Available(lookPath func(string) (string, error)) (ok bool, hint string) {
 		return false, installHint
 	}
 	return true, ""
+}
+
+// TranslateFlags turns the de-prefixed `--safehouse-*` knob tokens (the namespace
+// prefix already stripped by the internal/cli dispatcher) into the safehouse
+// `extra` argv fed verbatim into Wrap's pre-`--` slot. It owns only safehouse's
+// flag vocabulary: `enable=ssh,docker` comma-splits into repeated `--enable=KEY`;
+// `add-dirs=P` / `add-dirs-ro=P` map to `--add-dirs=P` / `--add-dirs-ro=P`. An
+// unrecognized key is a hard error so a typo never silently reaches the host. It
+// holds no `--safehouse-` namespace knowledge — a future sandbox's translator
+// sits beside this one, each owning its own host's vocabulary.
+func TranslateFlags(deprefixed []string) (extra []string, err error) {
+	for _, tok := range deprefixed {
+		key, value, ok := strings.Cut(tok, "=")
+		if !ok {
+			return nil, fmt.Errorf("safehouse: malformed flag %q (expected key=value)", tok)
+		}
+		switch key {
+		case "enable":
+			for _, v := range strings.Split(value, ",") {
+				extra = append(extra, "--enable="+v)
+			}
+		case "add-dirs":
+			extra = append(extra, "--add-dirs="+value)
+		case "add-dirs-ro":
+			extra = append(extra, "--add-dirs-ro="+value)
+		default:
+			return nil, fmt.Errorf("safehouse: unknown flag --safehouse-%s", key)
+		}
+	}
+	return extra, nil
 }
 
 // Wrap returns the inner argv wrapped as
