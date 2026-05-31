@@ -1,10 +1,10 @@
 ---
 id: 5baenph5sbcrx7mhv3qbbjbn
 title: Split-root ergonomics + remote/resume model — surface the state backend, recommend it at commission, define remote determination and 2nd-host resume
-status: backlog
+status: ideation
 source: FO/captain (2026-05-31) — split-root cognitive-load + collaboration nuances surfaced during the behavior-coverage sprint (k6 fallout)
 score: "0.32"
-started:
+started: 2026-05-31T20:54:03Z
 completed:
 verdict:
 worktree:
