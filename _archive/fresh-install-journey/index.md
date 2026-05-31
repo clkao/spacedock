@@ -1,14 +1,15 @@
 ---
 id: 5an0s2dqb0nh18n7nn6x07vx
 title: Land launcher on next + document the fresh-install user journey
-status: validation
+status: done
 source: sprint — Ship the Launcher slice D (captain, 2026-05-30)
 started: 2026-05-31T03:20:03Z
-completed:
-verdict:
+completed: 2026-05-31T04:03:09Z
+verdict: PASSED
 score: "0.26"
-worktree: /Users/clkao/git/spacedock-research/spacedock-v1/.worktrees/spacedock-ensign-fresh-install-journey
+worktree: 
 issue:
+archived: 2026-05-31T04:03:09Z
 ---
 
 Land the launcher slice on `next` and ship the repo's OWN plugin manifest so the self-hosting loop closes: with `.claude-plugin/plugin.json` vendored at the repo root, `--plugin-dir <repo>` loads V1's own `spacedock:first-officer`/`spacedock:ensign` skills, and the manifest's `requires-contract` makes the contract gate go green without `--skip-contract-check`. Then document the fresh-install journey end-to-end against the real command surface.
