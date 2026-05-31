@@ -1,14 +1,15 @@
 ---
 id: e72ambzmkkt3hp1whpz2tczr
 title: spacedock claude — safehouse launcher (replace the manual invocation)
-status: validation
+status: done
 source: sprint — Ship the Launcher slice A (captain, 2026-05-30); harvested from superseded ~/git/spacedock launcher plan 9bt646cz0h4q79g98qz68k9d
 started: 2026-05-30T23:45:55Z
-completed:
-verdict:
+completed: 2026-05-31T01:03:34Z
+verdict: PASSED
 score: "0.40"
-worktree: /Users/clkao/git/spacedock-research/spacedock-v1/.worktrees/spacedock-ensign-claude-safehouse-launcher
+worktree: 
 issue:
+archived: 2026-05-31T01:03:34Z
 ---
 
 Make `spacedock claude` a drop-in replacement for the captain's manual Claude Code invocation, launching the first officer through safehouse when a workdir safehouse profile is present. This builds the shared safehouse-detection + interposition helper that the codex launcher reuses.
