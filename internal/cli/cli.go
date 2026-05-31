@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 
 	"github.com/clkao/spacedock-v1/internal/contract"
 	"github.com/clkao/spacedock-v1/internal/dispatch"
@@ -45,7 +46,7 @@ func run(ctx context.Context, args []string, env []string, dir string, stdin io.
 		return dispatch.Run(args[1:], stdin, stdout, stderr)
 	case "claude":
 		devBranch = envValue(env, "SPACEDOCK_DEV_BRANCH")
-		return runClaude(ctx, args[1:], execHost{}, stdout, stderr)
+		return runClaude(ctx, args[1:], dir, execHost{}, exec.LookPath, stdout, stderr)
 	case "codex":
 		devBranch = envValue(env, "SPACEDOCK_DEV_BRANCH")
 		return runCodex(ctx, args[1:], execHost{}, stdout, stderr)

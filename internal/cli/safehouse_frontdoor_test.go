@@ -1,0 +1,166 @@
+// ABOUTME: AC-1..AC-5 oracles for `spacedock claude` safehouse interposition:
+// ABOUTME: argv shape with/without .safehouse, --resume suppression, gate ordering.
+package cli
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+// bootstrapPrompt is the fixed launch-and-go FO prompt the launcher appends as
+// the last inner-argv token. Pinned here so the oracles fail loudly if the
+// production constant drifts.
+const wantBootstrapPrompt = "Begin as the Spacedock first officer: run your startup sequence and work the event loop."
+
+// lookFound resolves any binary (safehouse Available → ok).
+func lookFound(string) (string, error) { return "/usr/bin/safehouse", nil }
+
+// lookMissing fails to resolve (safehouse Available → not ok).
+func lookMissing(string) (string, error) { return "", errors.New("not found") }
+
+// safehouseFixtureDir returns a temp dir containing a `.safehouse` profile file.
+func safehouseFixtureDir(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, ".safehouse"), []byte("profile"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+// AC-1: .safehouse present → canonical safehouse-wrapped argv with the bootstrap
+// prompt appended LAST, after the operator passthrough.
+func TestClaudeSafehousePresentWrapsArgv(t *testing.T) {
+	dir := safehouseFixtureDir(t)
+	fake := &fakeHost{manifest: compatibleManifest(t)}
+	var stdout, stderr bytes.Buffer
+
+	code := runClaude(context.Background(), []string{"--", "--foo"}, dir, fake, lookFound, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (stderr=%q)", code, stderr.String())
+	}
+	want := []string{"safehouse", "--trust-workdir-config", "--",
+		"claude", "--dangerously-skip-permissions", "--agent", "spacedock:first-officer",
+		"--foo", wantBootstrapPrompt}
+	if !equalArgv(fake.launchedArg, want) {
+		t.Fatalf("launch argv = %v, want %v", fake.launchedArg, want)
+	}
+}
+
+// AC-1 companion: a `.safehouse` DIRECTORY is detected identically to a file.
+func TestClaudeSafehouseDirDetectedLikeFile(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, ".safehouse"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeHost{manifest: compatibleManifest(t)}
+	var stdout, stderr bytes.Buffer
+
+	code := runClaude(context.Background(), nil, dir, fake, lookFound, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (stderr=%q)", code, stderr.String())
+	}
+	if len(fake.launchedArg) == 0 || fake.launchedArg[0] != "safehouse" {
+		t.Fatalf("launch argv = %v, want safehouse-wrapped for a .safehouse directory", fake.launchedArg)
+	}
+}
+
+// AC-2: no .safehouse → plain claude, NO --dangerously-skip-permissions, the
+// token `safehouse` appears nowhere; bootstrap prompt still appended.
+func TestClaudeNoSafehouseLaunchesPlain(t *testing.T) {
+	dir := t.TempDir() // no .safehouse
+	fake := &fakeHost{manifest: compatibleManifest(t)}
+	var stdout, stderr bytes.Buffer
+
+	code := runClaude(context.Background(), []string{"--", "--foo"}, dir, fake, lookFound, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (stderr=%q)", code, stderr.String())
+	}
+	want := []string{"claude", "--agent", "spacedock:first-officer", "--foo", wantBootstrapPrompt}
+	if !equalArgv(fake.launchedArg, want) {
+		t.Fatalf("launch argv = %v, want %v", fake.launchedArg, want)
+	}
+	for _, tok := range fake.launchedArg {
+		if tok == "safehouse" {
+			t.Fatalf("unsandboxed launch named safehouse: %v", fake.launchedArg)
+		}
+		if tok == "--dangerously-skip-permissions" {
+			t.Fatalf("unsandboxed launch carried --dangerously-skip-permissions: %v", fake.launchedArg)
+		}
+	}
+}
+
+// AC-3: plugin-gate failure SHORT-CIRCUITS before any safehouse logic. Even with
+// .safehouse present AND safehouse binary absent, the missing-plugin gate fires
+// first: plugin remedy on stderr, NO safehouse hint, Launch never called.
+func TestClaudePluginGateShortCircuitsBeforeSafehouse(t *testing.T) {
+	dir := safehouseFixtureDir(t)
+	fake := &fakeHost{manifest: ""} // no plugin
+	var stdout, stderr bytes.Buffer
+
+	code := runClaude(context.Background(), nil, dir, fake, lookMissing, &stdout, &stderr)
+
+	if code == 0 {
+		t.Fatalf("exit = 0, want non-zero when plugin gate fails")
+	}
+	if fake.launchedArg != nil {
+		t.Fatalf("Launch invoked despite plugin-gate failure: %v", fake.launchedArg)
+	}
+	if !strings.Contains(stderr.String(), "spacedock init") && !strings.Contains(stderr.String(), "spacedock doctor") {
+		t.Fatalf("stderr missing plugin-gate remedy: %q", stderr.String())
+	}
+	if strings.Contains(stderr.String(), ".safehouse profile") {
+		t.Fatalf("stderr carried the safehouse hint before the plugin gate: %q", stderr.String())
+	}
+}
+
+// AC-4: .safehouse present, plugin OK, but safehouse binary absent → pinned
+// install hint, rc≠0, Launch never called.
+func TestClaudeSafehousePresentButBinaryMissing(t *testing.T) {
+	dir := safehouseFixtureDir(t)
+	fake := &fakeHost{manifest: compatibleManifest(t)} // gate passes
+	var stdout, stderr bytes.Buffer
+
+	code := runClaude(context.Background(), nil, dir, fake, lookMissing, &stdout, &stderr)
+
+	if code == 0 {
+		t.Fatalf("exit = 0, want non-zero when safehouse binary is missing")
+	}
+	if fake.launchedArg != nil {
+		t.Fatalf("Launch invoked with safehouse binary absent: %v", fake.launchedArg)
+	}
+	if !strings.Contains(stderr.String(), ".safehouse profile") {
+		t.Fatalf("stderr missing pinned safehouse install hint: %q", stderr.String())
+	}
+}
+
+// AC-5: --resume suppresses the bootstrap prompt; operator args forward verbatim.
+func TestClaudeResumeSuppressesBootstrapPrompt(t *testing.T) {
+	dir := safehouseFixtureDir(t)
+	fake := &fakeHost{manifest: compatibleManifest(t)}
+	var stdout, stderr bytes.Buffer
+
+	code := runClaude(context.Background(), []string{"--", "--resume"}, dir, fake, lookFound, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (stderr=%q)", code, stderr.String())
+	}
+	want := []string{"safehouse", "--trust-workdir-config", "--",
+		"claude", "--dangerously-skip-permissions", "--agent", "spacedock:first-officer", "--resume"}
+	if !equalArgv(fake.launchedArg, want) {
+		t.Fatalf("launch argv = %v, want %v", fake.launchedArg, want)
+	}
+	for _, tok := range fake.launchedArg {
+		if tok == wantBootstrapPrompt {
+			t.Fatalf("--resume launch carried the bootstrap prompt: %v", fake.launchedArg)
+		}
+	}
+}
