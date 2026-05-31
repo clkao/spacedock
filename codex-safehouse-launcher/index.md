@@ -1,9 +1,9 @@
 ---
 id: bey37wn2zh5mf2gj01d2a05h
 title: spacedock codex — safehouse launcher (codex via skill, no --agent)
-status: backlog
+status: ideation
 source: sprint — Ship the Launcher slice A' (captain, 2026-05-30); codex reachable via safehouse --enable all-agents
-started:
+started: 2026-05-31T01:32:22Z
 completed:
 verdict:
 score: "0.30"
