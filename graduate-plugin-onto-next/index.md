@@ -1,13 +1,13 @@
 ---
 id: n15ga31s6dbs3xxbhbz4at8s
 title: Graduate the full plugin surface onto next (released-lane completion, next-as-source)
-status: validation
+status: done
 source: sprint — captain 2026-05-31 ("next-as-source is fine"); released-lane follow-up to fresh-install-journey (dev-lane)
 started: 2026-05-31T16:07:11Z
-completed:
-verdict:
+completed: 2026-05-31T18:34:57Z
+verdict: PASSED
 score: "0.30"
-worktree: .worktrees/spacedock-ensign-graduate-plugin-onto-next
+worktree: 
 issue:
 ---
 
