@@ -170,3 +170,16 @@ Captain version bump to 0.19.0, folded into the single source of truth.
 ### Summary
 
 Folded the captain's 0.19.0 binary-version bump into the single source of truth at internal/cli/cli.go (commit `cd9a76c`): the unstamped build now reports `spacedock 0.19.0 (contract 1)` (observed by running it), and the F9 git-describe `-X` stamp still overrides it. The first-release tag is corrected to `v0.19.0`. No other version literals exist — the goreleaser config stamps `{{.Version}}` and the tests read the symbol — so this is the only edit, and all gates plus the F9 proof remain green.
+
+## Stage Report: implementation (cycle 3)
+
+Fixed an AC-3 leak in the generated tap formula (caught by rg, via team-lead).
+
+- DONE: `brews.caveats` carries the safehouse docs link so the generated formula honors homebrew-tap AC-3.
+  The `brews:` block regenerates `Formula/spacedock.rb` on every release, so its caveats must match the tap's AC-3 (safehouse documented via a link). The block previously ended at "before first launch." and dropped the link — a silent AC-3 violation on every released formula. Commit `60989ed` on `spacedock-ensign/release-pipeline`: aligned the wording to rg's hand-authored formula (`runtime dependency` lowercase; "install it through the host tooling"; "See the safehouse install docs:") and added the captain-pinned link `https://agent-safehouse.dev`, so the generated caveats equals rg's `dist/homebrew/Formula/spacedock.rb` caveats byte-for-byte.
+- DONE: gates stay green (config-only change).
+  `go test ./...` exit 0.
+
+### Summary
+
+rg caught that goreleaser's `brews:` block overwrites the tap formula on every release and my `brews.caveats` dropped the safehouse docs link, silently breaking homebrew-tap AC-3 on each released formula. Fixed in commit `60989ed` by aligning the caveats wording to rg's hand-authored formula and adding the captain-pinned `https://agent-safehouse.dev` link — the generated formula's caveats now match rg's byte-for-byte. Config-only change; `go test ./...` stays green (exit 0). Ready for validation.
