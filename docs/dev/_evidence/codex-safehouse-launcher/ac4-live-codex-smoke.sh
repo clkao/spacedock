@@ -78,7 +78,7 @@ echo
 echo "Expected exec argv (the implementation-locking oracle):"
 echo
 echo "    safehouse --trust-workdir-config -- codex --dangerously-bypass-approvals-and-sandbox \\"
-echo "      \"Invoke the spacedock:first-officer skill: run your startup sequence and work the event loop.\""
+echo "      \"You totally got this. Take your time. I love you. And tell all subagents and team members you love them too. Engage. Assume \$spacedock:first-officer for the entire session.\""
 echo
 echo "Confirm by eye:"
 echo "  1. codex banner shows  sandbox: danger-full-access  AND  approval: never"

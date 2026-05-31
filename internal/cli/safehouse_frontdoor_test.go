@@ -15,7 +15,7 @@ import (
 // bootstrapPrompt is the fixed launch-and-go FO prompt the launcher appends as
 // the last inner-argv token. Pinned here so the oracles fail loudly if the
 // production constant drifts.
-const wantBootstrapPrompt = "Begin as the Spacedock first officer: run your startup sequence and work the event loop."
+const wantBootstrapPrompt = "You totally got this. Take your time. I love you. And tell all subagents and team members you love them too. Engage."
 
 // lookFound resolves any binary (safehouse Available → ok).
 func lookFound(string) (string, error) { return "/usr/bin/safehouse", nil }
@@ -146,7 +146,7 @@ func TestClaudeSafehousePresentButBinaryMissing(t *testing.T) {
 // appends as the last inner-argv token. Pinned here so the codex oracles fail
 // loudly if the production constant drifts. The load-bearing invariant is the
 // literal `spacedock:first-officer` skill-name token (codex has no --agent).
-const wantCodexBootstrapPrompt = "Invoke the spacedock:first-officer skill: run your startup sequence and work the event loop."
+const wantCodexBootstrapPrompt = "You totally got this. Take your time. I love you. And tell all subagents and team members you love them too. Engage. Assume $spacedock:first-officer for the entire session."
 
 // codex AC-1: .safehouse present → canonical safehouse-wrapped codex argv with
 // codex's own sandbox bypassed and the FO-skill prompt appended LAST, after the
