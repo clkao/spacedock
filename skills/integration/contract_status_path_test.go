@@ -1,5 +1,5 @@
-// ABOUTME: AC-5a static half — the vendored FO/ensign contracts call
-// ABOUTME: `spacedock status` and carry zero plugin-private status-path refs.
+// ABOUTME: AC-5a absence invariant — the vendored FO/ensign contracts carry
+// ABOUTME: zero plugin-private status-path refs (no real seam can prove an absence).
 package integration
 
 import (
@@ -17,24 +17,25 @@ var pluginPrivateStatusRefs = []string{
 	"commission/bin/status",
 }
 
-// TestVendoredSkillsCallSpacedockStatus locks AC-5a (static half): the FO
-// contract issues its load-bearing workflow reads/mutations through
-// `spacedock status`, and NEITHER the FO nor the ensign contract references any
-// plugin-private status path. Co-located with the vendored-fixture
-// requires-contract bracketing test (internal/contract) which closes the
-// fixture-vs-binary half of AC-5a.
-func TestVendoredSkillsCallSpacedockStatus(t *testing.T) {
+// TestNoPluginPrivateStatusPathInContracts locks the AC-5a absence invariant:
+// NEITHER the FO nor the ensign contract references any plugin-private status
+// path. The positive "the contract calls `spacedock status`" claim is owned
+// behaviorally by the launcher smoke seam (launcher_smoke_test.go drives the
+// real status binary for list/set/archive) and internal/status/*; that
+// behavioral coverage makes a bare prose-grep over the FO text redundant.
+//
+// Oracle: the absence invariant over the vendored on-disk skill surface — the
+// vendored skill tree must NOT re-introduce a retired plugin-private status
+// path (skills/commission/bin/status, {spacedock_plugin_dir}, commission/bin/
+// status). No positive behavioral seam can prove an absence: a re-introduced
+// plugin path would silently break the `spacedock status` launcher contract,
+// and only this structural scan over the contract bytes catches it. This is NOT
+// bare prose-grep — it asserts a structural negative the system depends on.
+func TestNoPluginPrivateStatusPathInContracts(t *testing.T) {
 	root := skillsRoot(t)
 	fo := readSkill(t, root, "first-officer/references/first-officer-shared-core.md")
 	ensign := readSkill(t, root, "ensign/references/ensign-shared-core.md")
 
-	// (1) The FO contract calls `spacedock status` for its workflow reads and
-	// mutations (the launcher front-end the plugin agents depend on).
-	if !strings.Contains(fo, "spacedock status") {
-		t.Errorf("FO contract does not call `spacedock status`")
-	}
-
-	// (2) Neither contract references a plugin-private status path.
 	for name, content := range map[string]string{
 		"first-officer-shared-core.md": fo,
 		"ensign-shared-core.md":        ensign,

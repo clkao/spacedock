@@ -1,30 +1,20 @@
-// ABOUTME: Dispatch-derivation fixture tests for the vendored claude-team helper
+// ABOUTME: Dispatch-derivation fixture tests over the native in-process dispatch.Run build
 // ABOUTME: under split-root + folder-form + worktree — AC-3 (state-path handoff) and AC-4 (slug-not-stem).
 package integration
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/spacedock-dev/spacedock/internal/dispatch"
 )
 
-// vendoredClaudeTeam is the project-vendored dispatch helper under test.
-func vendoredClaudeTeam(t *testing.T) string {
-	t.Helper()
-	p, err := filepath.Abs(filepath.Join("..", "commission", "bin", "claude-team"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(p); err != nil {
-		t.Fatalf("vendored claude-team not found at %s: %v", p, err)
-	}
-	return p
-}
-
-// buildResult is the subset of `claude-team build` JSON output the dispatch
+// buildResult is the subset of `dispatch build` JSON output the dispatch
 // derivation tests assert on, plus the dispatch body read from disk.
 type buildResult struct {
 	Name             string `json:"name"`
@@ -32,33 +22,33 @@ type buildResult struct {
 	body             string
 }
 
-// runBuild drives the vendored `claude-team build` with the given input JSON in
-// the given git-initialized fixture root, returning the parsed output and the
-// dispatch body written to dispatch_file_path. It fails the test on a non-zero
-// exit so callers can assert on a known-good build.
+// runBuild drives the native in-process `dispatch.Run build` with the given
+// input JSON, returning the parsed output and the dispatch body written to
+// dispatch_file_path. The build derives the worktree/state paths from the
+// git root of the workflow dir (FindGitRoot), so the git-initialized fixture
+// root is reachable through the absolute entity_path/workflow_dir in the input,
+// not the process working directory. It fails the test on a non-zero exit so
+// callers can assert on a known-good build.
 func runBuild(t *testing.T, root, workflowDir string, input map[string]any) buildResult {
 	t.Helper()
 	raw, err := json.Marshal(input)
 	if err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command("python3", vendoredClaudeTeam(t), "build", "--workflow-dir", workflowDir)
-	cmd.Dir = root
-	cmd.Stdin = strings.NewReader(string(raw))
-	// A unique HOME keeps the helper's _recent_team_evidence team-probe from
-	// reading the developer's real ~/.claude/teams; the build path does not
-	// depend on it in team mode (team_name supplied), but pin it for hermeticity.
-	cmd.Env = append(os.Environ(), "HOME="+t.TempDir())
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("claude-team build failed: %v\n%s", err, out)
+	// A unique HOME keeps the build's bare-mode team-evidence probe from reading
+	// the developer's real ~/.claude/teams; the build path does not depend on it
+	// in team mode (team_name supplied), but pin it for hermeticity.
+	t.Setenv("HOME", t.TempDir())
+	var stdout, stderr bytes.Buffer
+	if exit := dispatch.Run([]string{"build", "--workflow-dir", workflowDir}, strings.NewReader(string(raw)), &stdout, &stderr); exit != 0 {
+		t.Fatalf("dispatch build exited %d\nstdout: %s\nstderr: %s", exit, stdout.String(), stderr.String())
 	}
 	var res buildResult
-	if err := json.Unmarshal(out, &res); err != nil {
-		t.Fatalf("build output is not JSON: %v\n%s", err, out)
+	if err := json.Unmarshal(stdout.Bytes(), &res); err != nil {
+		t.Fatalf("build output is not JSON: %v\n%s", err, stdout.String())
 	}
 	if res.DispatchFilePath == "" {
-		t.Fatalf("build output has no dispatch_file_path\n%s", out)
+		t.Fatalf("build output has no dispatch_file_path\n%s", stdout.String())
 	}
 	bodyBytes, err := os.ReadFile(res.DispatchFilePath)
 	if err != nil {
