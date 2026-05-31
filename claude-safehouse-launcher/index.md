@@ -1,7 +1,7 @@
 ---
 id: e72ambzmkkt3hp1whpz2tczr
 title: spacedock claude — safehouse launcher (replace the manual invocation)
-status: validation
+status: implementation
 source: sprint — Ship the Launcher slice A (captain, 2026-05-30); harvested from superseded ~/git/spacedock launcher plan 9bt646cz0h4q79g98qz68k9d
 started: 2026-05-30T23:45:55Z
 completed:
@@ -337,3 +337,11 @@ FLAG — AC-6 is CAPTAIN-RUN before the validation gate locks the canonical argv
 ### Summary
 
 PASSED. All six acceptance criteria verified with reproduced evidence. AC-1/AC-2/AC-4/AC-5 argv-and-error oracles were independently reproduced via a throwaway test built from the worktree, transcribing expected argv from the spec rather than the implementer's tests; AC-3's plugin-gate short-circuit ordering invariant was additionally mutation-verified (the oracle fails when the gate is bypassed, then was restored). The shared `internal/safehouse` seam (Present/Available/Wrap) is inner-argv-agnostic as the spec requires for codex reuse. All four gates pass with captured RC=0 (test 404, race 404, gofmt clean, vet clean). AC-6 is recorded CAPTAIN-CONFIRMED PASSED per the dispatch scope note — the live smoke was run by the captain outside the sandbox and the canonical argv is locked. Recommendation: PASSED.
+
+## Feedback Cycle 1 — validation gate REJECT (resume-family widening)
+
+Validator recommended PASSED; the parallel staff audit flagged ONE material intent-vs-letter gap and the captain elected to fix it before merge. Routing to implementation (feedback-to).
+
+- **`--resume` suppression is under-broad** (`frontdoor.go:96,125-132`). `containsResume` matches only the literal token `--resume`, so the bootstrap prompt is NOT suppressed for claude's other resume forms — `-r` (short alias), `--resume=<id>` (equals form), and `-c`/`--continue`. With any of those the operator resumes a prior session AND the injected bootstrap prompt lands as a fresh user turn — the exact "prompt fights the resumed session" failure the suppression exists to prevent. Code satisfied the literal "unless --resume" + AC-5, but not the captain's launch-and-go-UNLESS-resuming intent. **Captain decision: widen.**
+
+Fix: widen `containsResume` to the resume family — `--resume`, `--resume=<id>`, `-r`, `--continue`, `-c` — and expand the AC-5 oracle to assert prompt suppression for each form. Then re-validate (fresh) + re-audit the widening. Polish items (redundant exec-time safehouse LookPath; test-side bootstrapPrompt duplication) are non-blocking and left as-is.
