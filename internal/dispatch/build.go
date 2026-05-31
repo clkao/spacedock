@@ -219,7 +219,10 @@ func runBuild(workflowDir string, stdin io.Reader, stdout, stderr io.Writer) int
 
 	// Split-root: the README declares a state: checkout, so a worktree stage
 	// isolates CODE only — the entity body stays at the FO-passed entity_path.
-	splitRoot := workflowIsSplitRoot(workflowDir)
+	// stateCheckout is the resolved absolute state-checkout dir (workflowDir/<state>),
+	// the git repo where the entity body lives; "" when the workflow is single-root.
+	stateCheckout := splitRootStateCheckout(workflowDir)
+	splitRoot := stateCheckout != ""
 
 	// Rule 5: Feedback context required for feedback reflow.
 	if isFeedbackReflow && feedbackContext == "" {
@@ -301,8 +304,8 @@ func runBuild(workflowDir string, stdin io.Reader, stdout, stderr io.Writer) int
 	// guidance applies to every stage, worktree or not: the worktree branch
 	// prepends CODE-directory/branch lines, a non-worktree stage emits the
 	// standalone guidance. The guidance carries the resolved absolute state
-	// checkout (workflowDir IS the state/entity dir under split root) and entity
-	// path — never literal {state_checkout}/{entity_path} brace tokens.
+	// checkout (workflowDir/<state>, the git repo holding the entity body) and
+	// entity path — never literal {state_checkout}/{entity_path} brace tokens.
 	var worktreeEntityPath string
 	if worktreePath != "" {
 		branch := fmt.Sprintf("%s/%s", workerKey, slug)
@@ -315,7 +318,7 @@ func runBuild(workflowDir string, stdin io.Reader, stdout, stderr io.Writer) int
 					"code to main.\n"+
 					"%s",
 				worktreePath, worktreePath, branch,
-				stateCommitGuidance(workflowDir, entityPath)))
+				stateCommitGuidance(stateCheckout, entityPath)))
 		} else {
 			parts = append(parts, fmt.Sprintf(
 				"Your working directory is %s\n"+
@@ -325,7 +328,7 @@ func runBuild(workflowDir string, stdin io.Reader, stdout, stderr io.Writer) int
 				worktreePath, worktreePath, branch))
 		}
 	} else if splitRoot {
-		parts = append(parts, stateCommitGuidance(workflowDir, entityPath))
+		parts = append(parts, stateCommitGuidance(stateCheckout, entityPath))
 	}
 
 	// 4. Entity-read instruction. Under split root the entity lives in the state

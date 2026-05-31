@@ -118,13 +118,20 @@ func isFile(path string) bool {
 	return err == nil && info.Mode().IsRegular()
 }
 
-// workflowIsSplitRoot reports whether the workflow README declares a state:
-// checkout. Matches workflow_is_split_root: false when the README is unreadable
-// or carries no non-empty state: field.
-func workflowIsSplitRoot(workflowDir string) bool {
+// splitRootStateCheckout returns the absolute state-checkout dir for a split-root
+// workflow, or "" when the workflow is single-root. Under split root the README
+// declares a state: checkout relative to the README/definition dir, so the
+// resolved state checkout is workflowDir/<state> — NOT workflowDir itself (which
+// is the definition dir where the state checkout is git-excluded). Returns "" when
+// the README is unreadable or carries no non-empty state: field.
+func splitRootStateCheckout(workflowDir string) string {
 	readmePath := filepath.Join(workflowDir, "README.md")
 	fm := status.ParseFrontmatter(readmePath)
-	return strings.TrimSpace(fm["state"]) != ""
+	state := strings.TrimSpace(fm["state"])
+	if state == "" {
+		return ""
+	}
+	return filepath.Join(workflowDir, state)
 }
 
 // recentTeamEvidence reports whether any ~/.claude/teams/*/config.json was

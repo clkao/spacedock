@@ -30,9 +30,12 @@ func TestStateCommitGuidanceResolvesPaths(t *testing.T) {
 			t.Setenv("HOME", home)
 			root := t.TempDir()
 
-			// Split root: the state checkout is the workflow dir; CODE (if any)
-			// lives in the worktree under root.
-			workflowDir := filepath.Join(root, "state-checkout")
+			// Split root: the workflow dir is the README/definition root; the
+			// README's `state: state-checkout` field diverges the entity/state
+			// checkout to workflowDir/state-checkout. CODE (if any) lives in the
+			// worktree under root.
+			workflowDir := root
+			stateCheckout := filepath.Join(workflowDir, "state-checkout")
 			writeFile(t, filepath.Join(workflowDir, "README.md"), readmeWorktree(true))
 
 			worktreeRel := ""
@@ -43,7 +46,7 @@ func TestStateCommitGuidanceResolvesPaths(t *testing.T) {
 				}
 			}
 
-			entityPath := filepath.Join(workflowDir, "thing", "index.md")
+			entityPath := filepath.Join(stateCheckout, "thing", "index.md")
 			writeFile(t, entityPath, entityFM("Thing", tc.stage, worktreeRel))
 
 			gitInit(t, root)
@@ -61,9 +64,11 @@ func TestStateCommitGuidanceResolvesPaths(t *testing.T) {
 			native := runNative(stdin, "build", "--workflow-dir", workflowDir)
 			body := readDispatchBody(t, dispatchFilePathFromStdout(t, native.stdout))
 
-			// POSITIVE: the resolved path-scoped state-commit command, both halves.
-			wantAdd := "git -C " + workflowDir + " add " + entityPath
-			wantCommit := "git -C " + workflowDir + " commit -m \"...\" -- " + entityPath
+			// POSITIVE: the resolved path-scoped state-commit command targets the
+			// resolved state checkout (workflowDir/state-checkout), not the bare
+			// workflow/definition dir, both halves.
+			wantAdd := "git -C " + stateCheckout + " add " + entityPath
+			wantCommit := "git -C " + stateCheckout + " commit -m \"...\" -- " + entityPath
 			if !strings.Contains(body, wantAdd) {
 				t.Errorf("%s: body missing resolved add command %q\n--- body ---\n%s",
 					tc.name, wantAdd, body)
