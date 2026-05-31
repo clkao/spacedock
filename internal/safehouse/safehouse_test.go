@@ -87,6 +87,46 @@ func TestWrapWithExtra(t *testing.T) {
 	}
 }
 
+// TestTranslateFlags pins the de-prefixed-knob → safehouse-extra translation:
+// `enable=ssh,docker` comma-splits into repeated `--enable=KEY`; `add-dirs=P` and
+// `add-dirs-ro=P` map to `--add-dirs=P` / `--add-dirs-ro=P`; an unknown key is a
+// hard error. The translator holds NO `--safehouse-` namespace knowledge — the
+// dispatcher in internal/cli strips the prefix before calling it (AC-3).
+func TestTranslateFlags(t *testing.T) {
+	cases := []struct {
+		name string
+		in   []string
+		want []string
+	}{
+		{"empty", nil, nil},
+		{"enable-single", []string{"enable=docker"}, []string{"--enable=docker"}},
+		{"enable-comma-split", []string{"enable=ssh,docker"}, []string{"--enable=ssh", "--enable=docker"}},
+		{"add-dirs", []string{"add-dirs=/a"}, []string{"--add-dirs=/a"}},
+		{"add-dirs-ro", []string{"add-dirs-ro=/b"}, []string{"--add-dirs-ro=/b"}},
+		{"order-preserved", []string{"enable=ssh", "add-dirs=/a", "add-dirs-ro=/b"},
+			[]string{"--enable=ssh", "--add-dirs=/a", "--add-dirs-ro=/b"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := TranslateFlags(tc.in)
+			if err != nil {
+				t.Fatalf("TranslateFlags(%v) err = %v, want nil", tc.in, err)
+			}
+			if !equalArgv(got, tc.want) {
+				t.Fatalf("TranslateFlags(%v) = %v, want %v", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestTranslateFlagsUnknownKeyErrors: an unrecognized de-prefixed key is a hard
+// error so a typo can never silently fall through to the host (AC-8).
+func TestTranslateFlagsUnknownKeyErrors(t *testing.T) {
+	if _, err := TranslateFlags([]string{"bogus=x"}); err == nil {
+		t.Fatalf("TranslateFlags([bogus=x]) err = nil, want a hard error for an unknown key")
+	}
+}
+
 func equalArgv(got, want []string) bool {
 	if len(got) != len(want) {
 		return false
