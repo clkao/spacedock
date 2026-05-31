@@ -17,7 +17,8 @@ var errNoManifest = errors.New("manifest not found")
 // readRequiresContract reads a plugin manifest JSON and returns its
 // requires-contract string. A missing file yields errNoManifest; an absent
 // requires-contract field yields an empty string (which Compare classifies as
-// malformed-range, since the field is required for a published plugin).
+// plugin-predates-contract — the installed plugin predates the contract
+// mechanism — and routes to the actionable `spacedock init` upgrade remedy).
 func readRequiresContract(manifestPath string) (string, error) {
 	data, err := os.ReadFile(manifestPath)
 	if err != nil {

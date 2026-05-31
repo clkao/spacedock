@@ -204,19 +204,30 @@ func (execHost) Launch(argv []string) error {
 	return syscall.Exec(bin, argv, os.Environ())
 }
 
-// Install shells the host plugin marketplace add + install pair. The marketplace
-// source is pinned to branch via @ref (Claude) when set. Codex installs are not
-// shelled here — runInit emits the documented prose for that host.
+// installArgvSequence is the 3-command upgrade shape `Install` issues: pin the
+// marketplace source (@ref when a branch is set), uninstall the existing
+// spacedock@spacedock, then install it fresh. The uninstall step is what moves a
+// stale already-installed plugin off — plain `plugin install` no-ops when the
+// plugin is already installed. uninstall is itself a no-op on a fresh box, so the
+// sequence is safe on first install.
+func installArgvSequence(source, branch string) [][]string {
+	return [][]string{
+		{"plugin", "marketplace", "add", marketplaceAddArg(source, branch)},
+		{"plugin", "uninstall", "spacedock@spacedock"},
+		{"plugin", "install", "spacedock@spacedock"},
+	}
+}
+
+// Install shells the host plugin upgrade sequence (marketplace add + uninstall +
+// install). The marketplace source is pinned to branch via @ref (Claude) when
+// set. Codex installs are not shelled here — runInit emits the documented prose
+// for that host.
 func (execHost) Install(host, source, branch string) (string, error) {
 	if host != "claude" {
 		return "", fmt.Errorf("programmatic install is only supported for claude; codex install is documented prose")
 	}
-	marketplaceArg := marketplaceAddArg(source, branch)
 	var sb strings.Builder
-	for _, args := range [][]string{
-		{"plugin", "marketplace", "add", marketplaceArg},
-		{"plugin", "install", "spacedock@spacedock"},
-	} {
+	for _, args := range installArgvSequence(source, branch) {
 		cmd := exec.Command(host, args...)
 		out, err := cmd.CombinedOutput()
 		sb.Write(out)
