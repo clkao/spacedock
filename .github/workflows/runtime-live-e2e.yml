@@ -1,0 +1,158 @@
+# SECURITY MODEL — read before editing.
+#
+# Triggers: workflow_dispatch (a maintainer triggers it manually) and
+# pull_request on `next`. It uses pull_request, NOT pull_request_target, so it
+# runs the PR-head version of the workflow and GitHub withholds repo secrets from
+# FORK PRs — untrusted fork code cannot exfiltrate ANTHROPIC_API_KEY because the
+# secret is simply absent for forks. Workflow-level permissions are read-only.
+#
+# The offline job carries NO environment and NO secret: it builds + runs the
+# default Go suite (the live-tagged test compiles out) as the secret-free gate,
+# and runs unconditionally on every PR. Only the live job declares an
+# `environment:` (a required-reviewer approval gate, reviewer = clkao) and reads
+# ANTHROPIC_API_KEY. The live job is a matrix over two variants — sonnet (the
+# Python-land floor) on CI-E2E and claude-opus-4-8 on CI-E2E-OPUS — each its own
+# separately-approved deployment. The live job is additionally label-gated: it
+# runs only on a manual dispatch or a PR carrying the `run-live-e2e` label. So a
+# live PR run needs same-repo-or-no-secrets + the label + the per-variant
+# environment approval; each variant pauses in `waiting` until a maintainer
+# approves its environment, so the API-spending dispatch cannot start unapproved.
+
+name: Runtime Live E2E
+
+on:
+  workflow_dispatch:
+    inputs:
+      claude_version:
+        description: "Pin Claude Code to a specific version (e.g. 2.1.107, stable, latest). Empty = installer default."
+        required: false
+        type: string
+        default: ""
+      effort:
+        description: "Effort hint for the live run (low, high, xhigh). Default low."
+        required: false
+        type: string
+        default: "low"
+  # pull_request (NOT pull_request_target): runs the PR-head/next version of this
+  # workflow, and withholds repo secrets from FORK PRs — a fork's malicious code
+  # cannot exfiltrate ANTHROPIC_API_KEY because the secret is simply absent.
+  # Same-repo PRs get the secret; the live job stays label- + environment-gated.
+  pull_request:
+    branches: [next]
+
+permissions:
+  contents: read
+
+jobs:
+  # Gate job: the secret-free offline suite must pass before the live job burns
+  # env-approval. NO environment, NO secret — the live-tagged test compiles out of
+  # the default `go test ./...` surface, so this job is the AC-3 secret-free gate.
+  offline:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Build
+        run: go build ./...
+
+      - name: Run offline test suite
+        run: go test ./...
+
+  # Live job: a matrix over two separately-approved variants. sonnet is the
+  # Python-land floor (CI-E2E); claude-opus-4-8 is the upper tier (CI-E2E-OPUS).
+  # Each leg pins its own model and its own approval-gated environment, so each
+  # spends ANTHROPIC_API_KEY only after a maintainer approves THAT deployment.
+  # fail-fast is off so one model's red does not cancel the other's run.
+  claude-live:
+    needs: offline
+    # Live, secret-bearing job runs only on an explicit opt-in: a manual
+    # workflow_dispatch, or a PR carrying the `run-live-e2e` label. The offline
+    # gate above runs unconditionally per-PR (no secrets); this job adds the
+    # label gate ON TOP OF the per-variant environment approval, so a live PR run
+    # needs same-repo-or-no-secrets + the label + the CI-E2E* deployment approval.
+    if: ${{ github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'run-live-e2e') }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - model: sonnet
+            environment: CI-E2E
+          - model: claude-opus-4-8
+            environment: CI-E2E-OPUS
+    environment:
+      name: ${{ matrix.environment }}
+    env:
+      DISABLE_AUTOUPDATER: "1"
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: "1"
+    steps:
+      - name: Check required secret
+        run: |
+          if [ -z "${ANTHROPIC_API_KEY}" ]; then
+            echo "ANTHROPIC_API_KEY is required for claude-live." >&2
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Claude Code
+        env:
+          CLAUDE_VERSION: ${{ inputs.claude_version }}
+        run: |
+          if [ -n "$CLAUDE_VERSION" ]; then
+            echo "Installing pinned Claude Code version: $CLAUDE_VERSION"
+            curl -fsSL https://claude.ai/install.sh | bash -s -- "$CLAUDE_VERSION"
+          else
+            echo "Installing latest Claude Code (no pin)"
+            curl -fsSL https://claude.ai/install.sh | bash
+          fi
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Build spacedock binary
+        run: |
+          go build -o ./spacedock ./cmd/spacedock
+          echo "SPACEDOCK_BIN=$(pwd)/spacedock" >> "$GITHUB_ENV"
+
+      - name: Configure git identity
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config --global init.defaultBranch main
+
+      - name: Show tool versions
+        run: |
+          claude --version
+          go version
+          echo "### Tool versions" >> "$GITHUB_STEP_SUMMARY"
+          echo "- \`claude --version\`: \`$(claude --version)\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- \`go version\`: \`$(go version)\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Model: \`${{ matrix.model }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Effort: \`${{ inputs.effort }}\`" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Run live ensign cycle
+        env:
+          SPACEDOCK_LIVE_MODEL: ${{ matrix.model }}
+        run: |
+          go test -tags live -run TestLiveEnsignCycle ./internal/ensigncycle/ -v
+
+      - name: Upload live artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: runtime-live-e2e-claude-live-${{ matrix.model }}
+          path: |
+            ./spacedock
+          if-no-files-found: warn
