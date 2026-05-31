@@ -138,3 +138,16 @@ All three checklist items landed in three commits on `spacedock-ensign/fresh-ins
 ### Summary
 
 PASSED. All three checklist items independently reproduced, not trusted from the implementation report. The dev-lane self-hosting oracle flips as claimed and is genuinely manifest-load-bearing (both before-states reproduced). The key adversarial dependency-closure check holds: the only dangling-risk pointers (codex runtimes, code-project-guardrails) were deliberately dropped along with the files they'd reference, and the FO/ensign contract content survives in the vendored shared-cores; the two Go tests are real guards (mutation-check on the gate-relax fails the test, then reverted clean). Gates all green with captured exit codes. Two NON-BLOCKING observations for the captain/FO: (1) `spacedock doctor` now emits a supplementary "Note:" line about the host's load-time `requires-contract` warning that the journey doc's step-4 quote omits — the doc's quoted first line + exit code remain accurate, so this is a doc-completeness nit, not a defect. (2) The dev-lane FO/ensign loaded via `--plugin-dir` no longer auto-loads `code-project-guardrails.md` (the sibling does); content is substantially duplicated in the vendored FO shared-core so closure is intact, but if the captain wants byte-parity with the sibling agents this is the one prose gap. Recommend PASSED.
+
+## Polish: implementation
+
+Three pre-merge polish items (test+doc only, no behavior change) folded after the CLEAN audit:
+
+- DONE: Guard the `init.go` marketplace-source fix against silent revert.
+  `internal/cli/init_test.go` `TestInitMarketplaceSourceIsMigratedRepo` asserts the marketplace-add target is `spacedock-dev/spacedock` on BOTH paths (claude install seam `installCmds[1]`, codex add-prose string) and that `clkao/spacedock` never returns. Mutation-checked: reverting the constant fails both subtests; reverted clean.
+- DONE: Complete the dev-lane doctor output quote in `docs/install-journey.md`.
+  Step 4 now quotes the supplementary `Note: hosts emit a load-time warning for the 'requires-contract' field …` line that `RunDoctor` emits on the Compatible path; byte-verified against real `spacedock doctor` output.
+- DONE: FO-scope clarity note — `skills/commission/` is NOT droppable as "out of scope."
+  The vendored named entry points are first-officer + ensign SKILL.md, but the FO runtime adapter transitively invokes `skills/commission/bin/claude-team` (explicitly `{project_root}/skills/commission/bin/claude-team context-budget …` at claude-first-officer-runtime.md:160) and its sibling `status` helper — both already vendored under `skills/commission/bin/`. A future reader pruning the vendored surface must keep `skills/commission/` even though `commission` is not a named entry-point skill, or the dev-lane FO loses team-mode dispatch.
+
+`go test ./...` green after the polish (test+doc only).
