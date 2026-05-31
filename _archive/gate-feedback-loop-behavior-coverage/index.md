@@ -9,6 +9,7 @@ verdict: PASSED
 score: "0.34"
 worktree: 
 issue:
+archived: 2026-05-31T18:27:27Z
 ---
 
 Row 15 of the coverage matrix (archived entity `behavior-test-skeleton-and-matrix`,

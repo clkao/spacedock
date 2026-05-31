@@ -9,6 +9,7 @@ completed: 2026-05-31T21:32:52Z
 verdict: PASSED
 worktree: 
 issue:
+archived: 2026-05-31T21:32:52Z
 ---
 
 The split-root state backend (`state:` README field → entities in a separate `.spacedock-state`

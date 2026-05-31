@@ -9,6 +9,7 @@ verdict: PASSED
 score: "0.24"
 worktree: 
 issue:
+archived: 2026-05-31T19:15:57Z
 ---
 
 The native dispatch build injects the split-root state-commit guidance (`git -C {state_checkout} add/commit -- {entity}`) ONLY for worktree stages — `internal/dispatch/build.go:302` gates the whole block on `if worktreePath != ""`. So NON-worktree dispatches (ideation, backlog) get NO state-commit instruction. Result: ideation ensigns edit the entity in `.spacedock-state` (git-excluded from the main checkout), try a bare `git add`, hit the exclusion, and report "couldn't commit — gitignored." This recurred on every ideation-stage dispatch this session (worktree-stage ensigns committed cleanly).

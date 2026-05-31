@@ -9,6 +9,7 @@ verdict: PASSED
 score: "0.28"
 worktree: 
 issue:
+archived: 2026-05-31T18:34:49Z
 ---
 
 Two pieces of `skills/integration/` test debt the coverage matrix (archived entity
