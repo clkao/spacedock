@@ -106,6 +106,30 @@ func TestNoPRMergeOrModBehaviorIntroduced(t *testing.T) {
 	}
 }
 
+// TestCommissionStateBackendDecisionRule locks AC-2: the commission SKILL.md
+// carries the split-root-vs-single-root state-backend decision rule, so a newly
+// commissioned workflow no longer defaults to single-root with no guidance. The
+// three load-bearing fragments are the split-root frontmatter spelling, the
+// split-root trigger phrase, and the single-root "omit" guidance.
+func TestCommissionStateBackendDecisionRule(t *testing.T) {
+	p := filepath.Join(skillsRoot(t), "commission", "SKILL.md")
+	b, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatalf("read commission SKILL.md: %v", err)
+	}
+	skill := string(b)
+
+	for _, frag := range []string{
+		"state: .spacedock-state",
+		"embedded in a code repo whose PRs you care about",
+		"omit `state:`",
+	} {
+		if !strings.Contains(skill, frag) {
+			t.Errorf("commission SKILL.md missing state-backend decision-rule fragment %q", frag)
+		}
+	}
+}
+
 // sectionAfter returns the body of the markdown section beginning at the line
 // equal to heading, up to (but excluding) the next top-level `## ` heading, or
 // "" when the heading is absent. Used to scope an assertion to one section.

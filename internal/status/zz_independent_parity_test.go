@@ -97,6 +97,10 @@ var indTSRe = regexp.MustCompile(`\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z`)
 
 func indNormalize(s, root string) string {
 	s = indTSRe.ReplaceAllString(s, "<TS>")
+	// Strip the native-only STATE_BACKEND boot banner (the oracle has no such
+	// line) — the same documented native/oracle divergence the in-tree harness
+	// strips; the backend keys are byte-pinned in json_boot_test.go instead.
+	s = stripStateBackend(s)
 	if root != "" {
 		if real, err := filepath.EvalSymlinks(root); err == nil && real != root {
 			s = strings.ReplaceAll(s, real, "<ROOT>")

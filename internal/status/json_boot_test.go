@@ -4,6 +4,7 @@ package status
 
 import (
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -11,9 +12,12 @@ import (
 
 // bootJSONKeys are the --boot --json top-level keys in their required order. The
 // FO parses --boot by key at startup, so order and presence are load-bearing.
+// The state-backend keys are appended AFTER team_state so every existing key's
+// relative order is preserved.
 var bootJSONKeys = []string{
 	"command", "mods", "id_style", "next_id", "min_prefix",
 	"orphans", "pr_state", "dispatchable", "team_state",
+	"state_backend", "definition_dir", "entity_dir", "entity_dir_present",
 }
 
 // TestBootJSONStructure (AC-1 oracle e) mirrors nextid_boot_test.go for the JSON
@@ -69,9 +73,28 @@ func TestBootJSONStructure(t *testing.T) {
 			Present string `json:"present"`
 			Hint    string `json:"hint"`
 		} `json:"team_state"`
+		StateBackend     string `json:"state_backend"`
+		DefinitionDir    string `json:"definition_dir"`
+		EntityDir        string `json:"entity_dir"`
+		EntityDirPresent string `json:"entity_dir_present"`
 	}
 	if err := json.Unmarshal([]byte(out), &boot); err != nil {
 		t.Fatalf("parse --boot --json: %v\n%s", err, out)
+	}
+
+	// State backend: the sdb32 fixture is single-root (no state: field), so the
+	// two roots converge and the backend reads single-root.
+	if boot.StateBackend != "single-root" {
+		t.Fatalf("state_backend = %q, want single-root (no state: field)", boot.StateBackend)
+	}
+	if boot.DefinitionDir != boot.EntityDir {
+		t.Fatalf("single-root definition_dir %q != entity_dir %q", boot.DefinitionDir, boot.EntityDir)
+	}
+	if !filepath.IsAbs(boot.DefinitionDir) {
+		t.Fatalf("definition_dir %q is not absolute", boot.DefinitionDir)
+	}
+	if boot.EntityDirPresent != "true" {
+		t.Fatalf("entity_dir_present = %q, want true (fixture dir exists)", boot.EntityDirPresent)
 	}
 
 	// Deterministic sections (env-independent on this fixture).
@@ -150,5 +173,72 @@ func TestBootJSONDispatchableMirrorsNext(t *testing.T) {
 				t.Fatalf("dispatchable[%d].%s differs: boot=%q next=%q", i, k, boot.Dispatchable[i][k], next.Dispatchable[i][k])
 			}
 		}
+	}
+}
+
+// bootStateFields is the state-backend slice of the --boot --json envelope.
+type bootStateFields struct {
+	StateBackend     string `json:"state_backend"`
+	DefinitionDir    string `json:"definition_dir"`
+	EntityDir        string `json:"entity_dir"`
+	EntityDirPresent string `json:"entity_dir_present"`
+}
+
+func bootStateOf(t *testing.T, root string) bootStateFields {
+	t.Helper()
+	out, errOut, code := runNative(t, root, pinnedEnv(t), "--workflow-dir", root, "--boot", "--json")
+	if code != 0 {
+		t.Fatalf("--boot --json exit=%d stderr=%q", code, errOut)
+	}
+	var b bootStateFields
+	if err := json.Unmarshal([]byte(out), &b); err != nil {
+		t.Fatalf("parse --boot --json: %v\n%s", err, out)
+	}
+	return b
+}
+
+// TestBootJSONStateBackendSplitRoot (AC-1) asserts a split-root workflow names
+// its split state checkout in --boot --json: state_backend split-root, entity_dir
+// ends in the state path, is absolute, and diverges from definition_dir.
+func TestBootJSONStateBackendSplitRoot(t *testing.T) {
+	def, _ := buildSplitRoot(t, splitRootReadme, map[string]string{
+		"add-login.md": "---\nstatus: ideation\n---\n",
+	})
+
+	b := bootStateOf(t, def)
+	if b.StateBackend != "split-root" {
+		t.Fatalf("state_backend = %q, want split-root", b.StateBackend)
+	}
+	if b.DefinitionDir == b.EntityDir {
+		t.Fatalf("split-root definition_dir == entity_dir (%q); roots must diverge", b.EntityDir)
+	}
+	if !filepath.IsAbs(b.EntityDir) {
+		t.Fatalf("entity_dir %q is not absolute", b.EntityDir)
+	}
+	if filepath.Base(b.EntityDir) != ".spacedock-state" {
+		t.Fatalf("entity_dir %q does not end in the state path .spacedock-state", b.EntityDir)
+	}
+	if b.EntityDirPresent != "true" {
+		t.Fatalf("entity_dir_present = %q, want true (state dir exists)", b.EntityDirPresent)
+	}
+}
+
+// TestBootJSONStateBackendEntityDirAbsent (AC-1 diagnostic) asserts the
+// absent-state-checkout case is observable: a split-root workflow whose state
+// dir does NOT exist on disk reports entity_dir_present false, so the FO can
+// distinguish a 2nd-host un-bootstrapped checkout from an empty workflow.
+func TestBootJSONStateBackendEntityDirAbsent(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte(splitRootReadme), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Deliberately do NOT create the .spacedock-state dir.
+
+	b := bootStateOf(t, root)
+	if b.StateBackend != "split-root" {
+		t.Fatalf("state_backend = %q, want split-root", b.StateBackend)
+	}
+	if b.EntityDirPresent != "false" {
+		t.Fatalf("entity_dir_present = %q, want false (state dir absent)", b.EntityDirPresent)
 	}
 }

@@ -274,6 +274,13 @@ Craft thoughtful, mission-specific content for each stage definition. The inputs
 
 Do NOT include a Scoring Rubric section by default. Scoring uses a simple 0.0–1.0 float — no rubric needed. If {captain} explicitly asks for a multi-dimension rubric, include a Scoring Rubric section documenting their chosen dimensions.
 
+**State backend (`state:` field).** Decide where the workflow's mutable entity state lives:
+
+- **Split-root** (`state: .spacedock-state` in the README frontmatter): use when the workflow is embedded in a code repo whose PRs you care about. The README (the living spec) stays on your code branch; the mutable entity state lives in a separate `.spacedock-state` checkout, so routine stage transitions never churn the code branch and never collide with a feature PR.
+- **Single-root** (omit `state:`): use for a standalone workflow that is not embedded in a code repo you ship from — the entities live beside the README in the same directory.
+
+If you choose split-root, also set up the `.spacedock-state` checkout (and, for collaboration/resume, declare its remote).
+
 Use this template structure, filling in all `{variables}` from the design phase:
 
 ````markdown

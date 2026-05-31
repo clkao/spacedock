@@ -174,6 +174,13 @@ type bootData struct {
 	dispatchable []dispatchable
 	teamPresent  bool
 	teamHint     string
+	// State backend: split-root when entityDir diverges from definitionDir (a
+	// non-empty README state: field), else single-root. The dirs are the absolute
+	// I/O spellings, so the FO reads the state checkout from boot with no inference.
+	stateBackend     string
+	definitionDir    string
+	entityDir        string
+	entityDirPresent bool
 }
 
 // gatherBoot runs every boot probe once and returns the result. NEXT_ID is
@@ -197,6 +204,17 @@ func gatherBoot(entities []*entity, stages []Stage, definitionDir, entityDir, gi
 	d.prStatus, d.prResults = checkPRStates(entities, stages, e)
 	d.dispatchable = computeDispatchable(entities, stages)
 	d.teamPresent, d.teamHint = probeTeamState(e)
+
+	d.definitionDir = definitionDir
+	d.entityDir = entityDir
+	if entityDir != definitionDir {
+		d.stateBackend = "split-root"
+	} else {
+		d.stateBackend = "single-root"
+	}
+	if info, err := os.Stat(entityDir); err == nil && info.IsDir() {
+		d.entityDirPresent = true
+	}
 	return d, nil
 }
 
@@ -275,5 +293,9 @@ func printBoot(w io.Writer, entities []*entity, stages []Stage, definitionDir, e
 		fmt.Fprintln(w, "present: false")
 		fmt.Fprintln(w, "hint: run TeamCreate before first team-mode dispatch (claude runtime supports it)")
 	}
+
+	// STATE_BACKEND
+	fmt.Fprintf(w, "STATE_BACKEND: %s (entity_dir: %s, present: %t)\n",
+		d.stateBackend, d.entityDir, d.entityDirPresent)
 	return nil
 }

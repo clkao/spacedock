@@ -118,6 +118,20 @@ func asExitError(err error, target **exec.ExitError) bool {
 // the microsecond timestamp slips through un-normalized.
 var tsRe = regexp.MustCompile(`\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z`)
 
+// stateBackendLineRe matches the native-only STATE_BACKEND boot banner. The text
+// --boot adds it to surface the state backend for a human reading the boot, but
+// the Python oracle has no such line — the same kind of intentional native/oracle
+// divergence as the dispatch fetch-line and state-commit guidance. The boot-text
+// parity normalizers strip it from BOTH sides (the oracle never emits it) so the
+// shared sections still byte-match; the JSON form is covered by json_boot_test.go.
+var stateBackendLineRe = regexp.MustCompile(`STATE_BACKEND: [^\n]*\n`)
+
+// stripStateBackend removes the native-only STATE_BACKEND boot banner so a body
+// with it and the oracle body without it normalize to the same bytes.
+func stripStateBackend(s string) string {
+	return stateBackendLineRe.ReplaceAllString(s, "")
+}
+
 // sdB32Re matches a 24-char SD-B32 id token (the --next-id / NEXT_ID material),
 // used to normalize the non-deterministic id away for structural comparison.
 var sdB32Re = regexp.MustCompile(`\b[0-9a-hjkmnp-tv-z]{24}\b`)

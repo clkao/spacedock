@@ -139,6 +139,16 @@ func runBuild(workflowDir string, stdin io.Reader, stdout, stderr io.Writer) int
 		return buildError(stderr, 1, "entity file not readable at '%s'", entityPath)
 	}
 
+	// Absolutize workflowDir against the process cwd once, so every downstream
+	// join — README path, splitRootStateCheckout, the fetch line's --workflow-dir,
+	// and the state-commit guidance — inherits an absolute, cwd-independent base.
+	// A worktree worker runs with its cwd inside .worktrees/…, where a relative
+	// emitted `git -C docs/dev/.spacedock-state` resolves nowhere; absolutizing
+	// here makes both halves of the emitted state-commit command absolute.
+	if abs, err := filepath.Abs(workflowDir); err == nil {
+		workflowDir = abs
+	}
+
 	// Rule 11: Workflow README readable.
 	readmePath := filepath.Join(workflowDir, "README.md")
 	if !isFile(readmePath) {
