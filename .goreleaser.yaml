@@ -70,8 +70,10 @@ brews:
       assert_match version.to_s, shell_output("#{bin}/spacedock --version")
     caveats: |
       spacedock launches host agent tooling (Claude Code / Codex) inside a
-      sandbox called "safehouse". safehouse is a RUNTIME dependency and is NOT
-      installed by brew. Install it via the host tooling before first launch.
+      sandbox called "safehouse". safehouse is a runtime dependency and is NOT
+      installed by brew; install it through the host tooling before first launch.
+      See the safehouse install docs:
+        https://agent-safehouse.dev
 
 snapshot:
   # Used by `goreleaser release --snapshot --clean` (the dry-run oracle). The
