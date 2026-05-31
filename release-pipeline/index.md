@@ -65,18 +65,32 @@ hides a real defect, confirmed empirically here by RUNNING built binaries:
    against the existing `const` is ALSO a silent no-op → `0.1.0-dev`. A const is not
    linker-writable; the build does not error.
 4. In a probe module where `Version` is a `var` (not const) and the `-X` path is the
-   var's fully-qualified package path, `git describe --tags` (`v0.2.3`) stamps through:
-   the built binary reported `spacedock v0.2.3`.
+   var's fully-qualified package path, the stamp value flows through and the built
+   binary reports it (probe used a seeded tag `v0.2.3`).
+5. **No git tags exist in this repo** (`git tag` count = 0). `git describe --tags`
+   exits 128 (`fatal: No names found, cannot describe anything`) — so a build that
+   feeds raw `git describe --tags` into ldflags would ERROR, not stamp. `git describe
+   --tags --always` falls back to a commit-ish (`cab8b48`) and does not error.
 
 **Consequences the build phase MUST honor:**
 - `internal/cli.Version` must become a `var` (not `const`) so the linker can write it.
+  This is a one-line SOURCE edit (`const Version = "0.1.0-dev"` →
+  `var Version = "0.1.0-dev"` at `internal/cli/cli.go:17`) that the pipeline depends
+  on — it lands in `internal/cli`, not in the pipeline config. Sequencing/ownership:
+  this source change ships WITH the pipeline work (same entity), on `next`; it is the
+  smallest change that unblocks stamping and does not alter the default-build output.
 - The ldflags `-X` key is `github.com/clkao/spacedock-v1/internal/cli.Version`,
   **NOT** `main.Version` (the entity's provisional `-X main.Version=...` wording is the
-  F9 trap and would silently no-op). The committed pipeline must use the cli-package
-  path. (Alternative: move the var into package `main` and have cli read it — extra
-  wiring for no benefit; keep it in `internal/cli` where `--version` already prints it.)
+  F9 trap and would silently no-op — there is no `Version` symbol in package `main`).
+  The committed pipeline must use the cli-package path.
+- The stamp value must use `git describe --tags --always` (or equivalent safe
+  fallback), NOT bare `git describe --tags`, so a tagless build stamps a commit-ish
+  instead of erroring. Separately, the **first release must seed an initial tag**
+  (e.g. `v0.1.0`): goreleaser requires a tag to cut a release, so tag-seeding is a
+  prerequisite of the first release path, and only a tagged build stamps a real semver.
 - AC-1 oracle = run the built binary and assert `spacedock --version` contains the
-  `git describe --tags` value, byte-for-byte on the tag — not "non-empty".
+  `git describe --tags --always` value byte-for-byte (a real `git describe` semver on a
+  tagged build) — not "non-empty".
 
 ### Release origin + formula-bump seam (named)
 
@@ -105,3 +119,18 @@ hides a real defect, confirmed empirically here by RUNNING built binaries:
 ### Summary
 
 Picked goreleaser (config + a thin tag-triggered GH-Actions workflow) over a hand-rolled build script because it owns the darwin arm64+amd64 matrix, `checksums.txt`, the GitHub Release, AND `--snapshot --clean` as a cheap dry-run oracle — at the cost of a new dev/CI dependency (goreleaser is not installed). The F9 root cause was found by running binaries: the entity's provisional `-X main.Version=...` is a silent no-op because the version source is a `const` (not a `var`) in `internal/cli` (not `main`); the build phase must make it a `var` and stamp `github.com/clkao/spacedock-v1/internal/cli.Version`, with AC-1 asserting `spacedock --version` equals `git describe --tags` byte-for-byte. The release origin (`clkao/spacedock@next`, captain-pushed) and the formula-bump seam (tap `url`+`sha256` from `checksums.txt`) are named and agree with the homebrew-tap entity's consumption contract.
+
+## Stage Report: ideation (cycle 2)
+
+Folded three factual corrections (team-lead, verified against code) into the version-stamp design.
+
+- DONE: Pipeline design is concrete and a choice is made (goreleaser config OR script+GH-Actions).
+  Unchanged: goreleaser via tag-triggered `.github/workflows/release.yml`; goreleaser-NOT-installed dev-dependency pinned.
+- DONE: Version-stamping is a behavioral oracle (closes F9), observed by RUNNING the built binary.
+  Corrected: (1) ldflags target is `github.com/clkao/spacedock-v1/internal/cli.Version`, not `main.Version` (no Version symbol in package main); (2) `Version` is a `const` and `-X` cannot stamp a const — pipeline depends on a one-line `const`→`var` source edit at `internal/cli/cli.go:17`, shipping with the pipeline on `next`; (3) `git tag` count = 0 so `git describe --tags` exits 128 — use `git describe --tags --always` fallback and seed an initial tag (e.g. `v0.1.0`) for the first release. AC-1 oracle now reflects the real var + const→var change + tag-seeding.
+- DONE: The release origin + formula-bump seam are named.
+  Unchanged: origin `clkao/spacedock@next` (captain push); formula bump = tap `url`+`sha256` from `checksums.txt`, agreeing with the homebrew-tap entity.
+
+### Summary
+
+Three corrections folded in: the ldflags `-X` key is `internal/cli.Version` (package `main` has no Version symbol); `Version` must change from `const` to `var` (a const is linker-silent) — a one-line source edit at `internal/cli/cli.go:17` that ships with the pipeline on `next`; and because the repo has zero tags, `git describe --tags` errors (exit 128), so the stamp must use `git describe --tags --always` and the first release must seed an initial tag (goreleaser requires a tag to cut a release). All three verified against the code. Pipeline choice, origin, and formula-bump seam are unchanged from cycle 1.
