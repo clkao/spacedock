@@ -1,13 +1,13 @@
 ---
 id: 2y7n58x5yx7yn64sy6q3jzmk
 title: Sandbox-flag passthrough — spacedock --safehouse-enable / --safehouse-add-dirs
-status: ideation
+status: implementation
 source: sprint — captain (2026-05-31); closes the safehouse --enable gap (.safehouse config can't carry capabilities)
 started: 2026-05-31T01:51:45Z
 completed:
 verdict:
 score: "0.32"
-worktree:
+worktree: /Users/clkao/git/spacedock-research/spacedock-v1/.worktrees/spacedock-ensign-sandbox-flag-passthrough
 issue:
 ---
 
