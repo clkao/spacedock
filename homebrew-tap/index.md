@@ -250,3 +250,14 @@ Authored the binary-only own-tap formula + tap README, staged under `dist/homebr
 ### Summary (cycle 2)
 
 Bumped the formula to the captain's 0.19.0 and verified the B↔C contract against jf's actual `.goreleaser.yaml` rather than the ideation prose — name_template, wrap_in_directory, ldflags target, and desc all agree. One divergence surfaced for jf: goreleaser's `brews:` block regenerates the formula on each release and its `caveats` drops the safehouse docs link, which would violate AC-3 on released formulas; flagged to jf to add the link to `brews.caveats`. The `brew audit --strict` oracle is still captain-gated (sandbox blocks `/opt/homebrew`) and the bump does not affect that version-neutral structural audit.
+
+## Stage Report: implementation (cycle 3)
+
+- DONE: Formula + tap README + B↔C contract committed on the branch.
+  `dist/homebrew/Formula/spacedock.rb` (version 0.19.0) + `dist/homebrew/README.md` on branch `spacedock-ensign/homebrew-tap`, commits bbdab4d (initial) + 31fd552 (0.19.0 bump). `ruby -c` Syntax OK.
+- DONE: AC-1 (`brew audit --strict`) recorded as a CAPTAIN-RUN post-tap check.
+  Verification method changed by the current brew: `brew audit [path]` is disabled — audit is name-only (`brew audit <tap>/<name>`), so a loose-file audit on the staged path cannot run (independent of this sandbox's `/opt/homebrew` write block, which also blocks brew here). Authoritative AC-1 check is run by the captain after the FO creates `spacedock-dev/homebrew-tap` and pushes the formula. Exact command: `brew audit --strict spacedock-dev/homebrew-tap/spacedock; echo "AUDIT_RC=$?"`. The rc is relayed into the validation gate by the FO. Not faked — no in-entity green claimed.
+
+### Summary (cycle 3)
+
+Per the FO's revised plan: the current brew disables path-form `brew audit`, so AC-1 cannot be a loose-file audit — it becomes a captain-run name-based audit (`brew audit --strict spacedock-dev/homebrew-tap/spacedock`) after the FO creates the tap repo and pushes this formula. Formula (0.19.0) + tap README + B↔C contract are committed on `spacedock-ensign/homebrew-tap` (bbdab4d, 31fd552); `ruby -c` is the only in-entity static check I can run (Syntax OK). The AC-1 rc and the AC-2 live `brew install` both flow through the FO/captain post-tap; no fabricated audit pass.
