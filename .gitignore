@@ -2,3 +2,6 @@
 # its sibling status library under SourceFileLoader.
 __pycache__/
 *.pyc
+
+# goreleaser build output (binaries, tarballs, checksums, generated cask).
+dist/

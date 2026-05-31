@@ -1,0 +1,79 @@
+# Release build for the spacedock launcher: darwin arm64 + amd64 tarballs,
+# a checksums file, a GitHub Release, and a Homebrew formula bump on the own-tap.
+version: 2
+
+project_name: spacedock
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: spacedock
+    main: ./cmd/spacedock
+    binary: spacedock
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+    goarch:
+      - arm64
+      - amd64
+    # The version stamp the formula's `test do` asserts. Target is the
+    # internal/cli.Version var (NOT main.Version — package main has no Version
+    # symbol, so -X main.Version is a silent no-op). Version must be a var, not a
+    # const, for the linker to write it. {{.Version}} is goreleaser's
+    # git-describe-derived version (the tag on a release, a snapshot string on
+    # --snapshot).
+    ldflags:
+      - -s -w
+      - -X github.com/spacedock-dev/spacedock/internal/cli.Version={{ .Version }}
+
+archives:
+  # Asset name template is the B<->C contract with the homebrew-tap formula:
+  # spacedock_{version}_darwin_{arm64|amd64}.tar.gz, with the bare `spacedock`
+  # binary at the archive root (no wrapping directory) so `bin.install
+  # "spacedock"` resolves.
+  - id: spacedock
+    formats:
+      - tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    wrap_in_directory: false
+
+checksum:
+  # The formula's per-arch sha256 lines are sourced from this file.
+  name_template: checksums.txt
+  algorithm: sha256
+
+release:
+  github:
+    owner: spacedock-dev
+    name: spacedock
+
+homebrew_casks:
+  # Generates + pushes a Homebrew Cask to spacedock-dev/homebrew-tap on each
+  # release, pinning the per-arch url + sha256 from the release assets +
+  # checksums.txt — the seam the homebrew-tap entity consumes. `brews:` is
+  # hard-deprecated at goreleaser v2.16; casks auto-detect the bare `spacedock`
+  # binary from the archive root, so no install/test stanza is given.
+  - name: spacedock
+    repository:
+      owner: spacedock-dev
+      name: homebrew-tap
+      # PAT with write access to the tap repo; the default GITHUB_TOKEN is scoped
+      # to the release repo and cannot push the cross-repo cask bump.
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    homepage: https://github.com/spacedock-dev/spacedock
+    description: Workflow launcher and first-officer dispatch for agentic dev
+    license: Apache-2.0
+    caveats: |
+      spacedock launches host agent tooling (Claude Code / Codex) inside a
+      sandbox called "safehouse". safehouse is a runtime dependency and is NOT
+      installed by brew; install it through the host tooling before first launch.
+      See the safehouse install docs:
+        https://agent-safehouse.dev
+
+snapshot:
+  # Used by `goreleaser release --snapshot --clean` (the dry-run oracle). The
+  # stamp the built binary reports comes from this template when there is no tag.
+  version_template: "{{ incpatch .Version }}-snapshot-{{ .ShortCommit }}"
