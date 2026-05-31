@@ -1,9 +1,9 @@
 ---
 id: 8033qbqdrh4zba10w0d34m4j
 title: Behavior-test skeleton + coverage matrix (replace the prose-grep antipattern)
-status: backlog
+status: ideation
 source: sprint — captain (2026-05-31); prereq to cutting the ensign contract
-started:
+started: 2026-05-31T02:36:17Z
 completed:
 verdict:
 score: "0.36"
