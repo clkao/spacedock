@@ -154,3 +154,24 @@ Fix (commit `576bd2b`): centralized the tag-cut shape in `release.AnnotatedTagAr
 ### Summary
 
 Fixed the AC-3 seam bug the validator reproduced. The notes now land in the annotated tag's BODY (subject `Release <version>` + notes via two `-m` flags), centralized in `release.AnnotatedTagArgs` as the single source of truth the CLI and the round-trip test share — so the test exercises the real code path instead of a hand-built fixture. Verified end-to-end with the actual binary: `%(contents:body)` is non-empty and equals the filtered notes, which is what release.yml extracts and feeds goreleaser. Scope unchanged (only `cmd/spacedock-release` + `internal/release`; release.yml's extract step was already correct). Code on `576bd2b`; tag/push still deferred to the 0.19.2 checkpoint.
+
+## Stage Report: validation (cycle 2)
+
+- DONE: Re-verify the FIXED AC-3 seam END-TO-END (cycle-1 bug was an empty `%(contents:body)`) — build branch binary, run real `notes <version>` in a scratch repo (confirm=y, no claude), cut via actual code, `git tag -l --format='%(contents:body)'` returns NOTES, NON-EMPTY, subject `Release <version>`; empty-body regression GONE.
+  Built `/tmp/sdr-bin/spacedock-release` from `576bd2b`. Live in `/tmp/sdr-live` with `PATH=/usr/bin:/bin` (no claude): `notes 1.2.3` confirm=y cut the tag via the real `cutAnnotatedTag`→`AnnotatedTagArgs`. `%(contents:subject)`=`Release 1.2.3`; `%(contents:body)`=the filtered notes (120 bytes, NON-EMPTY); CI's `[ ! -s release-notes.txt ]` guard PASSES; no subject leak in body. Regression is gone.
+- DONE: Confirm the test exercises the REAL path (not the cycle-1 masking fixture); AC-1 + AC-2 still PASS (regression).
+  `TestAnnotatedTagBodyRoundTrips` cuts via `release.AnnotatedTagArgs(...)` — the same builder `cutAnnotatedTag` uses (main.go:234). Mutation proof: reverting `AnnotatedTagArgs` to a single `-m body` (the cycle-1 bug) makes the test FAIL with `got: ""` / "notes folded into the subject"; restoring the two-`-m` form passes. The masking trap is closed — the test cannot be green while production is broken. Live no-claude run emitted the filtered log (noise `dispatch:`/`release: stamp`/`next: bump`/`merge:` dropped; `fix(dispatch):` scoped commit + `fix:`/`feat:` kept) and decline→no-tag holds (AC-1/AC-2).
+- DONE: `go test ./...` green except ONLY the pre-existing env-gated codex test; `git diff main...HEAD --name-only` = ONLY cmd/spacedock-release + internal/release + release.yml; gofmt+vet clean; release.yml wiring intact.
+  Full suite: only `internal/cli/TestCodexResolveManifestAgainstInstalledHost` FAILs (`~/.codex/config.toml: Operation not permitted` — sandbox env; `internal/cli` is NOT in the diff, so out of scope confirmed). Diff = `.github/workflows/release.yml`, `cmd/spacedock-release/main.go`, `internal/release/{notes.go,notes_extract_test.go,release_test.go}` only (0 internal/cli files). gofmt clean, vet clean. release.yml: extract step (l.38) PRECEDES goreleaser (l.47), empty-body guard `[ ! -s ]`+`::error::`+exit 1 (l.42-45), `--release-notes release-notes.txt` (l.51), trigger still `push: tags: v*` (l.7-10), stamp+builder unchanged.
+
+### Per-AC evidence table
+
+| AC | Verdict | Evidence |
+|----|---------|----------|
+| AC-1 notes clean (filter + prompt + no-claude fallback) | PASS | release unit tests green; live no-claude `notes 1.2.3` emitted filtered log, noise dropped, scoped `fix(dispatch):` kept |
+| AC-2 captain review before tag, no live CI prompt | PASS | confirm/decline injected-IO tests + live confirm cut tag; pure core needs no TTY; CI reads tag only |
+| AC-3 notes land on Release; build still on tag push | **PASS** | live: real `cutAnnotatedTag`→`AnnotatedTagArgs` → `%(contents:body)` NON-EMPTY (120B) == notes, subject `Release 1.2.3`, guard passes; mutation test proves the round-trip test catches the cycle-1 empty-body bug; release.yml extract-before-goreleaser + guard + `--release-notes` + `v*` trigger intact |
+
+### Summary
+
+PASSED. The cycle-1 AC-3 empty-body regression is fixed and verified LIVE end-to-end, not by report. The real binary's `cutAnnotatedTag` cuts the tag through `release.AnnotatedTagArgs` (subject `Release <version>` + notes as a second `-m`), so `%(contents:body)` — exactly what release.yml extracts for goreleaser `--release-notes` — is NON-EMPTY and equals the filtered notes; CI's empty-body guard passes. `TestAnnotatedTagBodyRoundTrips` now shares that production builder, and a mutation back to the single-`-m` cycle-1 form makes it fail with the empty-body symptom — so the masking fixture trap is closed and the test genuinely exercises the production path. AC-1 (filter+prompt+no-claude fallback) and AC-2 (confirm-then-tag) still pass. Full suite green except the pre-existing env-gated `internal/cli` codex test (not in the branch diff — out of scope). Scope, gofmt, vet, and release.yml wiring all clean. Release deferred (no merge/tag/push).
