@@ -1,7 +1,7 @@
 ---
 id: b6tef0q53k5v9d3vsga49sz4
 title: Wire an approval-gated live-runtime e2e CI job (CI-E2E env) — footing for the deferred live net
-status: validation
+status: implementation
 source: FO/captain (2026-05-31) — behavior-coverage sprint follow-on; the CI-E2E* approval-gated environments exist but no v1 workflow references them
 score: "0.30"
 started: 2026-05-31T18:40:08Z
@@ -241,3 +241,24 @@ Wired the approval-gated live-runtime e2e footing: `.github/workflows/runtime-li
 ### Summary
 
 Independently reproduced every offline/static proof around the single CAPTAIN-RUN live step and confirms PASSED. Build-tag isolation, compile-under-tag, vet, full offline suite (488 passed; lone fail is the pre-existing codex-env artifact, not a regression; live test excluded), actionlint (real go-run, no findings), and yq AC-wiring inspection all green with real captured exit codes. live_test.go is a genuine behavioral assertion — it shells the real `spacedock claude --plugin-dir` front door and reuses the skeleton's strict anchored regexes verbatim (go-red discipline re-proven via the skeleton's negative controls), and the `claude-live` `go test -tags live` step is the sole cost-bearing/CI-E2E-gated surface. FLAG-NOT-FAKE: the actual gated live model dispatch was NOT run (sandbox cannot trigger Actions, approve the CI-E2E gate, or spend ANTHROPIC_API_KEY) — the captain must trigger the workflow_dispatch (haiku/low), approve the gate, and observe `claude-live` park in `waiting` then go green. Recommendation: PASSED.
+
+## Feedback Cycles
+
+### Cycle 1 — REJECTED (post-validation: wrong auth mechanism; not locally runnable) — captain-surfaced
+
+Validation PASSED the offline surface, but the captain surfaced that the live test's AUTH mechanism diverges from the proven original and makes the test impossible to run locally. The original spacedock harness (`~/git/spacedock/scripts/test_lib.py:325-372`, `_isolated_claude_env`) uses a TWO-path decision tree with HOME isolation:
+
+- **(a) operator-local:** `~/.claude/benchmark-token` non-empty → fresh temp HOME, inject `CLAUDE_CODE_OAUTH_TOKEN=<token>`, DROP `ANTHROPIC_API_KEY` (token authoritative; `claude setup-token`).
+- **(b) CI:** no token file but `ANTHROPIC_API_KEY` present → fresh temp HOME, pass `ANTHROPIC_API_KEY` through (GitHub-runner path).
+- **(c) neither → None** (caller skips, does NOT fatal).
+
+v1's `internal/ensigncycle/live_test.go` hard-requires `ANTHROPIC_API_KEY` (`t.Fatal` :43-44) and uses the real (non-isolated) HOME. So it CANNOT run on an operator machine (which authenticates via OAuth/`benchmark-token`, not an API key) — `~/.claude/benchmark-token` is present here (108 bytes) yet the test refuses it — and it skips HOME isolation. The Python CI uses `ANTHROPIC_API_KEY` (path b), so v1's WORKFLOW key-wiring is correct and STAYS; the fix is the TEST's auth + HOME isolation.
+
+**Fix (route to implementation):**
+1. Port the decision tree into a small testable helper (e.g. `isolatedClaudeEnv(t)`): (a) benchmark-token → fresh `t.TempDir()` HOME + `CLAUDE_CODE_OAUTH_TOKEN` + drop `ANTHROPIC_API_KEY`; (b) `ANTHROPIC_API_KEY` → fresh HOME + passthrough; (c) neither → `t.Skip(...)`, NOT `t.Fatal`.
+2. Run `spacedock claude` with that isolated env (clean HOME + chosen credential).
+3. Add an OFFLINE unit test for the helper mirroring `~/git/spacedock/tests/test_test_lib_helpers.py` (fixture token file → OAuth path + key dropped; key-only → passthrough; neither → skip) — fast, no live model.
+4. Confirm plugin loading works under the clean HOME (test uses `--plugin-dir`; the original stages the plugin into HOME — verify `--plugin-dir` suffices with a fresh HOME, else stage it).
+5. Do NOT attempt the nested-claude live run inside the dispatched ensign (deep nesting/sandbox); the FO runs the gated live test locally with the real `benchmark-token` after the fix.
+
+**Cleared (do NOT change):** the workflow's `ANTHROPIC_API_KEY` wiring (correct CI path b), the security-audited gate/trigger/permissions, and the anchored on-disk assertions (genuine, not tautology).
