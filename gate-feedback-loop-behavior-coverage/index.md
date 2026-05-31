@@ -1,7 +1,7 @@
 ---
 id: m6h1tyyen9z9g7cm830wcpzq
 title: Behavioral coverage for the gate/feedback approval loop (matrix row 15)
-status: implementation
+status: validation
 source: FO/captain (2026-05-31) — comprehensive-behavior-coverage sprint; coverage matrix row 15 (largest pure GAP)
 started: 2026-05-31T18:06:58Z
 completed:
