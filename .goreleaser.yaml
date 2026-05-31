@@ -50,24 +50,22 @@ release:
     owner: spacedock-dev
     name: spacedock
 
-brews:
-  # Pushes the per-arch url + sha256 into spacedock-dev/homebrew-tap on each
-  # release. The url/sha256 the formula carries are sourced here from the release
-  # assets + checksums.txt — the seam the homebrew-tap entity consumes.
+homebrew_casks:
+  # Generates + pushes a Homebrew Cask to spacedock-dev/homebrew-tap on each
+  # release, pinning the per-arch url + sha256 from the release assets +
+  # checksums.txt — the seam the homebrew-tap entity consumes. `brews:` is
+  # hard-deprecated at goreleaser v2.16; casks auto-detect the bare `spacedock`
+  # binary from the archive root, so no install/test stanza is given.
   - name: spacedock
     repository:
       owner: spacedock-dev
       name: homebrew-tap
       # PAT with write access to the tap repo; the default GITHUB_TOKEN is scoped
-      # to the release repo and cannot push the cross-repo formula bump.
+      # to the release repo and cannot push the cross-repo cask bump.
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
     homepage: https://github.com/spacedock-dev/spacedock
     description: Workflow launcher and first-officer dispatch for agentic dev
     license: Apache-2.0
-    install: |
-      bin.install "spacedock"
-    test: |
-      assert_match version.to_s, shell_output("#{bin}/spacedock --version")
     caveats: |
       spacedock launches host agent tooling (Claude Code / Codex) inside a
       sandbox called "safehouse". safehouse is a runtime dependency and is NOT
