@@ -25,8 +25,8 @@ import (
 //
 // The `//go:build live` tag keeps this out of the default `go test ./...` suite
 // (the secret-free offline job). It compiles and runs ONLY under
-// `go test -tags live`, the gated job's invocation that spends ANTHROPIC_API_KEY
-// behind the CI-E2E approval gate.
+// `go test -tags live`, the gated job's invocation that spends the live
+// credential behind the CI-E2E approval gate.
 
 // liveTimeout caps the single live dispatch->cycle run. A haiku/low run of one
 // flat-entity backlog stage is well inside this; the cap turns a hung model run
@@ -39,13 +39,22 @@ const liveTimeout = 12 * time.Minute
 // anchored mechanical contract. It is the smallest meaningful live mechanism
 // proof: real binary front door + real plugin load + real model + real
 // dispatch->ensign->stage cycle + a real path-scoped state commit.
+//
+// Auth + HOME isolation are resolved by isolatedClaudeEnv: an operator machine
+// authenticates via the OAuth benchmark-token (~/.claude/benchmark-token), the
+// CI runner via ANTHROPIC_API_KEY, and a machine with neither SKIPS (never
+// fatals). The chosen credential runs against a fresh empty HOME so parallel
+// `spacedock claude` invocations never collide in ~/.claude.
 func TestLiveEnsignCycle(t *testing.T) {
-	if os.Getenv("ANTHROPIC_API_KEY") == "" {
-		t.Fatal("ANTHROPIC_API_KEY must be set for the live cycle test")
-	}
 	binary := spacedockBinary(t)
 	repoRoot := repoRoot(t)
 	model := envOr("SPACEDOCK_LIVE_MODEL", "haiku")
+
+	// Resolve the isolated child env (clean HOME + the authoritative credential)
+	// or skip when no auth mechanism is available. The empty home argument means
+	// "read the live $HOME"; the offline unit test drives isolatedClaudeEnv
+	// directly with a fake home so it never touches the real ~/.claude.
+	childEnv := isolatedClaudeEnv(t, os.Getenv("HOME"))
 
 	// Stage the SAME flat-entity backlog fixture the skeleton builds: a
 	// git-init'd root with a non-worktree workflow README and a flat entity in
@@ -70,8 +79,8 @@ func TestLiveEnsignCycle(t *testing.T) {
 	// (and relaxes the contract gate); --skip-contract-check is belt-and-braces.
 	// stream-json + bypassPermissions + the model pin mirror the headless launch
 	// the Python net uses. The task is fenced after `--` so it rides as the
-	// launch-prompt override. CLAUDECODE is unset so the binary takes the real
-	// front-door path rather than a nested-session shortcut.
+	// launch-prompt override. CLAUDECODE is dropped by isolatedClaudeEnv so the
+	// binary takes the real front-door path rather than a nested-session shortcut.
 	cmd := exec.CommandContext(ctx, binary, "claude",
 		"--plugin-dir", repoRoot,
 		"--skip-contract-check",
@@ -83,7 +92,7 @@ func TestLiveEnsignCycle(t *testing.T) {
 		"--", task,
 	)
 	cmd.Dir = root
-	cmd.Env = liveEnv()
+	cmd.Env = childEnv
 
 	out, err := cmd.CombinedOutput()
 	t.Logf("spacedock claude exit: %v\n--- transcript (tail) ---\n%s", err, tail(string(out), 8000))
@@ -166,36 +175,4 @@ func repoRoot(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return root
-}
-
-// liveEnv returns the child environment for the front-door launch: the parent
-// env minus CLAUDECODE (so the binary takes the real front-door path, not a
-// nested-session shortcut). ANTHROPIC_API_KEY is inherited from the parent (the
-// CI job env / the operator shell).
-func liveEnv() []string {
-	var env []string
-	for _, kv := range os.Environ() {
-		if strings.HasPrefix(kv, "CLAUDECODE=") {
-			continue
-		}
-		env = append(env, kv)
-	}
-	return env
-}
-
-// envOr returns the environment value for key, or def when unset/empty.
-func envOr(key, def string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return def
-}
-
-// tail returns the last n bytes of s, prefixed with an elision marker when s was
-// truncated, so the transcript log stays bounded.
-func tail(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return "…(truncated)…\n" + s[len(s)-n:]
 }
