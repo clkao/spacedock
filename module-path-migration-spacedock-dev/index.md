@@ -1,13 +1,13 @@
 ---
 id: rzfw9erffjatwa40q0jrs5c6
 title: Migrate Go module path to github.com/spacedock-dev/spacedock
-status: backlog
+status: implementation
 source: sprint — captain (2026-05-31); repo moved to spacedock-dev/spacedock, install off `next`
 started:
 completed:
 verdict:
 score: "0.34"
-worktree:
+worktree: /Users/clkao/git/spacedock-research/spacedock-v1/.worktrees/spacedock-ensign-module-path-migration-spacedock-dev
 issue:
 ---
 
