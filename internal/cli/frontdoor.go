@@ -6,9 +6,17 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/clkao/spacedock-v1/internal/contract"
+	"github.com/clkao/spacedock-v1/internal/safehouse"
 )
+
+// bootstrapPrompt is the fixed launch-and-go message appended as the last inner
+// argv token so a fresh `spacedock claude` session starts the first officer
+// rather than opening an idle agent. It is omitted when `--resume` is forwarded
+// (a resume already carries its own session intent).
+const bootstrapPrompt = "Begin as the Spacedock first officer: run your startup sequence and work the event loop."
 
 // hostOps is the injectable seam the front-door, init, and doctor paths depend
 // on. Production backs it with real `claude`/`codex` plugin commands and exec;
@@ -70,21 +78,63 @@ func gateHost(ops hostOps, host string, stderr io.Writer) (ok bool) {
 }
 
 // runClaude is the `spacedock claude` front door: version-gate (fail fast), then
-// launch `claude --agent spacedock:first-officer` with the operator's passthrough
-// args. `--skip-contract-check` bypasses the gate for first-install bootstrap.
-func runClaude(ctx context.Context, args []string, ops hostOps, stdout, stderr io.Writer) int {
+// launch the first officer. When `dir` carries a `.safehouse` profile the launch
+// is interposed through `safehouse --trust-workdir-config -- claude
+// --dangerously-skip-permissions …`; otherwise it is plain `claude --agent
+// spacedock:first-officer …` (no skip-permissions in an unsandboxed launch). A
+// fixed bootstrap prompt is appended last unless `--resume` is forwarded.
+// `--skip-contract-check` bypasses the gate for first-install bootstrap.
+// `lookPath` resolves the safehouse binary (default exec.LookPath; injected so
+// tests pin not-found).
+func runClaude(ctx context.Context, args []string, dir string, ops hostOps, lookPath func(string) (string, error), stdout, stderr io.Writer) int {
 	passthrough, skipCheck := splitFrontDoorArgs(args)
 	if !skipCheck {
 		if !gateHost(ops, "claude", stderr) {
 			return 1
 		}
 	}
-	argv := append([]string{"claude", "--agent", "spacedock:first-officer"}, passthrough...)
+
+	resume := containsResume(passthrough)
+	inner := []string{"claude"}
+	if safehouse.Present(dir) {
+		inner = append(inner, "--dangerously-skip-permissions")
+	}
+	inner = append(inner, "--agent", "spacedock:first-officer")
+	inner = append(inner, passthrough...)
+	if !resume {
+		inner = append(inner, bootstrapPrompt)
+	}
+
+	argv := inner
+	if safehouse.Present(dir) {
+		if ok, hint := safehouse.Available(lookPath); !ok {
+			fmt.Fprintln(stderr, hint)
+			return 1
+		}
+		argv = safehouse.Wrap(inner, nil)
+	}
+
 	if err := ops.Launch(argv); err != nil {
 		fmt.Fprintf(stderr, "spacedock claude: launch failed: %v\n", err)
 		return 1
 	}
 	return 0
+}
+
+// containsResume reports whether the operator forwarded any of claude's
+// session-resume forms (which carry their own session intent, so the bootstrap
+// prompt is suppressed): `--resume`, `--resume=<id>`, `-r`, `--continue`, `-c`.
+func containsResume(args []string) bool {
+	for _, a := range args {
+		switch a {
+		case "--resume", "-r", "--continue", "-c":
+			return true
+		}
+		if strings.HasPrefix(a, "--resume=") {
+			return true
+		}
+	}
+	return false
 }
 
 // runCodex is the `spacedock codex` front door: version-gate (fail fast), then

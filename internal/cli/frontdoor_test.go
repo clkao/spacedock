@@ -63,12 +63,12 @@ func TestClaudeFrontDoorLaunchesOnCompatible(t *testing.T) {
 	fake := &fakeHost{manifest: compatibleManifest(t)}
 	var stdout, stderr bytes.Buffer
 
-	code := runClaude(context.Background(), []string{"--", "-p", "do the thing"}, fake, &stdout, &stderr)
+	code := runClaude(context.Background(), []string{"--", "-p", "do the thing"}, t.TempDir(), fake, lookFound, &stdout, &stderr)
 
 	if code != 0 {
 		t.Fatalf("exit = %d, want 0 (stderr=%q)", code, stderr.String())
 	}
-	want := []string{"claude", "--agent", "spacedock:first-officer", "-p", "do the thing"}
+	want := []string{"claude", "--agent", "spacedock:first-officer", "-p", "do the thing", wantBootstrapPrompt}
 	if !equalArgv(fake.launchedArg, want) {
 		t.Fatalf("launch argv = %v, want %v", fake.launchedArg, want)
 	}
@@ -80,7 +80,7 @@ func TestClaudeFrontDoorFailFastOnMismatch(t *testing.T) {
 	fake := &fakeHost{manifest: tooOldBinaryManifest(t)}
 	var stdout, stderr bytes.Buffer
 
-	code := runClaude(context.Background(), nil, fake, &stdout, &stderr)
+	code := runClaude(context.Background(), nil, t.TempDir(), fake, lookFound, &stdout, &stderr)
 
 	if code == 0 {
 		t.Fatalf("exit = 0, want non-zero on mismatch")
@@ -100,7 +100,7 @@ func TestClaudeFrontDoorUnresolvableManifestFailsFast(t *testing.T) {
 	fake := &fakeHost{manifest: ""} // no plugin found
 	var stdout, stderr bytes.Buffer
 
-	code := runClaude(context.Background(), nil, fake, &stdout, &stderr)
+	code := runClaude(context.Background(), nil, t.TempDir(), fake, lookFound, &stdout, &stderr)
 
 	if code == 0 {
 		t.Fatalf("exit = 0, want non-zero when manifest unresolvable")
@@ -123,7 +123,7 @@ func TestClaudeFrontDoorNonEmptyMissingManifestFailsFast(t *testing.T) {
 	fake := &fakeHost{manifest: missing} // non-empty path, but the file is absent
 	var stdout, stderr bytes.Buffer
 
-	code := runClaude(context.Background(), nil, fake, &stdout, &stderr)
+	code := runClaude(context.Background(), nil, t.TempDir(), fake, lookFound, &stdout, &stderr)
 
 	if code == 0 {
 		t.Fatalf("exit = 0, want non-zero when resolved manifest path is missing")
@@ -143,12 +143,12 @@ func TestClaudeFrontDoorSkipContractCheckBootstrap(t *testing.T) {
 	fake := &fakeHost{manifest: tooOldBinaryManifest(t)} // would mismatch if checked
 	var stdout, stderr bytes.Buffer
 
-	code := runClaude(context.Background(), []string{"--skip-contract-check"}, fake, &stdout, &stderr)
+	code := runClaude(context.Background(), []string{"--skip-contract-check"}, t.TempDir(), fake, lookFound, &stdout, &stderr)
 
 	if code != 0 {
 		t.Fatalf("exit = %d, want 0 with --skip-contract-check (stderr=%q)", code, stderr.String())
 	}
-	want := []string{"claude", "--agent", "spacedock:first-officer"}
+	want := []string{"claude", "--agent", "spacedock:first-officer", wantBootstrapPrompt}
 	if !equalArgv(fake.launchedArg, want) {
 		t.Fatalf("launch argv = %v, want %v (skip-check must not pass the flag through)", fake.launchedArg, want)
 	}
