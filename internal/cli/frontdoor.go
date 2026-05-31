@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/clkao/spacedock-v1/internal/contract"
 	"github.com/clkao/spacedock-v1/internal/safehouse"
@@ -120,11 +121,16 @@ func runClaude(ctx context.Context, args []string, dir string, ops hostOps, look
 	return 0
 }
 
-// containsResume reports whether the operator forwarded `--resume` (which
-// carries its own session intent, so the bootstrap prompt is suppressed).
+// containsResume reports whether the operator forwarded any of claude's
+// session-resume forms (which carry their own session intent, so the bootstrap
+// prompt is suppressed): `--resume`, `--resume=<id>`, `-r`, `--continue`, `-c`.
 func containsResume(args []string) bool {
 	for _, a := range args {
-		if a == "--resume" {
+		switch a {
+		case "--resume", "-r", "--continue", "-c":
+			return true
+		}
+		if strings.HasPrefix(a, "--resume=") {
 			return true
 		}
 	}

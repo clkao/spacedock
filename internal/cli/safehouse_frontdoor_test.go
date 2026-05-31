@@ -142,25 +142,41 @@ func TestClaudeSafehousePresentButBinaryMissing(t *testing.T) {
 	}
 }
 
-// AC-5: --resume suppresses the bootstrap prompt; operator args forward verbatim.
-func TestClaudeResumeSuppressesBootstrapPrompt(t *testing.T) {
-	dir := safehouseFixtureDir(t)
-	fake := &fakeHost{manifest: compatibleManifest(t)}
-	var stdout, stderr bytes.Buffer
-
-	code := runClaude(context.Background(), []string{"--", "--resume"}, dir, fake, lookFound, &stdout, &stderr)
-
-	if code != 0 {
-		t.Fatalf("exit = %d, want 0 (stderr=%q)", code, stderr.String())
+// AC-5: any resume-family arg suppresses the bootstrap prompt; the operator arg
+// forwards verbatim. The family is claude's full set of session-resume forms:
+// --resume, --resume=<id>, -r, --continue, -c.
+func TestClaudeResumeFamilySuppressesBootstrapPrompt(t *testing.T) {
+	cases := []struct {
+		name string
+		arg  string
+	}{
+		{"resume", "--resume"},
+		{"resume-equals", "--resume=abc123"},
+		{"resume-short", "-r"},
+		{"continue", "--continue"},
+		{"continue-short", "-c"},
 	}
-	want := []string{"safehouse", "--trust-workdir-config", "--",
-		"claude", "--dangerously-skip-permissions", "--agent", "spacedock:first-officer", "--resume"}
-	if !equalArgv(fake.launchedArg, want) {
-		t.Fatalf("launch argv = %v, want %v", fake.launchedArg, want)
-	}
-	for _, tok := range fake.launchedArg {
-		if tok == wantBootstrapPrompt {
-			t.Fatalf("--resume launch carried the bootstrap prompt: %v", fake.launchedArg)
-		}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := safehouseFixtureDir(t)
+			fake := &fakeHost{manifest: compatibleManifest(t)}
+			var stdout, stderr bytes.Buffer
+
+			code := runClaude(context.Background(), []string{"--", tc.arg}, dir, fake, lookFound, &stdout, &stderr)
+
+			if code != 0 {
+				t.Fatalf("exit = %d, want 0 (stderr=%q)", code, stderr.String())
+			}
+			want := []string{"safehouse", "--trust-workdir-config", "--",
+				"claude", "--dangerously-skip-permissions", "--agent", "spacedock:first-officer", tc.arg}
+			if !equalArgv(fake.launchedArg, want) {
+				t.Fatalf("launch argv = %v, want %v", fake.launchedArg, want)
+			}
+			for _, tok := range fake.launchedArg {
+				if tok == wantBootstrapPrompt {
+					t.Fatalf("%s launch carried the bootstrap prompt: %v", tc.arg, fake.launchedArg)
+				}
+			}
+		})
 	}
 }
