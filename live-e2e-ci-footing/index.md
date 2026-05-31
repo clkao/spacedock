@@ -1,13 +1,13 @@
 ---
 id: b6tef0q53k5v9d3vsga49sz4
 title: Wire an approval-gated live-runtime e2e CI job (CI-E2E env) — footing for the deferred live net
-status: ideation
+status: implementation
 source: FO/captain (2026-05-31) — behavior-coverage sprint follow-on; the CI-E2E* approval-gated environments exist but no v1 workflow references them
 score: "0.30"
 started: 2026-05-31T18:40:08Z
 completed:
 verdict:
-worktree:
+worktree: /Users/clkao/git/spacedock-research/spacedock-v1/.worktrees/spacedock-ensign-live-e2e-ci-footing
 issue:
 ---
 
