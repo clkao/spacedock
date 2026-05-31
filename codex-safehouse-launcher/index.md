@@ -199,3 +199,16 @@ Captain-specified default launch prompt:
 - **codex (`codexBootstrapPrompt`, frontdoor.go):** the base PLUS ` Assume $spacedock:first-officer for the entire session.` (codex has no `--agent`, so the prompt assumes the FO skill; the `spacedock:first-officer` skill-token invariant for AC-2 stays satisfied).
 
 This change also updates the MERGED claude `bootstrapPrompt` — both consts live in `frontdoor.go`, so it rides this codex branch and the codex merge carries both launchers' new prompt. Test expected-values (claude `wantBootstrapPrompt` + codex prompt-token assertions) update with the consts.
+
+## Stage Report: implementation (cycle 2)
+
+- DONE: claude `bootstrapPrompt` set to the captain default launch prompt.
+  frontdoor.go bootstrapPrompt + safehouse_frontdoor_test.go wantBootstrapPrompt drift-detector updated to "You totally got this. ... Engage." (no skill line — --agent selects the FO). commit 69f9a4f.
+- DONE: codex `codexBootstrapPrompt` set to the captain default, assuming `$spacedock:first-officer` for the session.
+  frontdoor.go codexBootstrapPrompt + wantCodexBootstrapPrompt updated; ends with "Assume $spacedock:first-officer for the entire session." AC-2 token assertion (TestCodexSafehousePromptNamesFirstOfficerSkill) still green — the spacedock:first-officer token is present.
+- DONE: gates re-run with REAL captured exit codes after the prompt change.
+  go test ./... all 6 packages ok (exit 0); go test -race ./internal/cli/ ok (exit 0); go vet ./... no issues; gofmt -l clean. AC-4 evidence script's echoed oracle prompt updated to match.
+
+### Summary
+
+Cycle 2: applied the captain's default launch prompt to both front-door constants (both live in frontdoor.go on this branch). The claude prompt drops the skill line (--agent selects the FO); the codex prompt appends "Assume $spacedock:first-officer for the entire session." so the AC-2 skill-token invariant still holds with no --agent flag. Launch contract otherwise unchanged. Test drift-detectors and the AC-4 evidence script's echoed oracle were updated to match; all gates green with real exit codes.
