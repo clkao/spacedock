@@ -29,6 +29,7 @@ name: Runtime Live E2E
 on:
   pull_request_target:
     types: [opened, synchronize, reopened]
+    branches: [main]        # ← only fire for PRs TARGETING main
   workflow_dispatch:
     inputs:
       claude_version:
