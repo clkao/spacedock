@@ -1,9 +1,9 @@
 ---
 id: 38mavcnhs16tq7qhhvh2rj23
 title: Contract-gate dead-end — actionable remedy for empty requires-contract + make init actually upgrade a stale plugin
-status: backlog
+status: ideation
 source: captain (2026-05-31, hand-push/release session) — `spacedock claude --safehouse` on a stale 0.12.1 plugin
-started:
+started: 2026-05-31T20:51:24Z
 completed:
 verdict:
 score: "0.36"
