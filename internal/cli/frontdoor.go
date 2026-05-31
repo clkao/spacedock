@@ -16,7 +16,7 @@ import (
 // argv token so a fresh `spacedock claude` session starts the first officer
 // rather than opening an idle agent. It is omitted when `--resume` is forwarded
 // (a resume already carries its own session intent).
-const bootstrapPrompt = "Begin as the Spacedock first officer: run your startup sequence and work the event loop."
+const bootstrapPrompt = "You totally got this. Take your time. I love you. And tell all subagents and team members you love them too. Engage."
 
 // hostOps is the injectable seam the front-door, init, and doctor paths depend
 // on. Production backs it with real `claude`/`codex` plugin commands and exec;
@@ -137,20 +137,52 @@ func containsResume(args []string) bool {
 	return false
 }
 
+// codexBootstrapPrompt is the fixed launch-and-go message appended as the last
+// inner argv token so a fresh `spacedock codex` session starts the first
+// officer. Codex has no `--agent` analog (spike-confirmed: no agent/skill-select
+// flag on the top-level, `exec`, or `plugin` surfaces), so the only FO-selection
+// injection point is the positional prompt — this prompt names the
+// `spacedock:first-officer` skill explicitly.
+const codexBootstrapPrompt = "You totally got this. Take your time. I love you. And tell all subagents and team members you love them too. Engage. Assume $spacedock:first-officer for the entire session."
+
 // runCodex is the `spacedock codex` front door: version-gate (fail fast), then
-// print the documented prose. Codex has no --agent/named-subagent launch flag
-// (spike-confirmed), so this is NOT an agent-launch wrapper — it tells the
-// operator to use the spacedock:first-officer skill in Codex.
-func runCodex(ctx context.Context, args []string, ops hostOps, stdout, stderr io.Writer) int {
-	_, skipCheck := splitFrontDoorArgs(args)
+// launch the first officer. When `dir` carries a `.safehouse` profile the launch
+// is interposed through `safehouse --trust-workdir-config -- codex
+// --dangerously-bypass-approvals-and-sandbox …` — safehouse is the sandbox, so
+// codex's own sandbox is bypassed. Without a `.safehouse` profile the launch is
+// plain `codex …` keeping codex's own sandbox (the bypass flag is omitted: it is
+// only safe when safehouse provides the sandbox). A fixed FO-skill bootstrap
+// prompt is appended last. `--skip-contract-check` bypasses the gate for
+// first-install bootstrap. `lookPath` resolves the safehouse binary (default
+// exec.LookPath; injected so tests pin not-found).
+func runCodex(ctx context.Context, args []string, dir string, ops hostOps, lookPath func(string) (string, error), stdout, stderr io.Writer) int {
+	passthrough, skipCheck := splitFrontDoorArgs(args)
 	if !skipCheck {
 		if !gateHost(ops, "codex", stderr) {
 			return 1
 		}
 	}
-	fmt.Fprint(stdout,
-		"Codex has no agent-launch flag, so spacedock cannot start the first officer for you.\n"+
-			"In your Codex session, use the spacedock:first-officer skill in this directory to run the workflow.\n")
+
+	inner := []string{"codex"}
+	if safehouse.Present(dir) {
+		inner = append(inner, "--dangerously-bypass-approvals-and-sandbox")
+	}
+	inner = append(inner, passthrough...)
+	inner = append(inner, codexBootstrapPrompt)
+
+	argv := inner
+	if safehouse.Present(dir) {
+		if ok, hint := safehouse.Available(lookPath); !ok {
+			fmt.Fprintln(stderr, hint)
+			return 1
+		}
+		argv = safehouse.Wrap(inner, nil)
+	}
+
+	if err := ops.Launch(argv); err != nil {
+		fmt.Fprintf(stderr, "spacedock codex: launch failed: %v\n", err)
+		return 1
+	}
 	return 0
 }
 
