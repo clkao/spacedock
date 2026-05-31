@@ -1,14 +1,15 @@
 ---
 id: rzfw9erffjatwa40q0jrs5c6
 title: Migrate Go module path to github.com/spacedock-dev/spacedock
-status: implementation
+status: done
 source: sprint — captain (2026-05-31); repo moved to spacedock-dev/spacedock, install off `next`
 started:
-completed:
-verdict:
+completed: 2026-05-31T03:15:41Z
+verdict: PASSED
 score: "0.34"
-worktree: /Users/clkao/git/spacedock-research/spacedock-v1/.worktrees/spacedock-ensign-module-path-migration-spacedock-dev
+worktree: 
 issue:
+archived: 2026-05-31T03:15:41Z
 ---
 
 Mechanical module-path rename so the binary + vendored skills land under the migrated home. The repo is now `spacedock-dev/spacedock` (captain). After this merges, the FO adds the origin and pushes `next` (captain-authorized).
