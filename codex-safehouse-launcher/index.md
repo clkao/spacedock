@@ -1,7 +1,7 @@
 ---
 id: bey37wn2zh5mf2gj01d2a05h
 title: spacedock codex — safehouse launcher (codex via skill, no --agent)
-status: validation
+status: implementation
 source: sprint — Ship the Launcher slice A' (captain, 2026-05-30); codex reachable via safehouse --enable all-agents
 started: 2026-05-31T01:32:22Z
 completed:
@@ -188,3 +188,14 @@ Expected exec argv: `safehouse --trust-workdir-config -- codex --dangerously-byp
 ### Summary
 
 PASSED on AC-1/AC-2/AC-3/AC-3b + all gates; AC-4 is CAPTAIN-PENDING (live interactive smoke, captain-run outside the sandbox by design — safehouse not on PATH here). The load-bearing validation: the REAL built binary emits exactly the AC-4 implementation-locking argv on the safehouse path (`safehouse --trust-workdir-config -- codex --dangerously-bypass-approvals-and-sandbox <fo-prompt>` with the `spacedock:first-officer` token) and plain `codex <fo-prompt>` with no bypass on the no-safehouse path — so a passing captain AC-4 smoke confirms the locked argv. Entity AC/DECISION consistently reflect captain option (b); the prose-only test is genuinely replaced, not dropped. Recommend PASSED (gating only on the captain AC-4 live smoke).
+
+## Feedback Cycle 1 — captain change: default launch prompt (2026-05-31)
+
+Not a validation rejection — a captain-directed change to the default launch prompt, folded BEFORE merge (AC-4 not yet run, so it runs once on the final prompt). Routing to implementation (the alive impl ensign).
+
+Captain-specified default launch prompt:
+- **Base (both launchers):** `You totally got this. Take your time. I love you. And tell all subagents and team members you love them too. Engage.`
+- **claude (`bootstrapPrompt`, frontdoor.go):** the base ONLY — `--agent spacedock:first-officer` already selects the FO.
+- **codex (`codexBootstrapPrompt`, frontdoor.go):** the base PLUS ` Assume $spacedock:first-officer for the entire session.` (codex has no `--agent`, so the prompt assumes the FO skill; the `spacedock:first-officer` skill-token invariant for AC-2 stays satisfied).
+
+This change also updates the MERGED claude `bootstrapPrompt` — both consts live in `frontdoor.go`, so it rides this codex branch and the codex merge carries both launchers' new prompt. Test expected-values (claude `wantBootstrapPrompt` + codex prompt-token assertions) update with the consts.
