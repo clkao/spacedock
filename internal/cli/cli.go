@@ -14,7 +14,11 @@ import (
 	"github.com/spacedock-dev/spacedock/internal/status"
 )
 
-const Version = "0.1.0-dev"
+// Version is stamped by the release pipeline via -ldflags "-X
+// github.com/spacedock-dev/spacedock/internal/cli.Version=$(git describe --tags --always)".
+// It is a var (not a const) because the linker can only write package-level vars;
+// a const is silently ignored by -X. The default value is the untagged dev build.
+var Version = "0.1.0-dev"
 
 // Run is the process entry point. status is routed to the native Go runner,
 // which composes the definition root (README) and the entity root (the README's
