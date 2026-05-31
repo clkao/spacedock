@@ -1,13 +1,13 @@
 ---
 id: mvmpr2vx79pj8w8j65g4vqyz
 title: Retire the prose-grep integration assertions + repoint dispatch_test.go at native dispatch.Run
-status: ideation
+status: implementation
 source: coverage matrix rows 9/10/12/13/14 (prose-grep antipattern) + handoff-confirmed test debt (dispatch_test.go drives retired Python claude-team build)
 started: 2026-05-31T18:12:42Z
 completed:
 verdict:
 score: "0.28"
-worktree:
+worktree: /Users/clkao/git/spacedock-research/spacedock-v1/.worktrees/spacedock-ensign-harden-integration-prose-grep-tests
 issue:
 ---
 
