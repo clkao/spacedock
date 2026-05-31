@@ -11,20 +11,100 @@ worktree:
 issue:
 ---
 
-Integrate the launcher slice on the `next` branch and document the end-to-end fresh-install journey.
+Land the launcher slice on `next` and ship the repo's OWN plugin manifest so the self-hosting loop closes: with `.claude-plugin/plugin.json` vendored at the repo root, `--plugin-dir <repo>` loads V1's own `spacedock:first-officer`/`spacedock:ensign` skills, and the manifest's `requires-contract` makes the contract gate go green without `--skip-contract-check`. Then document the fresh-install journey end-to-end against the real command surface.
 
-## Target
-- Add origin `git@github.com:clkao/spacedock.git` to spacedock-v1; land the launcher + formula + release config on a `next` branch (NOT main).
-- README documents: `brew tap spacedock-dev/homebrew-tap && brew install spacedock`, the safehouse prerequisite + install hint, and the `spacedock claude` / `spacedock codex` usage.
-- Fresh-install user-journey doc: clean Mac → `brew install` → plugin install → `spacedock claude` launches the FO through safehouse.
-- `go test ./...` green on next.
+## Problem
 
-## Dependencies
-- Integrates A, A′, B, C. Sequence LAST.
-- The origin push (`next` to `clkao/spacedock`) is a captain repo action per the sprint notes; this entity stages the branch + docs.
+Two distinct gaps block a clean self-hosted install, both confirmed by behavioral spikes on this machine (2026-05-31):
 
-## Acceptance criteria (provisional — ideation hardens each)
+1. **Friction #7 — no dev path runs V1's own skills.** The repo vendors only `skills/{first-officer,ensign}/references/*.md` (the operating-contract prose). It has NO `.claude-plugin/plugin.json` at the root, NO `skills/*/SKILL.md` entry points, and NO `agents/*.md` named-agent entry points. So `--plugin-dir <repo>` resolves nothing. Spike proof (isolated `CLAUDE_CONFIG_DIR`, so no installed plugin masks the result):
+   - V1 today: `claude --plugin-dir <v1-repo> plugin details spacedock` → `Plugin "spacedock" not found. … or pass --plugin-dir <path> to load one from disk.`
+   - Sibling `~/git/spacedock` (which HAS a root manifest): same command → `Source: spacedock@inline`, `Skills (5)`, `Agents (2)  first-officer, ensign`, exit 0.
+   The FO/ensign that V1 ships therefore never RUN the contract V1 authors during development — the dogfooding loop is open. (Without an isolated config the failure is masked: `plugin details spacedock` silently falls back to the installed `spacedock@spacedock` 0.12.1 marketplace plugin and reports ITS inventory, which is why this gap was invisible until probed in isolation.)
 
-**AC-1 — next builds green.** `go test ./...` exits 0 on the `next` branch carrying the launcher.
+2. **Contract-gate bootstrap cliff (friction log #2).** The currently-published manifest carries no `requires-contract`. Spike proof: `spacedock doctor --plugin-manifest <sibling manifest>` → `malformed contract range "" … This is a packaging bug` exit 1. The packaging entity (tq) built the whole contract gate but DEFERRED the cross-repo `requires-contract` edit because `next` was not yet pushed to an authoritative repo. So `spacedock claude` fail-fasts on first real use and the operator is forced to `--skip-contract-check` — exactly what the captain hit. With a manifest carrying `requires-contract: ">=1,<2"`: `spacedock doctor` → `OK: binary contract 1 satisfies plugin range >=1,<2.` exit 0.
 
-**AC-2 — install docs present + accurate.** README documents the brew tap + install + safehouse prereq; the journey doc walks a fresh Mac end to end against the real command surface.
+## Proposed approach
+
+### The repo plugin manifest (KEY deliverable, closes friction #7)
+
+Vendor a `.claude-plugin/plugin.json` at the V1 repo root so the repo IS a loadable plugin, plus the entry points the manifest's `skills`/`agents` resolution needs:
+
+- `.claude-plugin/plugin.json` — `name: "spacedock"`, `"skills": "./skills/"`, `"requires-contract": ">=1,<2"` (brackets `CONTRACT_VERSION=1`), license Apache-2.0. Modeled on the sibling's content shape (`~/git/spacedock/.claude-plugin/plugin.json`) but pointing at V1's own tree, with `homepage`/`repository` updated to `spacedock-dev/spacedock` (the migration target).
+- `skills/first-officer/SKILL.md` + `skills/ensign/SKILL.md` — the skill entry points (today only `references/` exist). These are the `name: first-officer` / `name: ensign` frontmatter files whose `@references/…-shared-core.md` includes load V1's already-vendored contract prose. Copy/adapt from `~/git/spacedock/skills/{first-officer,ensign}/SKILL.md`, which `@`-include the same reference layout V1 already vendors.
+- `agents/first-officer.md` + `agents/ensign.md` — the `--agent spacedock:first-officer` / `spacedock:ensign` named-agent entry points (`skills: ["spacedock:first-officer"]` in frontmatter). `runClaude` execs `claude --agent spacedock:first-officer` (frontdoor.go:118), so the named agent MUST resolve from `--plugin-dir`. Copy/adapt from `~/git/spacedock/agents/{first-officer,ensign}.md`.
+
+Scope decision (open for captain steer): vendor the MINIMAL first-officer + ensign surface (the two the launcher/dispatch loop runs), NOT the full sibling set (commission/debrief/refit). YAGNI — V1's launch + dispatch path only fires first-officer and ensign; commission/debrief/refit are authoring tools not on the self-hosting critical path. The behavioral oracle (below) asserts `first-officer` and `ensign` resolve; it does not require the other three.
+
+Whether `.codex-plugin/plugin.json` is ALSO vendored in V1 depends on whether V1 publishes via its own `release.sh`-style sync. V1 has no `scripts/release.sh` (jf's release pipeline is goreleaser, which does not sync plugin manifests). So the release.sh authoritative/legacy sync pattern does NOT apply in V1; V1 vendors `.claude-plugin/plugin.json` directly (it is hand-authored, not generated). The authoritative `.codex-plugin/plugin.json` lives in the SEPARATE `spacedock-dev/spacedock` repo and is the cross-repo `requires-contract` target (see below) — it is not a file this entity creates inside V1.
+
+### The cross-repo requires-contract (was DEFERRED in tq; actionable now)
+
+The packaging entity deferred the authoritative-manifest `requires-contract` edit because no authoritative `next` existed. The migration (sprint note item 2) makes `spacedock-dev/spacedock` the authoritative repo and `next` is pushed there. So the deferred edit is now actionable: add `"requires-contract": ">=1,<2"` to the authoritative `.codex-plugin/plugin.json` on `spacedock-dev/spacedock@next`, which `release.sh::sync_legacy_plugin_manifest()` propagates verbatim to `.claude-plugin/plugin.json`. This is a CROSS-REPO edit (in `spacedock-dev/spacedock`, not V1); this entity's V1-side deliverable is the V1 repo manifest, and it tracks the cross-repo edit as a coordinated companion. The two manifests serve different install lanes: V1's root `.claude-plugin/plugin.json` serves `--plugin-dir <v1-repo>` (dev lane); `spacedock-dev/spacedock`'s serves the marketplace/`spacedock init` lane.
+
+### The fresh-install journey (two lanes, against the real command surface)
+
+A journey doc (`docs/install-journey.md` or a README section) walking BOTH install lanes, each step naming an observable command + expected output:
+
+- **Released lane (brew).** Clean Mac → `brew tap spacedock-dev/homebrew-tap && brew install spacedock` (pinned from rg's `dist/homebrew/README.md`) → `spacedock --version` prints `spacedock {version} (contract 1)` → `spacedock init --host claude` installs the marketplace plugin (carrying `requires-contract` once the cross-repo edit lands) → `spacedock claude` version-gates GREEN (no `--skip-contract-check`) and launches the FO through safehouse when a `.safehouse` profile is present. safehouse is a runtime dependency NOT installed by brew; hint points to `https://github.com/spacedock-dev/safehouse#install` (mirroring rg's caveat verbatim so they do not drift).
+- **Dev lane (`--plugin-dir`).** Clone `spacedock-dev/spacedock@next` → `go build -o spacedock ./cmd/spacedock` → `spacedock claude --plugin-dir <repo> -- "task"` loads V1's OWN vendored skills (the manifest this entity ships) and relaxes the contract gate (frontdoor.go:106 — `--plugin-dir` supersedes the installed plugin). This is the captain's primary dev workflow (launch-parity ground-truth #4).
+
+Pre-release `@next` constraint (pinned from jf's `.github/workflows/release.yml`): the release is TAGS-ONLY (`on: push: tags: v*`). There is no `next`-branch release artifact. So the `@next` lane is source-build / `goreleaser release --snapshot`, NOT brew — brew is the released-tag lane only. The journey doc states this plainly so a reader does not expect `brew install …@next`.
+
+### README install docs
+
+README documents the brew tap+install lines, the safehouse prerequisite + the `https://github.com/spacedock-dev/safehouse#install` hint, and the `spacedock claude [--safehouse…] -- "task"` / `spacedock codex …` usage (the front-door grammar from frontdoor.go: `--` fences a task appended to the base prompt; `--safehouse`/`--safehouse-*` knobs gate the sandbox wrap).
+
+### Out of scope
+
+- Fixing `init.go:16 marketplaceSource = "clkao/spacedock"` (pre-migration stale → should be `spacedock-dev/spacedock`). FLAGGED to jf + captain; it is a one-line migration-cleanup, not this entity's deliverable, but the journey doc's `spacedock init` step depends on it being correct, so it is named as a coordinated prerequisite.
+- The actual `spacedock-dev/spacedock` repo migration (module-path rewrite + origin move) is a captain-coordinated action; this entity assumes it is done and keys off the final paths.
+- Vendoring commission/debrief/refit skills (YAGNI — not on the launch/dispatch loop).
+
+## Acceptance criteria
+
+Each AC names a property of the finished entity and an exercise-and-observe oracle (run a command, observe output/side effects), not a prose grep.
+
+**AC-1 — `--plugin-dir <repo>` resolves V1's own first-officer + ensign, and `spacedock doctor` reports Compatible.**
+The repo carries `.claude-plugin/plugin.json` (`name: spacedock`, `skills: ./skills/`, `requires-contract: ">=1,<2"`) plus `skills/{first-officer,ensign}/SKILL.md` and `agents/{first-officer,ensign}.md`.
+Verified by, observe-don't-grep: (a) in an isolated `CLAUDE_CONFIG_DIR` (so no installed plugin masks the result), `claude --plugin-dir <v1-repo> plugin details spacedock` exits 0, prints `Source: spacedock@inline`, and the Agents inventory line names `first-officer` and `ensign` (today this command prints `Plugin "spacedock" not found` — the spike-captured before-state). (b) `spacedock doctor --plugin-manifest <repo>/.claude-plugin/plugin.json` exits 0 and prints `OK: binary contract 1 satisfies plugin range >=1,<2.` (today the sibling manifest without the field yields `malformed contract range "" … exit 1` — the spike-captured before-state). A Go test in `internal/contract` (or `skills/integration`) reads the vendored `.claude-plugin/plugin.json` and asserts its `requires-contract` parses and brackets `CONTRACT_VERSION` via the existing `contract.ParseRange`, closing manifest↔binary drift in one `go test`.
+
+**AC-2 — `spacedock claude` gates GREEN with no `--skip-contract-check`, on both install lanes.**
+Verified by, observe-don't-grep: (a) Dev lane: with the vendored manifest present, `spacedock claude --plugin-dir <repo> …` reaches the launch seam (the `--plugin-dir` gate-relax path, frontdoor.go:106) — exercised through the existing front-door launch-seam test pattern (`safehouse_frontdoor_test.go` / `frontdoor_test.go`), asserting the inner argv begins `claude --agent spacedock:first-officer` and NO contract-gate rejection fires. (b) Released lane: a Go test drives `gateHost` through the `hostOps` seam with a `ResolveManifest` returning the vendored manifest path; on the `requires-contract: ">=1,<2"` manifest the verdict is `Compatible` and launch is permitted (no `--skip-contract-check`). The before-state is the malformed-range rejection captured in AC-1(b).
+
+**AC-3 — install docs + journey doc are accurate against the real command surface, and `go test ./...` is green on `next`.**
+Verified by: (a) `go test ./...` exits 0 on the `next` branch carrying the manifest + entry points (baseline today: 470 passed / 8 packages). (b) The journey doc's command lines are the SAME literals the shipped artifacts emit — pinned by reference, not retyped: the brew lines equal rg's `dist/homebrew/README.md` lines, the tarball URL equals jf's goreleaser `name_template` expansion (`https://github.com/spacedock-dev/spacedock/releases/download/v{version}/spacedock_{version}_darwin_{arch}.tar.gz`), the safehouse hint equals the formula caveat URL (`https://github.com/spacedock-dev/safehouse#install`), and the `spacedock --version` shape equals `spacedock {Version} (contract {N})`. The accuracy oracle is a behavioral spot-check, not a grep: run `spacedock --version` and confirm the doc's quoted shape matches the binary's real output; run the AC-1 `plugin details` probe and confirm the doc's "loads V1's own skills" claim matches the observed `Source: spacedock@inline` inventory. Each documented command in the journey is one a reader can run and observe the stated output.
+
+## Test plan
+
+Behavior-first, riskiest path validated first (the `--plugin-dir` resolution mechanism — already spiked here before this plan was written, see ## Problem). Estimated cost/complexity: LOW. The contract-gate machinery (doctor, gateHost, ParseRange, the front-door seams) already exists and is tested (470 green); this entity adds the manifest + entry-point FILES and one bracketing Go test, then wires the journey doc.
+
+- **Manifest↔binary bracketing (Go unit, `internal/contract` or `skills/integration`).** Read the vendored `.claude-plugin/plugin.json`, assert `requires-contract` parses via `contract.ParseRange` and brackets `CONTRACT_VERSION`. Pure logic, no host, no network. This is the load-bearing static-but-behavioral check (it exercises the real parser the gate uses, not a prose grep).
+- **`--plugin-dir` resolution (behavioral spike, already run; re-runnable as a manual oracle).** `CLAUDE_CONFIG_DIR=<tmp> claude --plugin-dir <repo> plugin details spacedock` → exit 0, `Source: spacedock@inline`, agents name first-officer + ensign. This is a live-host probe (needs `claude` on PATH + an isolated config); it is the AC-1(a) oracle. It is NOT a Go unit gate — it is a documented reproducible spike in the validation spot-check, because the claim ("Claude Code loads V1's plugin from disk") is a host-integration claim, proven by running the host.
+- **Doctor verdict (binary CLI).** `spacedock doctor --plugin-manifest <repo>/.claude-plugin/plugin.json` → exit 0, `OK: binary contract 1 …`. Reuses the existing five-verdict doctor (no new code); this is the AC-1(b)/AC-2(b) oracle.
+- **Front-door gate-relax + Compatible launch (Go unit seams).** Reuse the existing `frontdoor_test.go` / `safehouse_frontdoor_test.go` launch-seam pattern: `--plugin-dir` reaches the launch seam without a gate call; a `hostOps.ResolveManifest` returning the vendored manifest yields a Compatible launch. No live host.
+- **`go test ./...` green on next (gate).** The AGENTS.md baseline gate; run on the `next` branch carrying the new files.
+
+No live workflow run is needed for any AC. The one live-host claim (AC-1(a)) is a re-runnable manual spike, kept hermetic by an isolated `CLAUDE_CONFIG_DIR`; everything else is Go unit / binary CLI.
+
+## Dependencies and coordination
+
+- **Integrates A, A′, B, C — sequence LAST.** This is the capstone.
+- **jf (release pipeline, in implementation).** Pins the tarball URL shape, the tags-only release trigger, and the `internal/cli.Version` stamp target — all SOURCED from jf's in-flight `.goreleaser.yaml` + `release.yml` (no blocking). The journey doc's `@next = source-build, not brew` lane follows from jf's tags-only trigger.
+- **rg (homebrew tap, in implementation).** Pins the `brew tap spacedock-dev/homebrew-tap && brew install spacedock` lines and the safehouse hint URL — SOURCED from rg's `dist/homebrew/README.md` + `Formula/spacedock.rb` (no blocking). README + journey mirror rg's wording verbatim to prevent drift.
+- **Cross-repo edit (companion, in `spacedock-dev/spacedock`, NOT V1).** Add `requires-contract: ">=1,<2"` to the authoritative `.codex-plugin/plugin.json` on `spacedock-dev/spacedock@next`; `release.sh` propagates it to `.claude-plugin/plugin.json`. The released-lane gate (AC-2b) goes green only after this lands. The dev-lane manifest (this entity's V1 deliverable) is independent and lands first.
+- **`init.go:16` stale `marketplaceSource`.** Pre-migration `clkao/spacedock` → must become `spacedock-dev/spacedock`. Flagged to jf + captain; the journey's `spacedock init` step depends on the fix but the fix itself is out of this entity's scope.
+- **Staff review: recommended.** This touches a new on-disk artifact (the repo plugin manifest + entry points) and a cross-repo contract edit — the "new on-disk format / skill integration" class the workflow README flags. The contract-axis mechanism itself was already audited (tq cycle 1); this entity reuses it unchanged, so review should focus on (a) the minimal-vs-full vendored-skill scope decision and (b) the dev-lane/released-lane split and its two manifests.
+
+## Stage Report: ideation
+
+- DONE: Design the repo plugin manifest (.claude-plugin/plugin.json + entry points) so --plugin-dir <repo> loads V1's OWN vendored skills (closes friction #7), carrying requires-contract ">=1,<2". Behavioral oracle: --plugin-dir resolves spacedock:first-officer; spacedock doctor reports Compatible.
+  ## Proposed approach §"The repo plugin manifest" specifies the manifest + skills/{first-officer,ensign}/SKILL.md + agents/{first-officer,ensign}.md. AC-1 names the observe-don't-grep oracle, GROUNDED in spikes run this machine: v1-today `claude --plugin-dir <repo> plugin details spacedock` (isolated config) → `Plugin "spacedock" not found`; sibling-with-manifest → `Source: spacedock@inline`, `Agents (2) first-officer, ensign`; doctor on a requires-contract manifest → `OK: binary contract 1 satisfies plugin range >=1,<2.` exit 0.
+- DONE: Design the fresh-install journey end-to-end as observable steps (brew released lane + --plugin-dir dev lane), resolving @next.
+  ## Proposed approach §"The fresh-install journey" walks both lanes step-by-step with observable commands. Pinned the @next constraint from jf's release.yml (TAGS-ONLY → @next is source-build/snapshot, not brew). Discovered V1 has no release.sh sync, so V1 vendors .claude-plugin/plugin.json directly (no .codex-plugin sync pattern in V1); the authoritative .codex-plugin edit is the SEPARATE cross-repo companion on spacedock-dev/spacedock.
+- DONE: README install docs (brew tap+install, safehouse prereq, claude/codex usage) + go test ./... green as the gate; every AC names an exercise-and-observe oracle.
+  ## Proposed approach §"README install docs" + AC-3. Install lines SOURCED verbatim from rg's dist/homebrew/README.md + Formula caveat (brew tap spacedock-dev/homebrew-tap && brew install spacedock; safehouse hint https://github.com/spacedock-dev/safehouse#install) and jf's goreleaser (tarball URL, internal/cli.Version stamp) — no blocking on teammates. Baseline gate captured: go test ./... → 470 passed / 8 packages, exit 0.
+
+### Summary
+
+The capstone splits into two grounded deliverables. (1) The repo plugin manifest closing friction #7: I spiked `claude --plugin-dir` on this machine in an isolated config and proved V1 today loads NOTHING (`Plugin "spacedock" not found`) while a root-manifest repo loads inline (`Source: spacedock@inline`, agents first-officer+ensign) — so the fix is vendoring `.claude-plugin/plugin.json` + `skills/*/SKILL.md` + `agents/*.md`, scoped MINIMALLY to first-officer+ensign (YAGNI; captain may steer). (2) The cross-repo `requires-contract` (deferred in tq) is now actionable against the authoritative `.codex-plugin/plugin.json` on spacedock-dev/spacedock@next; doctor on such a manifest yields `OK … exit 0` (spiked) vs today's `malformed contract range "" exit 1` bootstrap cliff. The journey doc walks two lanes (released brew, dev --plugin-dir) with the @next lane pinned as source-build (jf's release is tags-only). All install lines sourced verbatim from jf's + rg's in-flight artifacts. Flagged init.go:16's stale `clkao/spacedock` marketplaceSource as a coordinated migration-cleanup prerequisite. No production code written (ideation); frontmatter untouched. Staff review recommended on the vendored-scope decision and the two-manifest lane split.
