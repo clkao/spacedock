@@ -9,11 +9,18 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/spacedock-dev/spacedock/internal/claudeteam"
 )
 
 // NativeRunner is the native-Go status runner. It satisfies the same Runner
 // interface as VendorRunner; callers select it without any contract change.
-type NativeRunner struct{}
+// TeamStateProbe is the host-supplied boot TEAM_STATE probe: the Claude front
+// door wires claudeteam.Probe; a non-Claude host leaves it nil (host-neutral
+// present:false). It is the only host-coupled input the runner takes.
+type NativeRunner struct {
+	TeamStateProbe claudeteam.TeamStateProbe
+}
 
 var _ Runner = (*NativeRunner)(nil)
 
@@ -23,7 +30,7 @@ var _ Runner = (*NativeRunner)(nil)
 // runner can always run; failures are reported as exit code 1.
 func (r *NativeRunner) Run(ctx context.Context, req Request) (int, error) {
 	e := envFromSlice(req.Env)
-	code := dispatch(req.Args, req.Dir, e, req.Stdin, req.Stdout, req.Stderr)
+	code := dispatch(r.TeamStateProbe, req.Args, req.Dir, e, req.Stdin, req.Stdout, req.Stderr)
 	return code, nil
 }
 
@@ -34,8 +41,10 @@ func errExit(stderr io.Writer, msg string) int {
 	return 1
 }
 
-// dispatch is the argv-driven entry point mirroring the oracle's main().
-func dispatch(args []string, dir string, e env, stdin io.Reader, stdout, stderr io.Writer) int {
+// dispatch is the argv-driven entry point mirroring the oracle's main(). probe is
+// the host-supplied boot TEAM_STATE probe, threaded to runRead (nil on a
+// non-Claude host).
+func dispatch(probe claudeteam.TeamStateProbe, args []string, dir string, e env, stdin io.Reader, stdout, stderr io.Writer) int {
 	// --discover (incompatible with all other flags).
 	if contains(args, "--discover") {
 		return runDiscover(args, dir, stderr, stdout)
@@ -335,7 +344,7 @@ func dispatch(args []string, dir string, e env, stdin io.Reader, stdout, stderr 
 	}
 
 	// Read paths (table / next / boot / validate).
-	return runRead(roots, args, e, whereFilters, includeArchive, showNext, showBoot, showNextID, showValidate, explicitFields, allFieldsFlag, asJSON, quiet, archiveSlug != "", setResult != nil, resolveRef != "", stdout, stderr)
+	return runRead(probe, roots, args, e, whereFilters, includeArchive, showNext, showBoot, showNextID, showValidate, explicitFields, allFieldsFlag, asJSON, quiet, archiveSlug != "", setResult != nil, resolveRef != "", stdout, stderr)
 }
 
 // failOnValidationErrors prints validation errors to stderr and returns 1 when

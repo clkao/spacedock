@@ -178,12 +178,15 @@ func bootJSON(d *bootData) *jsonObj {
 
 	out.setValue("dispatchable", dispatchableJSONArr(d.dispatchable))
 
+	// present/absent hints are both resolved in gatherBoot so this renderer carries
+	// no host-specific string; present is the string-bool team_state convention.
 	team := newJSONObj()
 	if d.teamPresent {
-		team.set("present", "true").set("hint", d.teamHint)
+		team.set("present", "true")
 	} else {
-		team.set("present", "false").set("hint", "run TeamCreate before first team-mode dispatch (claude runtime supports it)")
+		team.set("present", "false")
 	}
+	team.set("hint", d.teamHint)
 	out.setValue("team_state", team)
 
 	// State backend keys, appended AFTER team_state so the FO's key-order parse of

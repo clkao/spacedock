@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/spacedock-dev/spacedock/internal/claudeteam"
 	"github.com/spacedock-dev/spacedock/internal/dispatch"
 )
 
@@ -40,7 +41,7 @@ func runBuild(t *testing.T, root, workflowDir string, input map[string]any) buil
 	// in team mode (team_name supplied), but pin it for hermeticity.
 	t.Setenv("HOME", t.TempDir())
 	var stdout, stderr bytes.Buffer
-	if exit := dispatch.Run([]string{"build", "--workflow-dir", workflowDir}, strings.NewReader(string(raw)), &stdout, &stderr); exit != 0 {
+	if exit := dispatch.Run(claudeteam.Probe, []string{"build", "--workflow-dir", workflowDir}, strings.NewReader(string(raw)), &stdout, &stderr); exit != 0 {
 		t.Fatalf("dispatch build exited %d\nstdout: %s\nstderr: %s", exit, stdout.String(), stderr.String())
 	}
 	var res buildResult

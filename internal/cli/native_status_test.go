@@ -26,7 +26,7 @@ func TestNativeRunnerSelectableThroughCLI(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	env := []string{"USER=pinned", "PATH=" + os.Getenv("PATH")}
-	code := run(context.Background(), []string{"status", "--workflow-dir", root}, env, root, nil, &stdout, &stderr, &status.NativeRunner{})
+	code := run(context.Background(), []string{"status", "--workflow-dir", root}, env, root, nil, &stdout, &stderr, &status.NativeRunner{}, nil)
 
 	if code != 0 {
 		t.Fatalf("native status exit=%d stderr=%q", code, stderr.String())

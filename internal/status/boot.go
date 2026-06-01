@@ -11,9 +11,15 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/spacedock-dev/spacedock/internal/claudeteam"
 )
 
-const teamStateMtimeWindowSecs = 30 * 60
+// teamStateNeutralHint is the boot TEAM_STATE present:false hint on a host with
+// no team-state probe wired (Codex/bare). It carries no Claude-specific advice —
+// the Claude present:false hint (claudeteam.PresentFalseHint) is supplied by the
+// seam only when a probe is present.
+const teamStateNeutralHint = "no active team runtime detected"
 
 // orphan describes a worktree-backed entity for the ORPHANS section.
 type orphan struct {
@@ -125,43 +131,6 @@ func lookupExecutable(name, pathStr string) string {
 	return ""
 }
 
-// probeTeamState reports whether any ~/.claude/teams/*/config.json was modified
-// within the last 30 minutes. Matches probe_team_state. Uses env HOME (the
-// oracle expands ~, which resolves HOME).
-func probeTeamState(e env) (bool, string) {
-	home := e.get("HOME")
-	if home == "" {
-		home = os.Getenv("HOME")
-	}
-	teamsDir := filepath.Join(home, ".claude", "teams")
-	info, err := os.Stat(teamsDir)
-	if err != nil || !info.IsDir() {
-		return false, ""
-	}
-	cutoff := time.Now().Add(-time.Duration(teamStateMtimeWindowSecs) * time.Second)
-	entries, err := os.ReadDir(teamsDir)
-	if err != nil {
-		return false, ""
-	}
-	var newest string
-	var newestMtime time.Time
-	for _, ent := range entries {
-		cfg := filepath.Join(teamsDir, ent.Name(), "config.json")
-		st, err := os.Stat(cfg)
-		if err != nil || !st.Mode().IsRegular() {
-			continue
-		}
-		if st.ModTime().After(newestMtime) {
-			newestMtime = st.ModTime()
-			newest = ent.Name()
-		}
-	}
-	if newest != "" && !newestMtime.Before(cutoff) {
-		return true, "recent team directory: " + newest
-	}
-	return false, ""
-}
-
 // bootData holds the gathered boot-section material the text and JSON renderers
 // both consume, so the two output forms read from one source of truth.
 type bootData struct {
@@ -186,7 +155,7 @@ type bootData struct {
 // gatherBoot runs every boot probe once and returns the result. NEXT_ID is
 // minted here (timestamp-dependent for sd-b32); on a minting error it returns
 // the error after the caller has emitted the stderr diagnostic.
-func gatherBoot(entities []*entity, stages []Stage, definitionDir, entityDir, gitRoot, idStyle string, e env, stderr io.Writer) (*bootData, error) {
+func gatherBoot(probe claudeteam.TeamStateProbe, entities []*entity, stages []Stage, definitionDir, entityDir, gitRoot, idStyle string, e env, stderr io.Writer) (*bootData, error) {
 	d := &bootData{idStyle: idStyle, hooks: scanMods(entityDir)}
 
 	if idStyle == "slug" {
@@ -203,7 +172,23 @@ func gatherBoot(entities []*entity, stages []Stage, definitionDir, entityDir, gi
 	d.orphans = scanOrphans(entities, gitRoot)
 	d.prStatus, d.prResults = checkPRStates(entities, stages, e)
 	d.dispatchable = computeDispatchable(entities, stages)
-	d.teamPresent, d.teamHint = probeTeamState(e)
+	// TEAM_STATE comes from the host-supplied probe. HOME resolution stays generic
+	// here; only the ~/.claude read moves into the Claude seam. The hint for both
+	// the present and absent cases is resolved here so the renderers carry no
+	// host-specific string: with a probe wired, present:false uses the Claude seam's
+	// PresentFalseHint; a nil probe (a non-Claude host) yields a host-neutral line.
+	if probe != nil {
+		home := e.get("HOME")
+		if home == "" {
+			home = os.Getenv("HOME")
+		}
+		d.teamPresent, d.teamHint, _ = probe(home, time.Now())
+		if !d.teamPresent {
+			d.teamHint = claudeteam.PresentFalseHint
+		}
+	} else {
+		d.teamHint = teamStateNeutralHint
+	}
 
 	d.definitionDir = definitionDir
 	d.entityDir = entityDir
@@ -219,8 +204,8 @@ func gatherBoot(entities []*entity, stages []Stage, definitionDir, entityDir, gi
 }
 
 // printBoot writes all boot sections in order. Matches print_boot.
-func printBoot(w io.Writer, entities []*entity, stages []Stage, definitionDir, entityDir, gitRoot, idStyle string, e env, stderr io.Writer) error {
-	d, err := gatherBoot(entities, stages, definitionDir, entityDir, gitRoot, idStyle, e, stderr)
+func printBoot(probe claudeteam.TeamStateProbe, w io.Writer, entities []*entity, stages []Stage, definitionDir, entityDir, gitRoot, idStyle string, e env, stderr io.Writer) error {
+	d, err := gatherBoot(probe, entities, stages, definitionDir, entityDir, gitRoot, idStyle, e, stderr)
 	if err != nil {
 		return err
 	}
@@ -284,15 +269,15 @@ func printBoot(w io.Writer, entities []*entity, stages []Stage, definitionDir, e
 	fmt.Fprintln(w, "DISPATCHABLE")
 	printNextTable(w, entities, stages, nil, false)
 
-	// TEAM_STATE
+	// TEAM_STATE. The present/absent hints are both resolved in gatherBoot so this
+	// renderer carries no host-specific string.
 	fmt.Fprintln(w, "TEAM_STATE")
 	if d.teamPresent {
 		fmt.Fprintln(w, "present: true")
-		fmt.Fprintf(w, "hint: %s\n", d.teamHint)
 	} else {
 		fmt.Fprintln(w, "present: false")
-		fmt.Fprintln(w, "hint: run TeamCreate before first team-mode dispatch (claude runtime supports it)")
 	}
+	fmt.Fprintf(w, "hint: %s\n", d.teamHint)
 
 	// STATE_BACKEND
 	fmt.Fprintf(w, "STATE_BACKEND: %s (entity_dir: %s, present: %t)\n",

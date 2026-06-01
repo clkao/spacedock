@@ -8,13 +8,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/spacedock-dev/spacedock/internal/status"
 )
-
-// teamEvidenceWindow is the lookback for the bare-mode TeamCreate-evidence probe.
-const teamEvidenceWindow = 30 * time.Minute
 
 // isJSONNull reports whether a raw JSON value is the literal null.
 func isJSONNull(v json.RawMessage) bool {
@@ -132,33 +128,6 @@ func splitRootStateCheckout(workflowDir string) string {
 		return ""
 	}
 	return filepath.Join(workflowDir, state)
-}
-
-// recentTeamEvidence reports whether any ~/.claude/teams/*/config.json was
-// modified within teamEvidenceWindow. Matches _recent_team_evidence: the
-// cheapest plausible proxy for "this session ran TeamCreate".
-func recentTeamEvidence() bool {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return false
-	}
-	teamsDir := filepath.Join(home, ".claude", "teams")
-	entries, err := os.ReadDir(teamsDir)
-	if err != nil {
-		return false
-	}
-	cutoff := time.Now().Add(-teamEvidenceWindow)
-	for _, ent := range entries {
-		cfg := filepath.Join(teamsDir, ent.Name(), "config.json")
-		info, err := os.Stat(cfg)
-		if err != nil || !info.Mode().IsRegular() {
-			continue
-		}
-		if !info.ModTime().Before(cutoff) {
-			return true
-		}
-	}
-	return false
 }
 
 // pyRelpath returns path relative to base the way os.path.relpath does for the

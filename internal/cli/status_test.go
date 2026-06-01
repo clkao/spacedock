@@ -48,7 +48,7 @@ func TestStatusForwardsRequestVerbatim(t *testing.T) {
 	stdin := strings.NewReader("BODY-FROM-STDIN")
 	args := []string{"status", "--workflow-dir", "/wf", "--next"}
 
-	code := run(context.Background(), args, env, dir, stdin, &stdout, &stderr, fake)
+	code := run(context.Background(), args, env, dir, stdin, &stdout, &stderr, fake, nil)
 
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0", code)
@@ -77,7 +77,7 @@ func TestStatusReturnsRunnerExitCodeUnmodified(t *testing.T) {
 	for _, code := range []int{0, 1} {
 		fake := &fakeRunner{exitCode: code}
 		var stdout, stderr bytes.Buffer
-		got := run(context.Background(), []string{"status", "--workflow-dir", "/wf"}, nil, "", nil, &stdout, &stderr, fake)
+		got := run(context.Background(), []string{"status", "--workflow-dir", "/wf"}, nil, "", nil, &stdout, &stderr, fake, nil)
 		if got != code {
 			t.Fatalf("exit code = %d, want %d (CLI must not translate)", got, code)
 		}
@@ -90,7 +90,7 @@ func TestStatusReturnsRunnerExitCodeUnmodified(t *testing.T) {
 func TestStatusUnknownTopLevelFlagForwarded(t *testing.T) {
 	fake := &fakeRunner{exitCode: 0, stdout: "DEFAULT-TABLE\n"}
 	var stdout, stderr bytes.Buffer
-	code := run(context.Background(), []string{"status", "--workflow-dir", "/wf", "--bogus-top-level"}, nil, "", nil, &stdout, &stderr, fake)
+	code := run(context.Background(), []string{"status", "--workflow-dir", "/wf", "--bogus-top-level"}, nil, "", nil, &stdout, &stderr, fake, nil)
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0", code)
 	}
@@ -105,7 +105,7 @@ func TestStatusUnknownTopLevelFlagForwarded(t *testing.T) {
 func TestStatusRunnerErrorIsLoud(t *testing.T) {
 	fake := &fakeRunner{exitCode: -1, err: errFakeNoPython}
 	var stdout, stderr bytes.Buffer
-	code := run(context.Background(), []string{"status", "--workflow-dir", "/wf"}, nil, "", nil, &stdout, &stderr, fake)
+	code := run(context.Background(), []string{"status", "--workflow-dir", "/wf"}, nil, "", nil, &stdout, &stderr, fake, nil)
 	if code != 1 {
 		t.Fatalf("exit code = %d, want 1", code)
 	}

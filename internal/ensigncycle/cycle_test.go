@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/spacedock-dev/spacedock/internal/claudeteam"
 	"github.com/spacedock-dev/spacedock/internal/dispatch"
 )
 
@@ -82,7 +83,7 @@ func stageFixture(t *testing.T) cycleFixture {
 	})
 
 	var stdout, stderr strings.Builder
-	if code := dispatch.Run([]string{"build", "--workflow-dir", root},
+	if code := dispatch.Run(claudeteam.Probe, []string{"build", "--workflow-dir", root},
 		strings.NewReader(stdin), &stdout, &stderr); code != 0 {
 		t.Fatalf("dispatch build exit=%d stderr=%s", code, stderr.String())
 	}
