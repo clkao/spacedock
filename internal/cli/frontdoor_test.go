@@ -176,7 +176,7 @@ func TestGateRemedyNamesLiveInstallCommand(t *testing.T) {
 	// while the removed `init` must fall back to root (the unknown-command path
 	// that exits 2). Resolution is deterministic and touches no host CLI.
 	var stdout, stderr bytes.Buffer
-	root := newRootCommand(context.Background(), nil, t.TempDir(), nil, &stdout, &stderr, &fakeRunner{})
+	root := newRootCommand(context.Background(), nil, t.TempDir(), nil, &stdout, &stderr, &fakeRunner{}, nil)
 	if cmd, _, err := root.Find([]string{"install"}); err != nil || cmd == root {
 		t.Fatalf("`install` did not resolve to a registered command (cmd=%v, err=%v)", cmd.Name(), err)
 	}

@@ -25,7 +25,7 @@ func TestNewVerbMintsInDiscoveredWorkflow(t *testing.T) {
 
 	env := []string{"USER=pinned", "PATH=" + os.Getenv("PATH")}
 	var stdout, stderr bytes.Buffer
-	code := run(context.Background(), []string{"new", "minted-task"}, env, def, strings.NewReader(newEntityBody), &stdout, &stderr, &status.NativeRunner{})
+	code := run(context.Background(), []string{"new", "minted-task"}, env, def, strings.NewReader(newEntityBody), &stdout, &stderr, &status.NativeRunner{}, nil)
 	if code != 0 {
 		t.Fatalf("new exit=%d stderr=%q", code, stderr.String())
 	}
@@ -38,7 +38,7 @@ func TestNewVerbMintsInDiscoveredWorkflow(t *testing.T) {
 
 	// --validate clean immediately after, proving a complete entity was minted.
 	var vout, verr bytes.Buffer
-	vcode := run(context.Background(), []string{"status", "--workflow-dir", def, "--validate"}, env, def, nil, &vout, &verr, &status.NativeRunner{})
+	vcode := run(context.Background(), []string{"status", "--workflow-dir", def, "--validate"}, env, def, nil, &vout, &verr, &status.NativeRunner{}, nil)
 	if vcode != 0 || strings.TrimSpace(vout.String()) != "VALID" {
 		t.Fatalf("post-new validate exit=%d out=%q err=%q", vcode, vout.String(), verr.String())
 	}
@@ -52,7 +52,7 @@ func TestNewVerbFolderForm(t *testing.T) {
 
 	env := []string{"USER=pinned", "PATH=" + os.Getenv("PATH")}
 	var stdout, stderr bytes.Buffer
-	code := run(context.Background(), []string{"new", "--folder", "foldered"}, env, def, strings.NewReader(newEntityBody), &stdout, &stderr, &status.NativeRunner{})
+	code := run(context.Background(), []string{"new", "--folder", "foldered"}, env, def, strings.NewReader(newEntityBody), &stdout, &stderr, &status.NativeRunner{}, nil)
 	if code != 0 {
 		t.Fatalf("new --folder exit=%d stderr=%q", code, stderr.String())
 	}

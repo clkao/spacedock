@@ -10,7 +10,9 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
+	"github.com/spacedock-dev/spacedock/internal/claudeteam"
 	"github.com/spacedock-dev/spacedock/internal/status"
 )
 
@@ -59,7 +61,7 @@ func buildError(stderr io.Writer, code int, format string, a ...any) int {
 // path. Scoped to non-_mods workflows: it emits the single show-stage-def fetch
 // line and never the standing-teammate fetch line. Matches cmd_build minus the
 // _mods/standing branch (deferred to the sibling claude-runtime-segregation).
-func runBuild(workflowDir string, stdin io.Reader, stdout, stderr io.Writer) int {
+func runBuild(probe claudeteam.TeamStateProbe, workflowDir string, stdin io.Reader, stdout, stderr io.Writer) int {
 	raw, err := io.ReadAll(stdin)
 	if err != nil {
 		return buildError(stderr, 1, "failed to read stdin: %s", err)
@@ -111,13 +113,17 @@ func runBuild(workflowDir string, stdin io.Reader, stdout, stderr io.Writer) int
 	isFeedbackReflow := optBool(fields, "is_feedback_reflow")
 
 	// FO bootstrap discipline: a bare_mode dispatch with no recent TeamCreate
-	// evidence on disk gets an advisory stderr warning (exit stays 0).
-	if bareMode && !recentTeamEvidence() {
-		fmt.Fprintln(stderr,
-			"WARN: bare_mode dispatch with no recent TeamCreate evidence "+
-				"(no ~/.claude/teams/*/config.json modified in the last 30 minutes). "+
-				"If you intend teams mode, run ToolSearch select:TeamCreate and TeamCreate first. "+
-				"If bare is intentional, this warning can be ignored.")
+	// evidence on disk gets an advisory stderr warning (exit stays 0). The evidence
+	// read and the warning text both live in the Claude seam; HOME resolution stays
+	// generic here. A nil probe (a non-Claude host) emits no advisory — the warning
+	// is Claude-specific bootstrap advice, host-neutral by absence.
+	if bareMode && probe != nil {
+		// HOME resolution stays generic (plain env, no ~/.claude read); the probe
+		// owns the team-state read. An unset HOME yields "", on which the probe
+		// reports no recent evidence and the advisory fires — the pre-seam behavior.
+		if _, _, recent := probe(os.Getenv("HOME"), time.Now()); !recent {
+			claudeteam.BareModeAdvisory(stderr)
+		}
 	}
 
 	// Rule 12: entity_path must be project-root, not worktree-absolute.

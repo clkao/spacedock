@@ -8,6 +8,8 @@ import (
 	"io"
 	"strings"
 	"testing"
+
+	"github.com/spacedock-dev/spacedock/internal/claudeteam"
 )
 
 // runNative runs the native runner with the given args/dir/env (and optional
@@ -21,7 +23,9 @@ func runNative(t *testing.T, dir string, env []string, args ...string) (string, 
 func runNativeStdin(t *testing.T, dir string, env []string, stdin io.Reader, args ...string) (string, string, int) {
 	t.Helper()
 	var stdout, stderr bytes.Buffer
-	runner := &NativeRunner{}
+	// The Claude team-state probe matches the Python oracle's ~/.claude/teams read,
+	// so boot TEAM_STATE parity holds byte-for-byte under the pinned (empty) HOME.
+	runner := &NativeRunner{TeamStateProbe: claudeteam.Probe}
 	code, err := runner.Run(context.Background(), Request{
 		Args:   args,
 		Dir:    dir,

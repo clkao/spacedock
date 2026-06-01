@@ -10,6 +10,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/spacedock-dev/spacedock/internal/claudeteam"
 )
 
 // oracleFetchPrefix and nativeFetchPrefix are the one intentional divergence:
@@ -73,7 +75,9 @@ func runOracle(t *testing.T, dir, home, stdin string, args ...string) runResult 
 // team-evidence probe is hermetic, matching the oracle's pinned HOME.
 func runNative(stdin string, args ...string) runResult {
 	var stdout, stderr bytes.Buffer
-	exit := Run(args, strings.NewReader(stdin), &stdout, &stderr)
+	// The Claude team-state probe matches the Python oracle's ~/.claude/teams read,
+	// so the bare-mode advisory parity holds byte-for-byte under the pinned HOME.
+	exit := Run(claudeteam.Probe, args, strings.NewReader(stdin), &stdout, &stderr)
 	return runResult{stdout.String(), stderr.String(), exit}
 }
 

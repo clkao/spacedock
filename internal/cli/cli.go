@@ -13,6 +13,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/spacedock-dev/spacedock/internal/claudeteam"
 	"github.com/spacedock-dev/spacedock/internal/contract"
 	"github.com/spacedock-dev/spacedock/internal/dispatch"
 	"github.com/spacedock-dev/spacedock/internal/status"
@@ -34,7 +35,13 @@ const tagline = "spacedock — agentic workflow launcher"
 // state: dir) itself; all other commands are handled directly. The vendored
 // Python runner stays selectable through the injectable run() core.
 func Run(args []string, stdout io.Writer, stderr io.Writer) int {
-	return run(context.Background(), args, os.Environ(), cwd(), os.Stdin, stdout, stderr, &status.NativeRunner{})
+	// The native binary is the Claude runtime's companion: the Claude first officer
+	// invokes `spacedock status --boot` and `spacedock dispatch build` directly, so
+	// the workflow surface is wired with the Claude team-state probe. claudeteam owns
+	// the ~/.claude read; status/dispatch take it as an opaque value. A non-Claude
+	// runtime entry point wires nil (host-neutral present:false / no bare-mode advisory).
+	return run(context.Background(), args, os.Environ(), cwd(), os.Stdin, stdout, stderr,
+		&status.NativeRunner{TeamStateProbe: claudeteam.Probe}, claudeteam.Probe)
 }
 
 // run is the injectable core. It depends only on the status.Runner interface,
@@ -42,8 +49,8 @@ func Run(args []string, stdout io.Writer, stderr io.Writer) int {
 // drive the status path with pinned env/cwd. cobra is wired INSIDE run so the
 // package's public surface (Run) and the exit-code contract are unchanged: the
 // command tree captures env/dir/stdin/stdout/stderr/runner in its RunE closures.
-func run(ctx context.Context, args []string, env []string, dir string, stdin io.Reader, stdout io.Writer, stderr io.Writer, runner status.Runner) int {
-	root := newRootCommand(ctx, env, dir, stdin, stdout, stderr, runner)
+func run(ctx context.Context, args []string, env []string, dir string, stdin io.Reader, stdout io.Writer, stderr io.Writer, runner status.Runner, dispatchProbe claudeteam.TeamStateProbe) int {
+	root := newRootCommand(ctx, env, dir, stdin, stdout, stderr, runner, dispatchProbe)
 	root.SetArgs(args)
 	if err := root.Execute(); err != nil {
 		return exitCodeFor(err)
@@ -78,7 +85,7 @@ func exitCodeFor(err error) int {
 // package: cobra never prints its own error or usage, so the unknown-command path
 // emits the pinned message and exits 2 (the root RunE below), and the help is
 // rendered solely by printHelp.
-func newRootCommand(ctx context.Context, env []string, dir string, stdin io.Reader, stdout, stderr io.Writer, runner status.Runner) *cobra.Command {
+func newRootCommand(ctx context.Context, env []string, dir string, stdin io.Reader, stdout, stderr io.Writer, runner status.Runner, dispatchProbe claudeteam.TeamStateProbe) *cobra.Command {
 	versionFlag := false
 
 	root := &cobra.Command{
@@ -121,7 +128,7 @@ func newRootCommand(ctx context.Context, env []string, dir string, stdin io.Read
 		newStatusCommand(ctx, env, dir, stdin, stdout, stderr, runner),
 		newNewCommand(ctx, env, dir, stdin, stdout, stderr, runner),
 		newCompletionCommand(stdout, stderr),
-		newDispatchCommand(stdin, stdout, stderr),
+		newDispatchCommand(dispatchProbe, stdin, stdout, stderr),
 	)
 	return root
 }
@@ -306,14 +313,14 @@ func newCompletionCommand(stdout, stderr io.Writer) *cobra.Command {
 
 // newDispatchCommand reparents `spacedock dispatch` under cobra with flag parsing
 // disabled, forwarding its post-subcommand argv verbatim to dispatch.Run (AC-5).
-func newDispatchCommand(stdin io.Reader, stdout, stderr io.Writer) *cobra.Command {
+func newDispatchCommand(probe claudeteam.TeamStateProbe, stdin io.Reader, stdout, stderr io.Writer) *cobra.Command {
 	return &cobra.Command{
 		Use:                "dispatch build | show-stage-def",
 		Short:              "Build worker dispatch artifacts",
 		GroupID:            "workflow",
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if code := dispatch.Run(args, stdin, stdout, stderr); code != 0 {
+			if code := dispatch.Run(probe, args, stdin, stdout, stderr); code != 0 {
 				return exitCodeError{code}
 			}
 			return nil

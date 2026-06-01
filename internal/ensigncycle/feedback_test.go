@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/spacedock-dev/spacedock/internal/claudeteam"
 	"github.com/spacedock-dev/spacedock/internal/dispatch"
 )
 
@@ -94,7 +95,7 @@ func stageReflowFixture(t *testing.T, reflow bool, feedbackContext string) reflo
 	}
 
 	var stdout, stderr strings.Builder
-	code := dispatch.Run([]string{"build", "--workflow-dir", root},
+	code := dispatch.Run(claudeteam.Probe, []string{"build", "--workflow-dir", root},
 		strings.NewReader(mustJSON(t, fields)), &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("dispatch build exit=%d stderr=%s", code, stderr.String())
@@ -180,7 +181,7 @@ func TestFeedbackReflowGoesRedOnBrokenOutput(t *testing.T) {
 		})
 
 		var stdout, stderr strings.Builder
-		code := dispatch.Run([]string{"build", "--workflow-dir", root},
+		code := dispatch.Run(claudeteam.Probe, []string{"build", "--workflow-dir", root},
 			strings.NewReader(stdin), &stdout, &stderr)
 
 		if code == 0 {

@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/spacedock-dev/spacedock/internal/claudeteam"
 )
 
 // runSet handles the --set mutation flow with mod-block / merge-hook /
@@ -172,7 +174,7 @@ func runSet(roots roots, set *setUpdate, args []string, whereFilters []whereFilt
 
 // runRead handles the table / --next / --boot / --validate read flows. Matches
 // the tail of main() after the mutation branches.
-func runRead(roots roots, args []string, e env, whereFilters []whereFilter,
+func runRead(probe claudeteam.TeamStateProbe, roots roots, args []string, e env, whereFilters []whereFilter,
 	includeArchive, showNext, showBoot, showNextID, showValidate bool,
 	explicitFields []string, allFieldsFlag, asJSON, quiet bool,
 	hasArchiveSlug, hasSet, hasResolve bool,
@@ -261,14 +263,14 @@ func runRead(roots roots, args []string, e env, whereFilters []whereFilter,
 	switch {
 	case showBoot:
 		if asJSON {
-			data, err := gatherBoot(entities, stages, roots.definitionDir, roots.entityDir, gitRoot, idStyle, e, stderr)
+			data, err := gatherBoot(probe, entities, stages, roots.definitionDir, roots.entityDir, gitRoot, idStyle, e, stderr)
 			if err != nil {
 				return 1
 			}
 			emitJSON(stdout, bootJSON(data))
 			return 0
 		}
-		if err := printBoot(stdout, entities, stages, roots.definitionDir, roots.entityDir, gitRoot, idStyle, e, stderr); err != nil {
+		if err := printBoot(probe, stdout, entities, stages, roots.definitionDir, roots.entityDir, gitRoot, idStyle, e, stderr); err != nil {
 			return 1
 		}
 	case showNext:

@@ -12,6 +12,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/spacedock-dev/spacedock/internal/claudeteam"
 )
 
 // This file is an INDEPENDENT validator authored at the validation stage. It
@@ -58,7 +60,9 @@ func indRunNative(t *testing.T, dir string, env []string, stdin string, args ...
 	if stdin != "" {
 		in = strings.NewReader(stdin)
 	}
-	r := &NativeRunner{}
+	// Production wires the Claude team-state probe (the native binary is the Claude
+	// runtime's companion); reproduce it so boot TEAM_STATE matches the oracle.
+	r := &NativeRunner{TeamStateProbe: claudeteam.Probe}
 	code, err := r.Run(context.Background(), Request{
 		Args: args, Dir: dir, Env: env,
 		Stdin:  in,

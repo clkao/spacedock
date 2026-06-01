@@ -5,6 +5,8 @@ package dispatch
 import (
 	"fmt"
 	"io"
+
+	"github.com/spacedock-dev/spacedock/internal/claudeteam"
 )
 
 // deferredSubcommands are the claude-team subcommands moved to the sibling
@@ -20,8 +22,9 @@ var deferredSubcommands = map[string]bool{
 // Run routes a `spacedock dispatch <subcommand> [flags]` invocation. build reads
 // stdin JSON and writes the dispatch envelope to stdout; show-stage-def writes a
 // README subsection to stdout. A deferred or unknown subcommand fails with exit
-// 2 and a usage diagnostic on stderr.
-func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+// 2 and a usage diagnostic on stderr. probe is the host-supplied team-state probe
+// gating the bare-mode advisory (nil on a non-Claude host → no advisory).
+func Run(probe claudeteam.TeamStateProbe, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
 		printUsage(stderr)
 		return 2
@@ -33,7 +36,7 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		if code != 0 {
 			return code
 		}
-		return runBuild(workflowDir, stdin, stdout, stderr)
+		return runBuild(probe, workflowDir, stdin, stdout, stderr)
 	case "show-stage-def":
 		workflowDir, stage, code := requireStageFlags(args[1:], stderr)
 		if code != 0 {
