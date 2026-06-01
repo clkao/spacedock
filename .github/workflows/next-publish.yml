@@ -1,17 +1,12 @@
-# Bumps the marketplace entry's calendar version on each `next` publish (AC-2d).
+# Bumps the marketplace entry's calendar version on a deliberate `next` publish.
 # The calendar key (`0.0.YYYYMMDDNN`) is the `claude plugin update` re-pull key:
 # bumping it is the ONLY thing that makes `update` re-pull the moving `next`
-# branch. Tied to the CI that publishes `next` so it cannot be forgotten.
+# branch. Triggered manually (`workflow_dispatch`) — run it when you want `@next`
+# marketplace installers to re-pull, not on every push.
 name: next-publish
 
 on:
-  push:
-    branches:
-      - next
-    # The bump commit only touches marketplace.json; ignoring that path stops the
-    # bump from re-triggering itself in a loop.
-    paths-ignore:
-      - ".claude-plugin/marketplace.json"
+  workflow_dispatch:
 
 permissions:
   contents: write
