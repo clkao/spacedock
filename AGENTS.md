@@ -23,6 +23,10 @@ gofmt -w ./cmd ./internal
 
 Use `go test ./...` as the baseline gate for every stage. Add focused tests for each stage before implementing that stage.
 
+## Releasing
+
+Cut releases from `next` via an annotated `vX.Y.Z` tag — see `docs/releasing.md`. Never release from `origin/main`.
+
 ## Project Shape
 
 - `cmd/spacedock/`: process entry point only.
