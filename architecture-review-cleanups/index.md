@@ -35,3 +35,18 @@ Verified by: `go vet ./...` + `go test ./...` green after removing — dead stru
 ## Notes
 
 Touches `internal/status` + `internal/dispatch` (the `pyJoin` seam) — sequences with the other internal/status entities (after packaging; can fold into the implementation drain). Small, low-risk, behavior-preserving. The review's full finding list is at `docs/dev/_reviews/architecture-review.md`.
+
+## Stage Report: implementation
+
+- DONE: AC-1: share pyJoin across the internal/status <-> internal/dispatch seam (currently byte-duplicated) — one definition, both call sites.
+  Exported `status.PyJoin` (was `status.pyJoin`); `internal/dispatch` consumes it at both call sites (`build.go:228,354`); deleted the byte-identical dispatch copy (`helpers.go`). `TestBuildAbsoluteWorktreeParity` passes. Commit 924a588c.
+- DONE: AC-3: remove the verified dead code / test-hygiene items the entity body lists; the full suite stays green.
+  Removed `roots.definitionDirSpelling` (written-never-read), `(*entity).get` (zero callers — `env.get`/`orderedMap.get` retained), inlined `runGit` into `runGitCmd` at its single caller, inlined the `sortStrings` alias to `sort.Strings` at 3 sites, dropped the two `_ = strings.TrimSpace` crutches + their now-unused `strings` imports, re-anchored test `sdB32Alphabet` to production `sdB32Chars`. Commit 9d99499d.
+- DONE: AC-2: status parity tests FAIL (not silently skip) when the Python oracle is absent — so a missing-oracle never masks a real divergence.
+  Both oracle chokepoints (`harness_test.go` `oraclePath`/`runOracle`, independent `indOraclePath`) now resolve the tree-relative vendored oracle (`internal/status/vendor/status`, byte-identical to the plugin oracle) and `t.Fatalf` on a missing oracle — mirroring the dispatch `vendoredOracle`+`t.Fatalf` pattern. Demonstrated: oracle var UNSET → strongest parity tests RUN via vendored oracle (0 skips), pass; `SPACEDOCK_ORACLE` → missing path → parity tests FAIL. Commit 941fdcb3.
+- DONE: ALSO (audit follow-up from zs #246): sweep the two now-stale comments in internal/dispatch/build.go.
+  ABOUTME line 2 dropped the `(non-_mods)` qualifier; `runBuild` docstring now says it appends the show-standing fetch line when standing teammates exist and "Matches cmd_build" (zs #246 landed the `_mods/standing` branch). Commit 5fdb32f6.
+
+### Summary
+
+All four items landed behavior-preserving on branch `spacedock-ensign/architecture-review-cleanups` (4 commits: 924a588c, 941fdcb3, 9d99499d, 5fdb32f6). `go test ./...` 587 passed / 1 failed — the sole failure is the pre-existing env-gated `TestCodexResolveManifestAgainstInstalledHost` in untouched `internal/cli` (codex host config error, not code). `go test -race` on the touched packages 377 passed; `gofmt -l` clean; `go vet ./...` clean. Key decision for AC-2: rather than a CI-only env hard-fail, the oracle now resolves the always-present in-tree vendored copy, so the parity suite hard-fails on a real divergence everywhere (CI and fresh clones), not just where a laptop path happened to exist.
