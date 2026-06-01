@@ -280,6 +280,7 @@ func runRead(probe claudeteam.TeamStateProbe, roots roots, args []string, e env,
 
 	applyEffectiveIDs(allEntities, idStyle, allEntities)
 	applyEffectiveIDs(entities, idStyle, allEntities)
+	materializeSuppressedBy(entities, stages, explicitFields, whereFilters)
 	entities = applyFilters(entities, whereFilters)
 
 	switch {

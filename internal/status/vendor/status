@@ -1592,6 +1592,83 @@ def update_frontmatter(filepath, updates):
     return resolved
 
 
+# The computed field name the #230 visibility surface exposes via --fields /
+# --where. It is NOT a frontmatter key: it is derived from the --next dispatch
+# analysis, so it is materialized only when explicitly named and is deliberately
+# excluded from --all-fields (which documents stored frontmatter keys).
+SUPPRESSED_BY_FIELD = 'next-suppressed-by'
+
+
+def compute_suppressed_by(entities, stages):
+    """Return {id(entity): reason} for why each entity is NOT dispatched by --next.
+
+    Mirrors the candidate loop in print_next_table exactly so the #230
+    visibility surface can never diverge from --next: a dispatched entity gets
+    '' (not suppressed). Reasons, in the loop's own precedence:
+    terminal | gate | worktree-set | concurrency-full. An entity whose status is
+    not a known stage, or that sits at the last stage with no successor, is not
+    attributable to one of the tracked suppression reasons and gets ''.
+    """
+    stage_by_name = {s['name']: s for s in (stages or [])}
+    stage_names = [s['name'] for s in (stages or [])]
+    active_counts = {}
+    for e in entities:
+        if e['worktree']:
+            st = e['status']
+            active_counts[st] = active_counts.get(st, 0) + 1
+
+    candidates = sorted(entities, key=sort_key_next)
+    next_stage_counts = dict(active_counts)
+    reasons = {}
+    for e in candidates:
+        status = e['status']
+        if status not in stage_by_name:
+            reasons[id(e)] = ''
+            continue
+        stage_idx = stage_names.index(status)
+        stage = stage_by_name[status]
+        if stage.get('terminal', False):
+            reasons[id(e)] = 'terminal'
+            continue
+        if stage.get('gate', False):
+            reasons[id(e)] = 'gate'
+            continue
+        if e['worktree']:
+            reasons[id(e)] = 'worktree-set'
+            continue
+        if stage_idx + 1 >= len(stage_names):
+            reasons[id(e)] = ''
+            continue
+        next_stage_name = stage_names[stage_idx + 1]
+        next_stage = stage_by_name[next_stage_name]
+        current_count = next_stage_counts.get(next_stage_name, 0)
+        if current_count >= next_stage['concurrency']:
+            reasons[id(e)] = 'concurrency-full'
+            continue
+        next_stage_counts[next_stage_name] = current_count + 1
+        reasons[id(e)] = ''
+    return reasons
+
+
+def materialize_suppressed_by(entities, stages, explicit_fields, where_filters):
+    """Write the computed next-suppressed-by reason into each entity ONLY when
+    the field is explicitly referenced by --fields or a --where clause.
+
+    Gating it keeps the value out of --all-fields and the default field set
+    (the entity dict is otherwise untouched), so the parity-pinned
+    frontmatter-keys surfaces stay byte-identical. The reason is computed from
+    the shared dispatch analysis over the read's entity set, so the surface
+    mirrors --next exactly.
+    """
+    referenced = SUPPRESSED_BY_FIELD in (explicit_fields or [])
+    referenced = referenced or any(f[0] == SUPPRESSED_BY_FIELD for f in (where_filters or []))
+    if not referenced:
+        return
+    reasons = compute_suppressed_by(entities, stages)
+    for e in entities:
+        e[SUPPRESSED_BY_FIELD] = reasons[id(e)]
+
+
 def apply_filters(entities, filters):
     """Filter entities based on --where conditions."""
     if not filters:
@@ -2566,6 +2643,7 @@ def main():
 
     apply_effective_ids(all_entities, id_style, all_entities)
     apply_effective_ids(entities, id_style, all_entities)
+    materialize_suppressed_by(entities, stages, explicit_fields, where_filters)
     entities = apply_filters(entities, where_filters)
 
     if show_boot:
