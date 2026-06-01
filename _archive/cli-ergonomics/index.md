@@ -10,6 +10,7 @@ mod-block:
 pr: #242
 completed: 2026-06-01T04:06:31Z
 verdict: PASSED
+archived: 2026-06-01T04:06:31Z
 ---
 
 Make `spacedock status` forgiving and discoverable. Today `--workflow-dir` is mandatory and unforgiving: omitting it falls back to the cwd and fails with a misleading "README.md has no stages block"; and pointing at a state checkout (the `state:` dir) post-migration errors with `non-numeric sequential id` instead of naming the real problem.
