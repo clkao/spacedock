@@ -51,11 +51,21 @@ func dispatch(args []string, dir string, e env, stdin io.Reader, stdout, stderr 
 		return errExit(stderr, err.Error())
 	}
 
-	// The native runner requires --workflow-dir (there is no embedded-script
-	// dirname(__file__) fallback). PIPELINE_DIR remains an accepted source.
+	// Resolution precedence: an explicit --workflow-dir (or PIPELINE_DIR) is used
+	// verbatim and discovery is skipped, preserving every explicit invocation. With
+	// neither, walk up from the request dir to the enclosing commissioned workflow;
+	// a miss is the named no-workflow error (replacing today's empty-table /
+	// "no stages block" fallback for the no-flag path only).
 	pipelineDir := workflowDir
 	if pipelineDir == "" {
 		pipelineDir = e.get("PIPELINE_DIR")
+	}
+	if pipelineDir == "" {
+		if discovered, ok := discoverWorkflowDir(dir); ok {
+			pipelineDir = discovered
+		} else {
+			return errExit(stderr, "no Spacedock workflow here — pass --workflow-dir or run inside a workflow")
+		}
 	}
 
 	setResult, err := parseSetArgs(args)
@@ -128,6 +138,18 @@ func dispatch(args []string, dir string, e env, stdin io.Reader, stdout, stderr 
 	roots, err := resolveRoots(pipelineDir, dir)
 	if err != nil {
 		return errExit(stderr, err.Error())
+	}
+
+	// State-checkout misdirection: when --workflow-dir points at a state checkout
+	// (a dir with no own commissioned README) whose enclosing definition dir
+	// declares state: back at it, name the real problem rather than emit the
+	// downstream id/stage symptoms. Fires only for the detected state-checkout
+	// case; an arbitrary non-workflow explicit dir falls through unchanged.
+	defReadme := filepath.Join(roots.definitionDir, "README.md")
+	if !(isRegularFile(defReadme) && strings.HasPrefix(ParseFrontmatter(defReadme)["commissioned-by"], "spacedock@")) {
+		if defDir, ok := stateCheckoutParent(roots.definitionDir); ok {
+			return errExit(stderr, "this is a state checkout; point --workflow-dir at the definition dir (the one whose README declares state:): "+defDir)
+		}
 	}
 
 	// --new atomic create.

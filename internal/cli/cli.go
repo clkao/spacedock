@@ -119,6 +119,8 @@ func newRootCommand(ctx context.Context, env []string, dir string, stdin io.Read
 		newInstallCommand(ctx, env, stdout, stderr),
 		newDoctorCommand(ctx, env, stdout, stderr),
 		newStatusCommand(ctx, env, dir, stdin, stdout, stderr, runner),
+		newNewCommand(ctx, env, dir, stdin, stdout, stderr, runner),
+		newCompletionCommand(stdout, stderr),
 		newDispatchCommand(stdin, stdout, stderr),
 	)
 	return root
@@ -253,6 +255,55 @@ func newStatusCommand(ctx context.Context, env []string, dir string, stdin io.Re
 	}
 }
 
+// newNewCommand wires `spacedock new [--folder] SLUG` as a pure alias for
+// `status --new`: the post-subcommand argv (the optional --folder plus the slug)
+// is prefixed with --new and forwarded verbatim to runStatus, so the body is read
+// from stdin and the existing runNew atomic-create path is reused unchanged. With
+// the discovery walk-up, `new` run inside a workflow needs no --workflow-dir.
+// DisableFlagParsing keeps --folder reaching the runner intact (AC-3).
+func newNewCommand(ctx context.Context, env []string, dir string, stdin io.Reader, stdout, stderr io.Writer, runner status.Runner) *cobra.Command {
+	return &cobra.Command{
+		Use:                "new [--folder] SLUG",
+		Short:              "Create an entity from a stdin body (auto-discovers the workflow)",
+		GroupID:            "workflow",
+		DisableFlagParsing: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if wantsHelp(args) {
+				return cmd.Help()
+			}
+			aliased := append([]string{"--new"}, args...)
+			if code := runStatus(ctx, aliased, env, dir, stdin, stdout, stderr, runner); code != 0 {
+				return exitCodeError{code}
+			}
+			return nil
+		},
+	}
+}
+
+// newCompletionCommand wires `spacedock completion bash|zsh`, emitting a static
+// completion script to stdout (exit 0). An unknown or missing shell prints the
+// named usage error and returns 2 — the CLI-layer usage-error code, matching the
+// unknown-command path. The static script (no dynamic slug completion: YAGNI)
+// replaces cobra's default completion command, which is disabled at the root via
+// CompletionOptions.DisableDefaultCmd (AC-3).
+func newCompletionCommand(stdout, stderr io.Writer) *cobra.Command {
+	return &cobra.Command{
+		Use:                "completion bash|zsh",
+		Short:              "Print a bash or zsh completion script",
+		GroupID:            "workflow",
+		DisableFlagParsing: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if wantsHelp(args) {
+				return cmd.Help()
+			}
+			if code := runCompletion(args, stdout, stderr); code != 0 {
+				return exitCodeError{code}
+			}
+			return nil
+		},
+	}
+}
+
 // newDispatchCommand reparents `spacedock dispatch` under cobra with flag parsing
 // disabled, forwarding its post-subcommand argv verbatim to dispatch.Run (AC-5).
 func newDispatchCommand(stdin io.Reader, stdout, stderr io.Writer) *cobra.Command {
@@ -345,3 +396,66 @@ func cwd() string {
 func printVersion(w io.Writer) {
 	fmt.Fprintf(w, "spacedock %s (contract %d)\n", Version, contract.CONTRACT_VERSION)
 }
+
+// runCompletion emits a static shell-completion script for bash or zsh to
+// stdout (exit 0). An unknown or missing shell prints the named usage error to
+// stderr and returns 2 — the CLI-layer usage-error code, consistent with the
+// unknown-command path, since completion is handled in-package and never reaches
+// the native runner.
+func runCompletion(args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 {
+		fmt.Fprintln(stderr, "Error: completion requires a shell: bash or zsh")
+		return 2
+	}
+	switch args[0] {
+	case "bash":
+		fmt.Fprint(stdout, bashCompletion)
+		return 0
+	case "zsh":
+		fmt.Fprint(stdout, zshCompletion)
+		return 0
+	default:
+		fmt.Fprintln(stderr, "Error: completion requires a shell: bash or zsh")
+		return 2
+	}
+}
+
+// bashCompletion completes the top-level verbs and the common status flags. It
+// is intentionally static (no dynamic slug completion): YAGNI.
+const bashCompletion = `# spacedock bash completion
+_spacedock() {
+  local cur prev verbs status_flags
+  cur="${COMP_WORDS[COMP_CWORD]}"
+  prev="${COMP_WORDS[COMP_CWORD-1]}"
+  verbs="claude codex install doctor status new completion dispatch --version --help"
+  status_flags="--workflow-dir --next --next-id --boot --validate --archived --json --quiet --new --folder --set --where --archive --resolve --short-id --discover --root"
+  if [ "$COMP_CWORD" -eq 1 ]; then
+    COMPREPLY=( $(compgen -W "$verbs" -- "$cur") )
+    return 0
+  fi
+  case "${COMP_WORDS[1]}" in
+    status) COMPREPLY=( $(compgen -W "$status_flags" -- "$cur") ) ;;
+    completion) COMPREPLY=( $(compgen -W "bash zsh" -- "$cur") ) ;;
+  esac
+}
+complete -F _spacedock spacedock
+`
+
+// zshCompletion completes the top-level verbs and the common status flags.
+const zshCompletion = `#compdef spacedock
+# spacedock zsh completion
+_spacedock() {
+  local -a verbs status_flags
+  verbs=(claude codex install doctor status new completion dispatch --version --help)
+  status_flags=(--workflow-dir --next --next-id --boot --validate --archived --json --quiet --new --folder --set --where --archive --resolve --short-id --discover --root)
+  if (( CURRENT == 2 )); then
+    compadd -- $verbs
+    return
+  fi
+  case "${words[2]}" in
+    status) compadd -- $status_flags ;;
+    completion) compadd -- bash zsh ;;
+  esac
+}
+_spacedock "$@"
+`
