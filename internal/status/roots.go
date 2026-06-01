@@ -23,11 +23,10 @@ type roots struct {
 	definitionDir string
 	// entityDir is the absolute entity root for I/O.
 	entityDir string
-	// definitionDirSpelling / entityDirSpelling are the as-passed spellings used
-	// in output so a relative --workflow-dir renders relative dests, matching the
-	// oracle's literal os.path.join(pipeline_dir, ...) output.
-	definitionDirSpelling string
-	entityDirSpelling     string
+	// entityDirSpelling is the as-passed spelling used in output so a relative
+	// --workflow-dir renders relative dests, matching the oracle's literal
+	// os.path.join(pipeline_dir, ...) output.
+	entityDirSpelling string
 }
 
 // resolveRoots returns the definition and entity roots for a workflow dir,
@@ -46,10 +45,9 @@ func resolveRoots(workflowDir, baseDir string) (roots, error) {
 	}
 
 	r := roots{
-		definitionDir:         abs,
-		entityDir:             abs,
-		definitionDirSpelling: workflowDir,
-		entityDirSpelling:     workflowDir,
+		definitionDir:     abs,
+		entityDir:         abs,
+		entityDirSpelling: workflowDir,
 	}
 
 	stateValue := strings.TrimSpace(ParseFrontmatter(filepath.Join(abs, "README.md"))["state"])
@@ -65,7 +63,7 @@ func resolveRoots(workflowDir, baseDir string) (roots, error) {
 	}
 
 	r.entityDir = filepath.Join(abs, cleaned)
-	r.entityDirSpelling = pyJoin(spellingOr(workflowDir, abs), stateValue)
+	r.entityDirSpelling = PyJoin(spellingOr(workflowDir, abs), stateValue)
 	return r, nil
 }
 

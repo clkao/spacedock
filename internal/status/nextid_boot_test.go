@@ -8,9 +8,6 @@ import (
 	"testing"
 )
 
-// sdB32Alphabet is the SD-B32 alphabet the --next-id candidate is drawn from.
-const sdB32Alphabet = "0123456789abcdefghjkmnpqrstvwxyz"
-
 // AC-1: --next-id is in scope for pass-through but asserted at format + oracle-
 // equality level (not a static golden), since the candidate is SHA-derived. The
 // harness pins all id material (timestamp via env, seed/actor via flags) so the
@@ -34,7 +31,7 @@ func TestNextIDParity(t *testing.T) {
 		t.Fatalf("--next-id candidate %q length=%d, want 24", candidate, len(candidate))
 	}
 	for _, c := range candidate {
-		if !strings.ContainsRune(sdB32Alphabet, c) {
+		if !strings.ContainsRune(sdB32Chars, c) {
 			t.Fatalf("--next-id candidate %q has char %q outside SD-B32 alphabet", candidate, c)
 		}
 	}

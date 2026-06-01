@@ -5,7 +5,6 @@ package status
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -147,5 +146,4 @@ func TestNativeValidationGatesReads(t *testing.T) {
 	if normalize(nErr, nativeRoot) != normalize(oErr, oracleRoot) {
 		t.Fatalf("stderr: native=%q oracle=%q", normalize(nErr, nativeRoot), normalize(oErr, oracleRoot))
 	}
-	_ = strings.TrimSpace
 }

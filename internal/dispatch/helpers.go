@@ -140,24 +140,3 @@ func pyRelpath(path, base string) string {
 	}
 	return rel
 }
-
-// pyJoin concatenates path components the way os.path.join does: an absolute
-// later component resets the path; otherwise components join with the OS
-// separator without cleaning. Matches the status pyJoin.
-func pyJoin(parts ...string) string {
-	sep := string(filepath.Separator)
-	result := ""
-	for _, p := range parts {
-		switch {
-		case result == "":
-			result = p
-		case filepath.IsAbs(p):
-			result = p
-		case strings.HasSuffix(result, sep):
-			result += p
-		default:
-			result += sep + p
-		}
-	}
-	return result
-}

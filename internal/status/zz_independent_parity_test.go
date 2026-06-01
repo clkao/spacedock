@@ -22,21 +22,27 @@ import (
 // the live oracle, and diffs the four observable channels after the documented
 // normalization. Failure here means a real parity gap, not a stale golden.
 
-const indOracle = "/Users/clkao/git/spacedock/skills/commission/bin/status"
-
+// indOraclePath resolves the oracle for the independent parity harness with the
+// same test-integrity contract as oraclePath: a SPACEDOCK_ORACLE override must
+// point at an existing file, and with no override the in-tree vendored oracle is
+// used. A missing oracle is a hard failure, never a skip — so the oracle-backed
+// TestInd* subtests cannot pass-by-skip on CI or a fresh clone.
 func indOraclePath(t *testing.T) string {
 	t.Helper()
 	if p := os.Getenv("SPACEDOCK_ORACLE"); p != "" {
+		if _, err := os.Stat(p); err != nil {
+			t.Fatalf("SPACEDOCK_ORACLE=%s does not exist: %v", p, err)
+		}
 		return p
 	}
-	if _, err := os.Stat(indOracle); err == nil {
-		return indOracle
+	p, err := filepath.Abs(filepath.Join("vendor", "status"))
+	if err != nil {
+		t.Fatal(err)
 	}
-	// Oracle-dependent subtests skip when the oracle is absent (matching the
-	// in-tree harness). The --new / guard subtests do not touch the oracle and
-	// run unconditionally.
-	t.Skipf("oracle not found at %s (set SPACEDOCK_ORACLE)", indOracle)
-	return ""
+	if _, err := os.Stat(p); err != nil {
+		t.Fatalf("vendored oracle not found at %s: %v", p, err)
+	}
+	return p
 }
 
 func indEnv(t *testing.T) []string {

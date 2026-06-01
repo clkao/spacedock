@@ -89,8 +89,8 @@ func findEntityFormConflicts(directory, dirSpelling, scope string) []string {
 	}
 	var errs []string
 	for _, slug := range conflicts {
-		folderPath := pyJoin(dirSpelling, slug, "index.md")
-		flatPath := pyJoin(dirSpelling, slug+".md")
+		folderPath := PyJoin(dirSpelling, slug, "index.md")
+		flatPath := PyJoin(dirSpelling, slug+".md")
 		errs = append(errs, fmt.Sprintf(
 			"Error: flat/folder conflict: workflow=%s scope=%s slug=%s flat_path=%s folder_path=%s",
 			workflowField, scope, slug, flatPath, folderPath))
@@ -141,7 +141,7 @@ func validateWorkflowStageNames(definitionDir string) []string {
 func validateWorkflow(definitionDir, entityDir, idStyle string, stderr io.Writer) []string {
 	var errs []string
 	errs = append(errs, findEntityFormConflicts(entityDir, entityDir, "active")...)
-	errs = append(errs, findEntityFormConflicts(filepath.Join(entityDir, "_archive"), pyJoin(entityDir, "_archive"), "archived")...)
+	errs = append(errs, findEntityFormConflicts(filepath.Join(entityDir, "_archive"), PyJoin(entityDir, "_archive"), "archived")...)
 	errs = append(errs, validateWorkflowStageNames(definitionDir)...)
 
 	entities := activeAndArchivedEntities(entityDir, stderr)
