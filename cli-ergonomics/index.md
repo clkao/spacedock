@@ -1,13 +1,15 @@
 ---
 id: xdt3cjnppc89amm5g23s86mm
 title: CLI ergonomics — workflow auto-discovery and actionable errors
-status: validation
+status: done
 source: session 1 debrief — ergonomics
 score: "0.30"
-worktree: .worktrees/spacedock-ensign-cli-ergonomics
+worktree: 
 started: 2026-05-30T21:28:40Z
 mod-block: 
 pr: #242
+completed: 2026-06-01T04:06:31Z
+verdict: PASSED
 ---
 
 Make `spacedock status` forgiving and discoverable. Today `--workflow-dir` is mandatory and unforgiving: omitting it falls back to the cwd and fails with a misleading "README.md has no stages block"; and pointing at a state checkout (the `state:` dir) post-migration errors with `non-numeric sequential id` instead of naming the real problem.
