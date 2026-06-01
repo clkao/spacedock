@@ -20,6 +20,9 @@ This file captures the shared first-officer semantics. Keep it aligned with `age
    - **ORPHANS** — entities with worktree fields, cross-referenced against filesystem and git state. Report anomalies; do not auto-redispatch.
    - **PR_STATE** — PR-pending entities with current merge state. Advance merged PRs.
    - **DISPATCHABLE** — entities ready for dispatch (same as `--next`).
+   - **STATE_BACKEND** — `split-root` or `single-root`, the resolved entity dir, and whether that dir is present. The split-root halt-gate below keys off this.
+6. **Split-root state halt-gate.** If the boot `STATE_BACKEND` line shows `state_backend == split-root` AND `entity_dir_present == false`, the state checkout is NOT initialized — the orphan state branch exists on origin but is not checked out at the `state:` path (a fresh clone, or a removed worktree). The boot table would render EMPTY (no entities) and `--validate` would say VALID — a silent failure. Do NOT dispatch against this phantom-empty workflow. HALT dispatch, report "state not initialized," and run (or prompt the captain to run) `spacedock state init` (which fetches the orphan branch and adds the linked worktree; the manual fallback is `git fetch origin <state-branch> && git worktree add <state-path> <state-branch>`). After init, re-read `--boot` and proceed only once `entity_dir_present == true`.
+7. **Split-root pull-on-boot.** For a split-root workflow, before the first dispatch, integrate peers' state with `git -C <state-path> pull --rebase origin <state-branch>` (the state branch is shared via `origin`; one pull at boot, NOT per-read). If that `pull --rebase` CONFLICTS, follow the rebase-conflict halt in **State Management** below: HALT, `git rebase --abort`, surface the conflict, and stop — do not dispatch against an unmerged state tree.
 
 ## Status Viewer
 
@@ -235,7 +238,7 @@ When an entity reaches its terminal stage:
 
 ### Ship-Local Ceremony
 
-When the merge boundary has no PR host — the README declares `merge: local`, or the pr-merge fallback applies (no `gh`, push failed, captain chose local) — the FO runs ONE fixed ceremony per entity instead of re-deriving the steps. The README's top-level `merge:` key (read at boot, default `pr`) selects whether this ceremony or the PR path applies. The happy path uses NO `--force`:
+When the merge boundary has no PR host — the README declares `merge: local`, or the pr-merge fallback applies (no `gh`, push failed, captain chose local) — the FO runs ONE fixed ceremony per entity instead of re-deriving the steps. The README's top-level `merge:` key (read on-demand by the status viewer at each terminal-transition guard, default `pr`) selects whether this ceremony or the PR path applies. The happy path uses NO `--force`:
 
 1. Set the merge mod-block before invoking the hook: `spacedock status --workflow-dir {workflow_dir} --set {slug} mod-block=merge:{mod_name}` (commit path-scoped).
 2. Invoke the merge hook, which performs the local `--no-ff` merge of `{branch}` onto `next`.
@@ -294,6 +297,21 @@ When the workflow is split-root — the workflow README declares a `state:` chec
 
 - **Preferred — tool-managed atomic state commits.** When the status tool owns the `add`+`commit` of an entity's state under a lock, route entity commits through it so concurrent writers serialize and never cross-attribute.
 - **Fallback — path-scoped commits per writer.** Until the tool owns commits, stage and commit ONLY the writer's own entity path: `git -C {state_checkout} add {entity_path} && git -C {state_checkout} commit -m "…" -- {entity_path}`. Never a bare `git add -A` or bare `git commit` in the shared state checkout. Retry on `index.lock` contention after a short wait (~2s).
+
+**Multi-writer sync (push / pull --rebase).** The state branch is shared via the main repo's `origin`; concurrent writers (the FO and ensigns, across hosts or same-host parallel stages) must converge without clobbering. Three minimal sync points extend the path-scoped-commit rule — NOT a pull before every dispatch:
+
+- **After a state commit → push.** Whoever commits an entity/report to the state checkout pushes the state branch so peers see it: `git -C {state_checkout} push origin {state_branch}`.
+- **On push rejection (non-fast-forward) → `pull --rebase` then re-push.** A peer pushed first; `git -C {state_checkout} pull --rebase origin {state_branch}` replays the local path-scoped commit atop the peer's. Because each writer commits exactly ONE entity file, concurrent writers touch disjoint paths → the rebase replays with no conflict. Then re-push.
+- **At FO boot (before first dispatch) → `pull --rebase`.** Integrate peers' state once at boot (the Startup pull-on-boot step), not per-read.
+
+**Rebase-conflict halt (B6).** When a `git -C {state_checkout} pull --rebase origin {state_branch}` (at boot, or after a push rejection) CONFLICTS — the only realistic cause is two writers editing the SAME entity's frontmatter concurrently, the path-scoped rule's known boundary — the FO MUST:
+
+1. **HALT** the operation in progress (dispatch). Do not proceed against an unmerged state tree.
+2. **Abort the rebase** (`git -C {state_checkout} rebase --abort`) to leave the checkout in a clean, known state.
+3. **Surface** the conflict to the captain with the conflicting entity path(s) and the peer commit, and **stop**. This is manual intervention.
+4. The FO must NOT `--force` / `--force-with-lease` push, and must NOT auto-resolve (no `-X ours/theirs`, no discarding either side) — either choice silently loses a peer's frontmatter edit.
+
+This matches the escalate-rather-than-guess discipline. A full lock model is out of scope; the halt IS the boundary behavior for the rare same-entity collision.
 
 ## FO Write Scope
 

@@ -47,6 +47,20 @@ When the workflow is split-root — the workflow README declares a `state:` chec
 - **Preferred — tool-managed atomic state commits.** When the status tool owns the state `add`+`commit` under a lock, route your entity commit through it.
 - **Fallback — path-scoped commit.** Otherwise stage and commit ONLY your own entity path: `git -C {state_checkout} add {entity_path} && git -C {state_checkout} commit -m "…" -- {entity_path}`. Never a bare `git add -A` or bare `git commit` in the shared state checkout. Retry on `index.lock` contention after a short wait (~2s).
 
+**Multi-writer sync (push / pull --rebase).** The state checkout is an orphan state branch shared via the main repo's `origin`; peers (the FO and sibling ensigns, possibly on other hosts) write concurrently. After your path-scoped state commit:
+
+- **Push the state branch** so peers see your entity/report: `git -C {state_checkout} push origin {state_branch}` (`{state_branch}` is the workflow's state branch, e.g. `spacedock-state/dev`).
+- **On a push rejection (non-fast-forward) → `pull --rebase` then re-push.** A peer pushed first: `git -C {state_checkout} pull --rebase origin {state_branch}` replays your single path-scoped commit atop the peer's. Because you committed exactly ONE entity file, concurrent writers touch disjoint paths → the rebase replays with no conflict. Then re-push.
+
+**Rebase-conflict halt.** If that `git -C {state_checkout} pull --rebase origin {state_branch}` CONFLICTS — the only realistic cause is two writers editing the SAME entity's frontmatter concurrently, the path-scoped rule's known boundary — you MUST:
+
+1. **HALT** the operation in progress (your commit/push).
+2. **Abort the rebase** (`git -C {state_checkout} rebase --abort`) to leave the checkout clean.
+3. **Surface** the conflict to the first officer with the conflicting entity path(s) and the peer commit, and **stop**. This is manual intervention.
+4. Do NOT `--force` / `--force-with-lease` push, and do NOT auto-resolve (no `-X ours/theirs`, no discarding either side) — either silently loses a peer's frontmatter edit.
+
+This matches the escalate-rather-than-guess discipline in the Rules below. A full lock model is out of scope; the halt IS the boundary behavior for the rare same-entity collision.
+
 ## Rules
 
 - Do NOT modify YAML frontmatter in entity files.
