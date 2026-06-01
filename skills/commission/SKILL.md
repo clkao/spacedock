@@ -345,7 +345,7 @@ Every {entity_label} file has YAML frontmatter. Fields are documented below; see
 
 The `id-style` frontmatter setting controls the operator-facing ID strategy:
 
-- `sequential`: `id` is required and stores the next zero-padded numeric value from `status --next-id`, counting active and archived entities.
+- `sequential`: `id` is required and stores the next zero-padded numeric value from `status --reserve-id --slug <slug>`, counting active and archived entities. The reserve command writes and commits an inline `status: reserved` stub before returning; use `status --promote-id <ref> status=<initial-stage>` to turn it into real work or `status --release-id <ref>` to abandon it. `status --stale-reservations` reports reserved stubs older than the TTL.
 - `sd-b32`: `id` is required and stores the full stable 24-character lowercase SD-B32 stored ID from `status --next-id --id-seed <slug-or-title>`. SD-B32 is Spacedock Base32: SHA-256 digest material formatted with Spacedock's human-safe alphabet `0123456789abcdefghjkmnpqrstvwxyz`. Status tables show shorter display/address prefixes computed from active plus archived entities. `status --boot` reports `ID_STYLE: sd-b32`, `NEXT_ID: {candidate}`, and `MIN_PREFIX: 2`.
 - `slug`: `id` is optional; the effective ID is the entity slug. `status --next-id is not applicable for id-style: slug` because the slug comes from the title.
 
@@ -373,7 +373,7 @@ SD-B32 examples:
 | 100s of entities | `9m2c7v4xq8j3h6t0p5w1r8n2`, `9m2cq8j3h6t0p5w1r8v7x4kn` | `9m2c7`, `9m2cq` |
 | 1000s of entities | `v7k3q9x2m5c8h6t0p1w4r8n2`, `v7k3qrv5t9p3j6n2w8c4x1mk` | `v7k3q9`, `v7k3qr` |
 
-Generated IDs make concurrent and offline creation safer because creators do not share a central counter. Migration from existing sequential workflows is manual migration in this release: validate the target style, update README/entity frontmatter deliberately, and defer rewrite automation to a separate tracked task.
+Reserved sequential stubs make concurrent creation safer because the claimed ID is visible in the repository before a creator writes the full body. Generated IDs make concurrent and offline creation safer because creators do not share a central counter. Migration from existing sequential workflows is manual migration in this release: validate the target style, update README/entity frontmatter deliberately, and defer rewrite automation to a separate tracked task.
 
 ## Stages
 
@@ -443,7 +443,7 @@ The `title` field is the human-readable name (e.g., "Full Cycle Test"). The file
 
 Set the `id` field according to `{id_style}`:
 
-- `sequential`: assign IDs starting at `001`, zero-padded to 3 digits.
+- `sequential`: for generated seed entities during commission, assign IDs starting at `001`, zero-padded to 3 digits. For post-commission task creation, use `status --reserve-id --slug "{slug}"` so a `status: reserved` stub is committed before the ID is handed to the creator.
 - `sd-b32`: call the plugin status viewer with `--next-id --id-seed "{slug-or-title}"` immediately before writing each entity and store the returned 24-character SD-B32 stored ID. This value is not a reservation; call again for the next entity.
 - `slug`: omit `id` or leave it blank; the slug is the effective ID.
 
