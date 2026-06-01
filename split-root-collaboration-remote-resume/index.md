@@ -9,6 +9,7 @@ completed:
 verdict:
 worktree: .worktrees/spacedock-ensign-split-root-collaboration-remote-resume
 issue:
+mod-block: merge:pr-merge
 ---
 
 Phase B of the split-root model (Phase A = boot surfacing + absolute path + commission rule +
