@@ -157,3 +157,16 @@ Implemented per the Design section with TDD (failing tests first, then minimal c
 ### Summary
 
 PASSED. Independently rebuilt the branch binary and reproduced every AC against it rather than trusting the implementation report: AC-1 discovery walk-up + no-workflow error, AC-2 named state-checkout error (exact strings, exit 1, symptom gone), AC-3 new/completion/--help. The riskiest surface — the `--workflow-dir` resolution re-interpretation — holds: explicit `--workflow-dir`/`PIPELINE_DIR` skip discovery, empty-explicit-dir is unchanged, and a flip-test proved the AC-2 regression guard would fail if the `non-numeric sequential id` misdiagnosis returned. Full suite green except the pre-existing, env-gated codex-host test that is unrelated to this change.
+
+## Stage Report: implementation (cycle 2)
+
+- DONE: [A-1 BLOCKER] discovery gate regressed `--root --resolve 'wf::ref'` (and unqualified `--root --resolve <ref>`) from a non-enclosed cwd: exit 0 → exit 1 "no Spacedock workflow here"
+  The `--root` cross-workflow resolve path (`resolveFromRootOrExit`, including the `wf::ref` qualifier) takes its workflows from the explicit root and never consumes `pipelineDir`/`roots`, so the `pipelineDir == ""` discovery gate must not fire for it. Fix in `native_runner.go`: gate discovery on `pipelineDir == "" && rootPath == ""`, mirroring the `--discover` early-return exemption; the state-checkout gate gets the same `rootPath == ""` guard (its cwd-derived `definitionDir` must not be reinterpreted as a misdirected `--workflow-dir`). Commit 0f47ca3a.
+- DONE: TDD — failing regression test FIRST, the gap that kept the suite green
+  Added `internal/status/root_resolve_discovery_test.go`: `TestRootResolveSkipsDiscovery` (qualified `wfa::shared-task`) and `TestRootResolveUnqualifiedSkipsDiscovery` both from a non-enclosed cwd assert exit 0 + correct resolution; both FAILED pre-fix (exit 1, no-workflow error), pass post-fix.
+- DONE: polish-item message decision pinned
+  Plain `--resolve <ref>` (no --root, no --workflow-dir) DOES require a workflow, so it stays on the discovery path: a non-workflow cwd now yields the named no-workflow error — more actionable than the prior "unknown reference", both exit 1. Decision is intentional and locked by `TestPlainResolveFromNonWorkflowEmitsNoWorkflow`.
+
+### Summary
+
+Fixed the A-1 BLOCKER the adversarial detached-checkout audit found: the new discovery gate hard-errored the shipped `--root --resolve` cross-workflow path from a non-enclosed cwd. Wrote the missing failing regression tests first (the exact gap that left the validation suite green), then added a one-condition `rootPath == ""` guard to both the discovery gate and the state-checkout gate, mirroring the existing `--discover` exemption. Kept the plain-`--resolve`→no-workflow message change (it's the more actionable error and that path genuinely needs a workflow), pinned by a test. `gofmt`/`go vet` clean; `go test ./...` = 532 passed, 1 failed — the sole failure is the pre-existing env-gated `TestCodexResolveManifestAgainstInstalledHost` (fails identically on the clean base). Code commit 0f47ca3a on `spacedock-ensign/cli-ergonomics`.
