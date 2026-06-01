@@ -10,6 +10,7 @@ mod-block:
 pr: #247
 completed: 2026-06-01T06:29:53Z
 verdict: PASSED
+archived: 2026-06-01T06:29:53Z
 ---
 
 The NOW-SAFE cleanups surfaced by the architecture review (`docs/dev/_reviews/architecture-review.md`). The review found the core architecturally sound with NO rework required; these are the small, contained, in-place fixes worth landing during the implementation drain. POST-BOOTSTRAP parity-debt is explicitly NOT here (it goes elsewhere — see Out of scope).
