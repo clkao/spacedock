@@ -10,6 +10,7 @@ verdict: PASSED
 worktree: 
 issue:
 mod-block: 
+archived: 2026-06-01T04:19:58Z
 ---
 
 Initialize the workflow's first **merge-lifecycle mod**: a `_mods/pr-merge.md` with a `## Hook: merge`
