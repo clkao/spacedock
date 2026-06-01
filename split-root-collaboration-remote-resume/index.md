@@ -5,9 +5,9 @@ status: validation
 source: FO/captain (2026-05-31) — Phase-B follow-on to split-root-ergonomics (Phase A); captain-directed orphan-branch model + three journeys
 score: "0.30"
 started: 2026-05-31T21:15:12Z
-completed:
-verdict:
-worktree: .worktrees/spacedock-ensign-split-root-collaboration-remote-resume
+completed: 2026-06-01T22:07:23Z
+verdict: PASSED
+worktree: 
 issue:
 mod-block: 
 pr: #256
