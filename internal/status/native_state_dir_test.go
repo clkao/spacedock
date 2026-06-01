@@ -344,46 +344,72 @@ func TestSplitRootDefinitionDirModArmsGuard(t *testing.T) {
 	})
 }
 
-// TestSplitRootModRegistrationNoGap is the M-1 no-gap property: the merge hook
-// stays registered whether the mod sits at <definitionDir>/_mods/ (the migrated
-// location) OR at <entityDir>/_mods/ (the state checkout, the pre-migration
-// location), so the terminal guard fires from either spot and the migration
-// opens no window where the hook goes dark. --boot lists it under MODS either
-// way. Native-only (no runOracle).
-func TestSplitRootModRegistrationNoGap(t *testing.T) {
+// TestSplitRootStateDirModDoesNotRegister is the AC-1(b) negative: a mod placed
+// ONLY at <entityDir>/_mods/ (the state checkout) does NOT register — scanMods
+// reads the definition dir, never the state checkout — so --boot shows no MODS
+// and a terminal transition on a pr-empty / mod-block-empty entity succeeds (the
+// guard is unarmed). This is the inverse of the def-dir case and locks the clean
+// cutover. Native-only (no runOracle).
+func TestSplitRootStateDirModDoesNotRegister(t *testing.T) {
 	env := pinnedEnv(t)
-	cases := []struct {
-		name    string
-		modRoot func(def, state string) string
-	}{
-		{"definition dir (migrated)", func(def, _ string) string { return def }},
-		{"state checkout (pre-migration)", func(_, state string) string { return state }},
+	def, state := buildSplitRoot(t, splitRootReadme, map[string]string{
+		"add-login.md": "---\nstatus: implementation\n---\n",
+	})
+	writeMergeMod(t, state)
+
+	// --boot lists no MODS: the state-checkout mod is not scanned.
+	bootOut, bootErr, bootCode := runNative(t, def, env, "--workflow-dir", def, "--boot")
+	if bootCode != 0 {
+		t.Fatalf("--boot exit=%d stderr=%q", bootCode, bootErr)
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			def, state := buildSplitRoot(t, splitRootReadme, map[string]string{
-				"add-login.md": "---\nstatus: implementation\n---\n",
-			})
-			writeMergeMod(t, tc.modRoot(def, state))
+	if !strings.Contains(bootOut, "MODS: none") {
+		t.Fatalf("--boot should show MODS: none (state-dir mod must not register); got\n%s", bootOut)
+	}
 
-			// --boot lists the merge mod under MODS.
-			bootOut, bootErr, bootCode := runNative(t, def, env, "--workflow-dir", def, "--boot")
-			if bootCode != 0 {
-				t.Fatalf("--boot exit=%d stderr=%q", bootCode, bootErr)
-			}
-			if !strings.Contains(bootOut, "merge: pr-merge") {
-				t.Fatalf("--boot MODS should show merge: pr-merge; got\n%s", bootOut)
-			}
+	// The terminal transition succeeds: the guard is unarmed.
+	out, stderr, code := runNative(t, def, env, "--workflow-dir", def, "--set", "add-login", "status=review")
+	if code != 0 {
+		t.Fatalf("terminal --set exit=%d, want 0 (state-dir mod must not arm guard)\nstdout=%q stderr=%q", code, out, stderr)
+	}
+	if !strings.Contains(out, "status: implementation -> review") {
+		t.Fatalf("--set narration = %q, want the status transition to succeed", out)
+	}
+}
 
-			// The terminal guard fires.
-			out, stderr, code := runNative(t, def, env, "--workflow-dir", def, "--set", "add-login", "status=review")
-			if code != 1 {
-				t.Fatalf("terminal --set exit=%d, want 1 (hook must stay registered)\nstdout=%q stderr=%q", code, out, stderr)
-			}
-			if !strings.Contains(stderr, "merge hook(s) [pr-merge]") {
-				t.Fatalf("stderr should carry the merge-hook guard text; got %q", stderr)
-			}
-		})
+// TestSplitRootMigrationNoGap locks the no-gap property of the atomic migration:
+// because the PR delivers the scanMods def-dir read AND the docs/dev/_mods/
+// copy together, a post-migration binary always finds the mod at the definition
+// dir, so the merge hook never goes dark. During the transition the stale
+// state-checkout copy may still be present; the def-dir-only scan ignores it, so
+// the hook registers exactly once (no double-registration) and stays armed. This
+// is the no-gap closure — an atomic add plus a harmless leftover, not a runtime
+// both-dirs scan. Native-only (no runOracle).
+func TestSplitRootMigrationNoGap(t *testing.T) {
+	env := pinnedEnv(t)
+	def, state := buildSplitRoot(t, splitRootReadme, map[string]string{
+		"add-login.md": "---\nstatus: implementation\n---\n",
+	})
+	// Migrated state: the def-dir copy is the live one; the stale state-checkout
+	// copy is left in place during the transition (the FO removes it later).
+	writeMergeMod(t, def)
+	writeMergeMod(t, state)
+
+	// --boot lists the merge mod exactly once — the stale state-dir dup is ignored.
+	bootOut, bootErr, bootCode := runNative(t, def, env, "--workflow-dir", def, "--boot")
+	if bootCode != 0 {
+		t.Fatalf("--boot exit=%d stderr=%q", bootCode, bootErr)
+	}
+	if got := strings.Count(bootOut, "merge: pr-merge"); got != 1 {
+		t.Fatalf("--boot MODS should show merge: pr-merge exactly once, got %d\n%s", got, bootOut)
+	}
+
+	// The terminal guard fires: the hook stayed registered through the migration.
+	out, stderr, code := runNative(t, def, env, "--workflow-dir", def, "--set", "add-login", "status=review")
+	if code != 1 {
+		t.Fatalf("terminal --set exit=%d, want 1 (hook must stay registered through migration)\nstdout=%q stderr=%q", code, out, stderr)
+	}
+	if !strings.Contains(stderr, "merge hook(s) [pr-merge]") {
+		t.Fatalf("stderr should carry the merge-hook guard text; got %q", stderr)
 	}
 }
 
