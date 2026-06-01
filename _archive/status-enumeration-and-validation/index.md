@@ -11,6 +11,7 @@ worktree:
 issue:
 mod-block: 
 pr: #254
+archived: 2026-06-01T20:26:38Z
 ---
 
 Fix three correctness/ergonomics gaps in `spacedock status` that mislead the FO's scheduling and
