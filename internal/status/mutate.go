@@ -152,10 +152,10 @@ func atomicWrite(path string, data []byte) error {
 // the move and printing `archived: {dest}`. Enforces the source-missing,
 // already-archived, mod-block, and merge-hook guards. Matches run_archive.
 // entityDir is the absolute entity root for I/O; definitionDir is the README root
-// used to resolve merge-hook mods (definitionDir/_mods/, plus entityDir/_mods/
-// during a split-root mod migration); spellingDir is the as-passed spelling used
-// for the printed dest (so a relative --workflow-dir renders a relative
-// `archived:` path, matching the oracle's literal os.path.join).
+// used to resolve merge-hook mods (definitionDir/_mods/); spellingDir is the
+// as-passed spelling used for the printed dest (so a relative --workflow-dir
+// renders a relative `archived:` path, matching the oracle's literal
+// os.path.join).
 func runArchive(definitionDir, entityDir, spellingDir, slug string, force, quiet, asJSON bool, stdout, stderr io.Writer) int {
 	flatPath := filepath.Join(entityDir, slug+".md")
 	folderRoot := filepath.Join(entityDir, slug)
