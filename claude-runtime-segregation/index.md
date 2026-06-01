@@ -1,7 +1,7 @@
 ---
 id: zse4a3ds0x19gpdcjh7anhgs
 title: Segregate Claude-specific runtime coupling (context-budget, team/standing) from the generic contract
-status: implementation
+status: validation
 source: sprint — FO/captain (native-dispatch-helper scope split)
 score: "0.32"
 worktree: .worktrees/spacedock-ensign-claude-runtime-segregation
