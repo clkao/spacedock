@@ -4,10 +4,10 @@ title: status correctness — --next undercount, archive enumeration consistency
 status: validation
 source: issue sweep (2026-05-31) — CL dev-workflow-ergonomics triage; consolidates #230, #207, #189, #163
 started: 2026-06-01T05:04:22Z
-completed:
-verdict:
+completed: 2026-06-01T20:26:38Z
+verdict: PASSED
 score: "0.28"
-worktree: .worktrees/spacedock-ensign-status-enumeration-and-validation
+worktree: 
 issue:
 mod-block: 
 pr: #254
