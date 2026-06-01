@@ -144,6 +144,27 @@ VendorRunner retired), a long pole. Recommend fixing AC-4 now in the hand-rolled
 parity-paired) rather than waiting on the migration; note in the migration entity that AC-4's tests
 become coverage it must keep green.
 
+## #230 shipped behavior (documented-behavior note)
+
+Per the captain-ratified scope, the #230 code deliverable in this entity is the ADDITIVE visibility
+surface ONLY — `--next` / `computeDispatchable` semantics are unchanged. A `--next` suppression is
+now observable via a computed field `next-suppressed-by` surfaced through the existing
+`--fields` / `--where` machinery (no new flag): `status --fields next-suppressed-by` shows, per
+entity, why `--next` held it, and `status --where 'next-suppressed-by = concurrency-full'` filters
+on it. Values mirror the dispatch loop exactly: `worktree-set` (worktree not torn down),
+`concurrency-full` (next stage saturated), `gate` (sits at a gate), `terminal`, or `""`
+(dispatchable / not attributable). The field is COMPUTED, not frontmatter: it is materialized only
+when explicitly named and is excluded from `--all-fields` so that parity-pinned surface stays
+byte-identical. Both the Go native path and the Python oracle compute it identically (parity-green).
+
+`--next` suppression remains BY DESIGN: an entity whose report is committed but whose `worktree` is
+still set is correctly held from `--next` (dispatching it would overrun the worktree/concurrency
+contract). The advance-after-report ENFORCEMENT (the FO advancing `status` and tearing down the
+worktree after an ensign signals completion) is a prose FO/ensign-contract matter tracked as a
+SEPARATE follow-up — it is NOT a status-binary change and was intentionally NOT made in this entity.
+The surface above makes a dropped advance-after-report hand-off observable (the lingering entity
+shows `next-suppressed-by: worktree-set`) so the contract gap is diagnosable from `status` output.
+
 ## Test plan
 
 Go unit + differential-parity tests in `internal/status/`, sized to the claim:
