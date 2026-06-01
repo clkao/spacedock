@@ -218,6 +218,24 @@ def parse_mod_metadata(filepath):
     }
 
 
+def strip_inline_comment(val):
+    """Remove a trailing ` # comment` from a value.
+
+    A `#` preceded by whitespace (or at the start of the value) begins a comment
+    and is dropped along with everything after it; the surviving text is
+    right-trimmed. A `#` NOT preceded by whitespace (e.g. an issue token like
+    `#163`) is kept, so values such as `consolidates #163` are preserved. Used
+    for stage numeric/bool/token fields, which never legitimately carry a
+    literal ` #`.
+    """
+    for i, ch in enumerate(val):
+        if ch != '#':
+            continue
+        if i == 0 or val[i - 1].isspace():
+            return val[:i].rstrip()
+    return val
+
+
 def parse_stages_block(filepath):
     """Parse the stages block from README frontmatter."""
     lines = []
@@ -272,7 +290,7 @@ def parse_stages_block(filepath):
                         break
                     if ':' in dstripped:
                         k, _, v = dstripped.partition(':')
-                        defaults[k.strip()] = v.strip()
+                        defaults[k.strip()] = strip_inline_comment(v.strip())
                     i += 1
                 continue
             elif stripped == 'states:':
@@ -289,11 +307,11 @@ def parse_stages_block(filepath):
                         break
                     if sstripped.startswith('- name:'):
                         _, _, name = sstripped.partition('- name:')
-                        current_state = {'name': name.strip()}
+                        current_state = {'name': strip_inline_comment(name.strip())}
                         states.append(current_state)
                     elif current_state is not None and ':' in sstripped and not sstripped.startswith('- '):
                         k, _, v = sstripped.partition(':')
-                        current_state[k.strip()] = v.strip()
+                        current_state[k.strip()] = strip_inline_comment(v.strip())
                     i += 1
                 continue
         i += 1
@@ -376,7 +394,7 @@ def parse_stages_with_defaults(filepath):
                         break
                     if ':' in dstripped:
                         k, _, v = dstripped.partition(':')
-                        defaults[k.strip()] = v.strip()
+                        defaults[k.strip()] = strip_inline_comment(v.strip())
                     i += 1
                 continue
             i += 1
