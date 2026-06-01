@@ -1,13 +1,13 @@
 ---
 id: z0epv5b79qcs83w24acd1fnd
 title: CLI redesign — cobra migration, install rename, Option-2 passthrough, jargon-free grouped help
-status: validation
+status: done
 source: captain brainstorm (2026-05-31) — `spacedock --help` readability; design APPROVED via superpowers:brainstorming
 started: 2026-05-31T22:25:41Z
-completed:
-verdict:
+completed: 2026-06-01T03:50:24Z
+verdict: PASSED
 score: "0.34"
-worktree: .worktrees/spacedock-ensign-cli-cobra-redesign
+worktree: 
 issue:
 mod-block: 
 pr: #241
