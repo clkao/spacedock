@@ -1,13 +1,15 @@
 ---
 id: 0xcqyh24hr5xnek3kfp8makg
 title: Architecture-review cleanups — share pyJoin, fix parity-test skip-vs-fail, drop dead code
-status: validation
+status: done
 source: sprint — architecture review (must-fix #2/#3 + now-safe nice-to-haves)
 score: "0.28"
-worktree: .worktrees/spacedock-ensign-architecture-review-cleanups
+worktree: 
 started: 2026-06-01T06:04:55Z
 mod-block: 
 pr: #247
+completed: 2026-06-01T06:29:53Z
+verdict: PASSED
 ---
 
 The NOW-SAFE cleanups surfaced by the architecture review (`docs/dev/_reviews/architecture-review.md`). The review found the core architecturally sound with NO rework required; these are the small, contained, in-place fixes worth landing during the implementation drain. POST-BOOTSTRAP parity-debt is explicitly NOT here (it goes elsewhere — see Out of scope).
