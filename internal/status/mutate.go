@@ -151,10 +151,12 @@ func atomicWrite(path string, data []byte) error {
 // runArchive archives an entity (flat or folder form), stamping archived: before
 // the move and printing `archived: {dest}`. Enforces the source-missing,
 // already-archived, mod-block, and merge-hook guards. Matches run_archive.
-// entityDir is the absolute entity root for I/O; spellingDir is the as-passed
-// spelling used for the printed dest (so a relative --workflow-dir renders a
-// relative `archived:` path, matching the oracle's literal os.path.join).
-func runArchive(entityDir, spellingDir, slug string, force, quiet, asJSON bool, stdout, stderr io.Writer) int {
+// entityDir is the absolute entity root for I/O; definitionDir is the README root
+// used to resolve merge-hook mods (definitionDir/_mods/, plus entityDir/_mods/
+// during a split-root mod migration); spellingDir is the as-passed spelling used
+// for the printed dest (so a relative --workflow-dir renders a relative
+// `archived:` path, matching the oracle's literal os.path.join).
+func runArchive(definitionDir, entityDir, spellingDir, slug string, force, quiet, asJSON bool, stdout, stderr io.Writer) int {
 	flatPath := filepath.Join(entityDir, slug+".md")
 	folderRoot := filepath.Join(entityDir, slug)
 	folderIndex := filepath.Join(folderRoot, "index.md")
@@ -195,7 +197,7 @@ func runArchive(entityDir, spellingDir, slug string, force, quiet, asJSON bool, 
 	// Merge-hook invariant: archival is terminal. Refuse unless the hook ran
 	// (pr set), is in flight (mod-block set, handled above), or --force.
 	if !force && modBlock == "" && pr == "" {
-		mergeHooks := scanMods(entityDir)["merge"]
+		mergeHooks := scanMods(definitionDir, entityDir)["merge"]
 		if len(mergeHooks) > 0 {
 			fmt.Fprintf(stderr,
 				"Error: entity %s cannot be archived — workflow has merge hook(s) [%s] "+
@@ -278,38 +280,57 @@ func PyJoin(parts ...string) string {
 	return result
 }
 
-// scanMods scans entityDir/_mods/*.md for `## Hook:` headings, returning
-// hookPoint -> sorted mod names. Matches scan_mods.
-func scanMods(entityDir string) map[string][]string {
-	modsDir := filepath.Join(entityDir, "_mods")
-	info, err := os.Stat(modsDir)
-	if err != nil || !info.IsDir() {
-		return map[string][]string{}
+// scanMods scans for `## Hook:` headings in `_mods/*.md`, returning hookPoint ->
+// sorted mod names. Mods are workflow definition (lifecycle hooks declared for
+// the workflow, kin to the README stages), so they live next to the README in
+// definitionDir/_mods/. The entityDir/_mods/ location is also scanned so a mod
+// registered there before migrating to the definition dir keeps its hook live
+// through the move — there is no window where the hook goes dark. A mod present
+// in both dirs (mid-migration) is counted once, with the definition-dir copy
+// taking precedence. In single-root (definitionDir == entityDir) only one dir is
+// scanned, matching scan_mods byte-for-byte.
+func scanMods(definitionDir, entityDir string) map[string][]string {
+	// Definition dir first so its copy of a same-named mod wins the dedup.
+	dirs := []string{filepath.Join(definitionDir, "_mods")}
+	if entityDir != definitionDir {
+		dirs = append(dirs, filepath.Join(entityDir, "_mods"))
 	}
-	entries, err := os.ReadDir(modsDir)
-	if err != nil {
-		return map[string][]string{}
-	}
-	var files []string
-	for _, ent := range entries {
-		if !ent.IsDir() && strings.HasSuffix(ent.Name(), ".md") {
-			files = append(files, ent.Name())
-		}
-	}
-	// glob returns sorted order.
-	sort.Strings(files)
+
+	seen := map[string]bool{}
 	hooks := map[string][]string{}
-	for _, name := range files {
-		modName := strings.TrimSuffix(name, ".md")
-		data, err := os.ReadFile(filepath.Join(modsDir, name))
+	for _, modsDir := range dirs {
+		info, err := os.Stat(modsDir)
+		if err != nil || !info.IsDir() {
+			continue
+		}
+		entries, err := os.ReadDir(modsDir)
 		if err != nil {
 			continue
 		}
-		for _, line := range splitLines(string(data)) {
-			if strings.HasPrefix(line, "## Hook:") {
-				point := strings.TrimSpace(strings.TrimPrefix(line, "## Hook:"))
-				if point != "" {
-					hooks[point] = append(hooks[point], modName)
+		var files []string
+		for _, ent := range entries {
+			if !ent.IsDir() && strings.HasSuffix(ent.Name(), ".md") {
+				files = append(files, ent.Name())
+			}
+		}
+		// glob returns sorted order.
+		sort.Strings(files)
+		for _, name := range files {
+			modName := strings.TrimSuffix(name, ".md")
+			if seen[modName] {
+				continue
+			}
+			seen[modName] = true
+			data, err := os.ReadFile(filepath.Join(modsDir, name))
+			if err != nil {
+				continue
+			}
+			for _, line := range splitLines(string(data)) {
+				if strings.HasPrefix(line, "## Hook:") {
+					point := strings.TrimSpace(strings.TrimPrefix(line, "## Hook:"))
+					if point != "" {
+						hooks[point] = append(hooks[point], modName)
+					}
 				}
 			}
 		}

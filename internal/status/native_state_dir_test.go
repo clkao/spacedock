@@ -292,6 +292,101 @@ func TestSplitRootDiscoverySingleCount(t *testing.T) {
 	})
 }
 
+// mergeModBody is a minimal mod declaring a `merge` hook, used to arm the
+// terminal merge guard in the split-root scanMods tests.
+const mergeModBody = "---\nname: pr-merge\n---\n\n# PR Merge\n\n## Hook: merge\n\nRuns at the terminal merge boundary.\n"
+
+// writeMergeMod writes mergeModBody to <root>/_mods/pr-merge.md.
+func writeMergeMod(t *testing.T, root string) {
+	t.Helper()
+	writeFile(t, filepath.Join(root, "_mods", "pr-merge.md"), mergeModBody)
+}
+
+// TestSplitRootDefinitionDirModArmsGuard is the AC-1(a) scan contract: under a
+// split-root workflow a merge mod placed at <definitionDir>/_mods/ registers, so
+// a terminal transition on a pr-empty / mod-block-empty entity is refused with
+// the merge-hook error. Both the terminal --set and --archive guards see it.
+// Native-only (no runOracle): split-root is an intentional native divergence.
+func TestSplitRootDefinitionDirModArmsGuard(t *testing.T) {
+	env := pinnedEnv(t)
+
+	t.Run("terminal --set refused", func(t *testing.T) {
+		def, _ := buildSplitRoot(t, splitRootReadme, map[string]string{
+			"add-login.md": "---\nstatus: implementation\n---\n",
+		})
+		writeMergeMod(t, def)
+
+		out, stderr, code := runNative(t, def, env, "--workflow-dir", def, "--set", "add-login", "status=review")
+		if code != 1 {
+			t.Fatalf("terminal --set exit=%d, want 1 (def-dir merge mod must arm guard)\nstdout=%q stderr=%q", code, out, stderr)
+		}
+		if !strings.Contains(stderr, "cannot advance to terminal") || !strings.Contains(stderr, "merge hook(s) [pr-merge]") {
+			t.Fatalf("stderr should carry the merge-hook guard text; got %q", stderr)
+		}
+		if out != "" {
+			t.Fatalf("stdout must be empty on rejection: %q", out)
+		}
+	})
+
+	t.Run("--archive refused", func(t *testing.T) {
+		def, _ := buildSplitRoot(t, splitRootReadme, map[string]string{
+			"add-login.md": "---\nstatus: implementation\n---\n",
+		})
+		writeMergeMod(t, def)
+
+		out, stderr, code := runNative(t, def, env, "--workflow-dir", def, "--archive", "add-login")
+		if code != 1 {
+			t.Fatalf("--archive exit=%d, want 1 (def-dir merge mod must arm guard)\nstdout=%q stderr=%q", code, out, stderr)
+		}
+		if !strings.Contains(stderr, "cannot be archived") || !strings.Contains(stderr, "merge hook(s) [pr-merge]") {
+			t.Fatalf("stderr should carry the archive merge-hook guard text; got %q", stderr)
+		}
+	})
+}
+
+// TestSplitRootModRegistrationNoGap is the M-1 no-gap property: the merge hook
+// stays registered whether the mod sits at <definitionDir>/_mods/ (the migrated
+// location) OR at <entityDir>/_mods/ (the state checkout, the pre-migration
+// location), so the terminal guard fires from either spot and the migration
+// opens no window where the hook goes dark. --boot lists it under MODS either
+// way. Native-only (no runOracle).
+func TestSplitRootModRegistrationNoGap(t *testing.T) {
+	env := pinnedEnv(t)
+	cases := []struct {
+		name    string
+		modRoot func(def, state string) string
+	}{
+		{"definition dir (migrated)", func(def, _ string) string { return def }},
+		{"state checkout (pre-migration)", func(_, state string) string { return state }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			def, state := buildSplitRoot(t, splitRootReadme, map[string]string{
+				"add-login.md": "---\nstatus: implementation\n---\n",
+			})
+			writeMergeMod(t, tc.modRoot(def, state))
+
+			// --boot lists the merge mod under MODS.
+			bootOut, bootErr, bootCode := runNative(t, def, env, "--workflow-dir", def, "--boot")
+			if bootCode != 0 {
+				t.Fatalf("--boot exit=%d stderr=%q", bootCode, bootErr)
+			}
+			if !strings.Contains(bootOut, "merge: pr-merge") {
+				t.Fatalf("--boot MODS should show merge: pr-merge; got\n%s", bootOut)
+			}
+
+			// The terminal guard fires.
+			out, stderr, code := runNative(t, def, env, "--workflow-dir", def, "--set", "add-login", "status=review")
+			if code != 1 {
+				t.Fatalf("terminal --set exit=%d, want 1 (hook must stay registered)\nstdout=%q stderr=%q", code, out, stderr)
+			}
+			if !strings.Contains(stderr, "merge hook(s) [pr-merge]") {
+				t.Fatalf("stderr should carry the merge-hook guard text; got %q", stderr)
+			}
+		})
+	}
+}
+
 // readBytes reads a file as a string, failing the test on error.
 func readBytes(t *testing.T, path string) string {
 	t.Helper()
