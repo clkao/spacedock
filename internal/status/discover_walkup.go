@@ -49,13 +49,9 @@ func stateCheckoutParent(pointedDir string) (string, bool) {
 	for {
 		readme := filepath.Join(d, "README.md")
 		if isRegularFile(readme) {
-			stateValue := strings.TrimSpace(ParseFrontmatter(readme)["state"])
-			if stateValue != "" && !filepath.IsAbs(stateValue) {
-				cleaned := filepath.Clean(stateValue)
-				if cleaned != ".." && !strings.HasPrefix(cleaned, ".."+string(filepath.Separator)) {
-					if realpathOf(filepath.Join(d, cleaned)) == target {
-						return d, true
-					}
+			if mode, relPath, err := ClassifyState(ParseFrontmatter(readme)["state"]); err == nil && mode == StateSplitRoot {
+				if realpathOf(filepath.Join(d, relPath)) == target {
+					return d, true
 				}
 			}
 		}

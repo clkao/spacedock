@@ -50,20 +50,17 @@ func resolveRoots(workflowDir, baseDir string) (roots, error) {
 		entityDirSpelling: workflowDir,
 	}
 
-	stateValue := strings.TrimSpace(ParseFrontmatter(filepath.Join(abs, "README.md"))["state"])
-	if stateValue == "" {
+	stateValue := ParseFrontmatter(filepath.Join(abs, "README.md"))["state"]
+	mode, relPath, err := ClassifyState(stateValue)
+	if err != nil {
+		return roots{}, err
+	}
+	if mode == StateInline {
 		return r, nil
 	}
-	if filepath.IsAbs(stateValue) {
-		return roots{}, fmt.Errorf("state: must be a path relative to the workflow README directory, not absolute: %s", stateValue)
-	}
-	cleaned := filepath.Clean(stateValue)
-	if cleaned == ".." || strings.HasPrefix(cleaned, ".."+string(filepath.Separator)) {
-		return roots{}, fmt.Errorf("state: must not escape the workflow README directory: %s", stateValue)
-	}
 
-	r.entityDir = filepath.Join(abs, cleaned)
-	r.entityDirSpelling = PyJoin(spellingOr(workflowDir, abs), stateValue)
+	r.entityDir = filepath.Join(abs, relPath)
+	r.entityDirSpelling = PyJoin(spellingOr(workflowDir, abs), relPath)
 	return r, nil
 }
 
