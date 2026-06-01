@@ -79,6 +79,21 @@ homebrew_casks:
       See the safehouse install docs:
         https://agent-safehouse.dev
 
+      The spacedock binary is not yet notarized, so the cask download is tagged
+      with the com.apple.quarantine attribute and macOS Gatekeeper blocks the
+      first launch. This cask clears the attribute automatically on install. If
+      Gatekeeper still blocks spacedock, clear it manually before first launch:
+        xattr -dr com.apple.quarantine "$(brew --prefix)/bin/spacedock"
+    hooks:
+      # The binary is adhoc/linker-signed only (not notarized), so the cask
+      # download carries com.apple.quarantine and Gatekeeper kills the first
+      # launch. Strip the attribute from the staged binary so the user needs no
+      # manual step. Interim until a Developer ID notarized build lands.
+      post:
+        install: |
+          system_command "/usr/bin/xattr",
+                         args: ["-dr", "com.apple.quarantine", "#{staged_path}/spacedock"]
+
 snapshot:
   # Used by `goreleaser release --snapshot --clean` (the dry-run oracle). The
   # stamp the built binary reports comes from this template when there is no tag.
