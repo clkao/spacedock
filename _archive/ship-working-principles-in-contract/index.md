@@ -11,6 +11,7 @@ worktree:
 issue:
 mod-block: 
 pr: #248
+archived: 2026-06-01T13:13:10Z
 ---
 
 **What this is for (plain).** The ways of working we've learned the hard way currently live in one
