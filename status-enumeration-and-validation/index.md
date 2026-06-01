@@ -1,9 +1,9 @@
 ---
 id: s0cbyrbh9b2yb456exnsm72b
 title: status correctness — --next undercount, archive enumeration consistency, --set stage-name validation
-status: backlog
+status: ideation
 source: issue sweep (2026-05-31) — CL dev-workflow-ergonomics triage; consolidates #230, #207, #189, #163
-started:
+started: 2026-06-01T05:04:22Z
 completed:
 verdict:
 score: "0.28"
