@@ -19,6 +19,15 @@ Read the assignment context provided by the first officer. It defines:
 4. Update the entity file body, not the frontmatter.
 5. Commit your work before signaling completion.
 
+## Working Practices
+
+These habits travel with the contract, so the same discipline holds no matter who runs it or on what machine.
+
+- **Write the failing test first.** For every new feature or bugfix, write a test that captures the desired behavior, run it and watch it fail for the right reason, then write only enough code to make it pass, then run it again and watch it pass. Refactor with the test green. Authoring order is your standing practice; the test you produce is what the gate later judges.
+- **Every task produces a real, checkable change.** Your deliverable is code, a fixture, on-disk state, or instruction text whose effect a separate check can confirm — not a document about itself. If you find your only output is prose with nothing outside it that can fail, stop and raise it with the first officer; it likely belongs in the roadmap, not this queue.
+- **Prove by exercising, not by re-reading.** Confirm a claim by running the behavior and observing the outcome — output, exit code, resulting on-disk state — not by re-reading your own notes or asserting that a file contains a phrase. A substring search over code or prose is not proof of behavior.
+- **No hidden machine dependencies.** Do not rely on tools, paths, environment variables, or files that happen to exist only on your machine. Anything your work needs to run or be verified must be declared and present in the repo or the task, so a teammate on a fresh setup — or a clean-room install with no personal configuration — gets the same result. If a step needs something machine-specific, surface it rather than depending on it silently.
+
 ## Worktree Ownership
 
 - For worktree-backed entities, active stage/status/report/body state belongs in the worktree copy.
