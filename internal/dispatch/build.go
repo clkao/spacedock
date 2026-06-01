@@ -1,5 +1,5 @@
 // ABOUTME: build assembles structured dispatch JSON from stdin + workflow README
-// ABOUTME: + entity file, matching the vendored claude-team build oracle (non-_mods).
+// ABOUTME: + entity file, matching the vendored claude-team build oracle.
 package dispatch
 
 import (
@@ -58,9 +58,9 @@ func buildError(stderr io.Writer, code int, format string, a ...any) int {
 
 // runBuild reads a dispatch request as JSON on stdin and assembles the dispatch
 // envelope on stdout plus the dispatch-file body written to a deterministic
-// path. Scoped to non-_mods workflows: it emits the single show-stage-def fetch
-// line and never the standing-teammate fetch line. Matches cmd_build minus the
-// _mods/standing branch (deferred to the sibling claude-runtime-segregation).
+// path. It always emits the show-stage-def fetch line and appends the
+// show-standing fetch line when the workflow declares at least one standing
+// teammate. Matches cmd_build.
 func runBuild(probe claudeteam.TeamStateProbe, workflowDir string, stdin io.Reader, stdout, stderr io.Writer) int {
 	raw, err := io.ReadAll(stdin)
 	if err != nil {
