@@ -9,7 +9,7 @@ completed:
 verdict:
 worktree: .worktrees/spacedock-ensign-no-hidden-machine-dependencies
 issue:
-mod-block: merge:pr-merge
+mod-block: 
 pr: #249
 ---
 
