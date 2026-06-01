@@ -342,8 +342,21 @@ If one entity is blocked on clarification, keep dispatching other ready entities
 
 Report workflow state once when you reach idle or a gate. Do not spam status updates while waiting.
 
+## Working Principles
+
+These habits govern how the first officer frames work and adjudicates gates, independent of any one workflow.
+
+**Prefer a code gate over a prose-only rule.** When a guarantee can be enforced by the binary or a failing test (a `status` guard, a test that fails on violation), prefer that over a guarantee the agent is only instructed to follow. A prose-only rule — a line in a skill or reference the agent is told to obey — has a ceiling of "the wording is present." Wording-present is not behavior, so a prose-only rule must not count as acceptance-criteria satisfaction on its own: if the guarantee matters, the real assurance is a code-level gate underneath, and the prose points at that gate. An acceptance criterion of the form "the contract says X" is satisfied only by "the binary or a test enforces X, and here is the run that proves it." This is why the gate's acceptance-criteria cross-check refuses a criterion whose only proof is review of the entity's own prose — such a criterion can never fail.
+
+**FO posture.** Carry this stance into every dispatch and gate:
+
+- **Name the end value before starting.** State the outcome the work is for — the change in the world the captain gets — before getting into mechanism. A task framed by its end value is one the captain can judge; a task framed by its steps is one they have to reverse-engineer.
+- **Lead with a recommendation the captain can say yes to.** When presenting a choice or a gate, open with one clear recommended direction the captain can approve in a single "yes," then supply the supporting detail underneath. Do not bury the recommendation under a menu of equally-weighted options.
+- **Do obvious reversible work without ceremony.** When the next step is obvious and reversible — a dispatch the contract already allows, a status read, a routine state transition — just do it. Reserve asking for the choices that are hard to reverse or where the decision genuinely matters. Ceremony around reversible work is friction, not diligence.
+
 ## Probe and Ideation Discipline
 
+- when a dispatched-ideation design rests on an unverified mechanism (a format round-trip, a runtime handoff, a tool actually supporting a flag), the riskiest path is exercised end-to-end first — the smallest run that would invalidate the rest of the work if it broke. The evidence from that run goes in the entity body; "no spike needed" is recorded with the proven mechanisms relied on. See the `running-research-spikes` skill. This is the integration-level analog of the acceptance-criteria rule: arrive at the gate with the riskiest claim demonstrated, not asserted.
 - when checking whether tool X supports Y, read X's schema directly via ToolSearch before greping for existing callers — usage presence is not existence evidence.
 - prefer Grep over Read for targeted entity-body inspection. Anchor a Grep to the heading or field name (a `## Stage Report`, a `### Feedback Cycles` entry, a specific frontmatter field) instead of reading the whole file. Read only when you need the full text; avoid full-file Read as a probe.
 - on Claude Code: a `Read` followed by a Bash-driven mutation of the same file (including `status --set`) triggers the file-staleness safety net, which echoes the entire current file back on the next turn as cache-write tokens. Grep does not participate in this tracking. Use Grep for targeted reads and trust `status --set` stdout for mutation narration.

@@ -77,14 +77,17 @@ A task moves to ideation when a pilot starts fleshing out the idea: clarify the 
   - Acceptance criteria must include how each criterion will be tested.
   - Acceptance criteria are **entity-level** - they describe properties of the finished task, not stage actions. Items that describe stage work belong in the stage report's checklist.
   - If an AC item reads as an imperative verb phrase, rewrite it as the end-state property it produces.
+  - Every task must produce a real, checkable change — code, a fixture, on-disk state, or instruction text whose effect a separate check can confirm — not just a document about itself. Each AC's "Verified by" must name something outside the task body that can fail: a test, a command's output or exit code, a file the change produces, or the resulting on-disk state. An AC whose only proof is reviewing the task's own prose ("verified by reviewing this task's decision section") can never fail, so it is not an acceptance criterion. If the task's only output is a decision with nothing shipped, it does not belong in this queue — record the decision in the roadmap instead. Cleanup and overhaul do qualify: the change is the new code plus passing tests.
+  - When the design's soundness rests on an unverified mechanism — a parser round-trip, a runtime handoff, an on-disk format, a tool actually supporting a flag — try the riskiest unknown first: run the smallest end-to-end exercise of that path before committing to the rest of the plan, and record the result in the task body. Ask "what would invalidate the rest of this work if it broke?" — that goes first; pay the small bill first. The exercise is throwaway, but what it teaches seeds the implementation's first test. If nothing is unverified — the design only composes already-proven behavior — record "no spike needed: {the proven mechanisms it relies on}" so the determination is on the record rather than silent.
   - Test plans should state what verifies the implementation, estimated cost/complexity, and whether fixture, CLI, or live workflow tests are needed.
   - Plans should describe intended behavior at the level a future worker or validator needs to reason about it. Prefer observable behavior over implementation internals unless the task is specifically about that internal representation.
-  - Choose proof at the same abstraction level as the claim: Go unit tests for parser and command behavior, golden fixtures for status output, static skill tests for instruction text, and live workflow smoke tests only when runtime behavior is the claim.
+  - Choose proof at the same abstraction level as the claim, and prefer proof that exercises the behavior and observes the outcome — output bytes, exit code, resulting on-disk state, or a test feeding many inputs and asserting uniform handling: Go unit tests for parser and command behavior, golden fixtures for status output, behavior fixtures that drive the binary for command-level claims, and live workflow smoke tests only when runtime behavior is the claim. A substring search is not proof of behavior. Searching code asserts spelling (it false-passes on a renamed-but-equivalent branch and false-fails on a rename); searching instruction prose is weaker still — the document is not the behavior, so "the contract says to run the command" never proves the agent runs it. A static check is legitimate when it parses real artifacts and tests a relationship between real values (for example, that the plugin manifest's contract range brackets the binary's contract version), or when the claim itself is about the text — a presence check over instruction files proving they carry a required clause or stay free of a banned token is proof at the claim's own level. The line is: invariant over real values, or a property of the text when the text is the claim, is legitimate; a substring search standing in for a behavioral claim is not.
+  - Prefer acceptance criteria a code gate can enforce — a guard in the binary, a test that fails on violation — over criteria the agent is merely instructed to follow. Where a behavior can be guarded by the binary or a failing test, the proof is that gate, not a sentence in a skill file. An AC whose only proof is "the instruction text says to do X" has a ceiling of wording-is-present and cannot stand on its own.
   - When captain feedback changes the target behavior, update the task body, acceptance criteria, and test plan together before re-validating.
   - For template or skill text changes: specific before/after wording, not just "change X".
 - **Good:** Clearly scoped, behavior-first, actionable, addresses a real need, considers edge cases, avoids unnecessary runtime-internal modeling, and uses tests that prove the intended behavior directly
 - **Bad:** Vague hand-waving, scope creep, solving problems that do not exist yet, no clear definition of done, acceptance criteria without a test plan, static prose tests for behavioral requirements, or tests that pass while missing the intended behavior
-- **Staff review:** When the FO assesses ideation as complex, such as native status parity, split-root behavior, or skill integration, it should request an independent review before presenting the ideation gate. The review checks design soundness, test plan sufficiency, and gaps.
+- **Staff review:** When the FO assesses ideation as complex, such as native status parity, split-root behavior, or skill integration, it should request an independent review before presenting the ideation gate. The review checks design soundness, test plan sufficiency, gaps, and that the riskiest unverified mechanism was exercised first (or that the task records an auditable "no spike needed" with the proven mechanisms it relies on). A design whose soundness rests on an unexercised, unverified mechanism is not ready for the gate.
 
 ### `implementation`
 
@@ -108,7 +111,7 @@ A task moves to validation after implementation is complete. The work here is to
   - Reject when tests pass but prove an obsolete, over-specified, or wrong target behavior.
   - A PASSED/REJECTED recommendation.
 - **Good:** Thorough testing against acceptance criteria, clear evidence of pass/fail, honest assessment, and validation that tests prove the current intended behavior
-- **Bad:** Rubber-stamping without testing, ignoring failing edge cases, validating against wrong criteria, or accepting passing tests that encode stale prose, obsolete assumptions, or the wrong abstraction level
+- **Bad:** Rubber-stamping without testing, ignoring failing edge cases, validating against wrong criteria, accepting passing tests that encode stale prose, obsolete assumptions, or the wrong abstraction level, or accepting a substring search (over code or over instruction prose) as proof of a behavioral claim — proof of behavior must run the behavior; a static test passes only as an invariant over real parsed values, not as a spelling check
 - **Spot-check principle:** Before committing to an expensive live workflow or compatibility run, do a cheap fixture or single-command spot-check to verify the infrastructure works end-to-end.
 
 ### `done`
@@ -118,7 +121,7 @@ A task reaches done when validation is complete and the captain approves the res
 - **Inputs:** The validation report with PASSED/REJECTED recommendation
 - **Outputs:** Final verdict set in frontmatter, completed timestamp recorded
 - **Good:** Clear resolution and lessons learned captured if relevant
-- **Bad:** Closing without reading the validation report or overriding a REJECTED recommendation without reason
+- **Bad:** Closing without reading the validation report, overriding a REJECTED recommendation without reason, or reaching done with PASSED on a task whose deliverable is prose with nothing outside it that can fail (a design that concludes "do not build X" ships as a roadmap decision, not a PASSED dev-queue task)
 
 ## Workflow State
 
@@ -132,6 +135,12 @@ The target launcher command is:
 
 ```bash
 spacedock status --workflow-dir docs/dev
+```
+
+To list the tasks ready for dispatch (the query the first officer runs each loop):
+
+```bash
+spacedock status --workflow-dir docs/dev --next
 ```
 
 ## Task Template
@@ -152,12 +161,28 @@ issue:
 
 Brief description of this task and what it aims to achieve.
 
+## Problem
+
+{What is broken or missing, and why it matters. Ideation fills this in.}
+
+## Proposed approach
+
+{How the task intends to solve the problem. Ideation fills this in.}
+
+## Out of scope
+
+{What this task deliberately does not cover, so the boundary is explicit.}
+
 ## Acceptance criteria
 
 Each AC names a property of the finished entity, not a stage action, and how it is verified.
 
 **AC-1 - {End-state property.}**
-Verified by: {grep / test name / file path / command a future reader can reproduce.}
+Verified by: {test name / command output or exit code / file the change produces / resulting on-disk state — something outside this task body that a future reader can reproduce and that can fail.}
+
+## Test plan
+
+{What verifies the implementation, estimated cost/complexity, and whether fixture, CLI, or live workflow tests are needed.}
 ```
 
 ## Testing Resources
