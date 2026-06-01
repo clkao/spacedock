@@ -7,6 +7,7 @@ score: "0.28"
 worktree: .worktrees/spacedock-ensign-architecture-review-cleanups
 started: 2026-06-01T06:04:55Z
 mod-block: merge:pr-merge
+pr: #247
 ---
 
 The NOW-SAFE cleanups surfaced by the architecture review (`docs/dev/_reviews/architecture-review.md`). The review found the core architecturally sound with NO rework required; these are the small, contained, in-place fixes worth landing during the implementation drain. POST-BOOTSTRAP parity-debt is explicitly NOT here (it goes elsewhere — see Out of scope).
