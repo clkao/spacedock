@@ -1,32 +1,11 @@
-// ABOUTME: AC-3 behavioral guard — deferred and unknown dispatch subcommands
-// ABOUTME: exit non-zero with a usage diagnostic, making the deferral observable.
+// ABOUTME: behavioral guard — unknown dispatch subcommands and missing required
+// ABOUTME: flags exit non-zero with a usage diagnostic on stderr.
 package dispatch
 
 import (
 	"strings"
 	"testing"
 )
-
-// TestDeferredSubcommandGuard asserts each subcommand moved to the sibling
-// claude-runtime-segregation surface exits non-zero with a diagnostic naming
-// the deferral, rather than silently no-op'ing. This converts the prose
-// deferral into observed behavior.
-func TestDeferredSubcommandGuard(t *testing.T) {
-	for _, sub := range []string{"context-budget", "list-standing", "show-standing", "spawn-standing"} {
-		t.Run(sub, func(t *testing.T) {
-			res := runNative("", sub, "--workflow-dir", "/tmp")
-			if res.exit == 0 {
-				t.Errorf("deferred subcommand %q exited 0 (must be non-zero)", sub)
-			}
-			if !strings.Contains(res.stderr, "claude-runtime-segregation") {
-				t.Errorf("deferred subcommand %q diagnostic does not name the sibling surface:\n%q", sub, res.stderr)
-			}
-			if res.stdout != "" {
-				t.Errorf("deferred subcommand %q wrote stdout (must be silent on stdout):\n%q", sub, res.stdout)
-			}
-		})
-	}
-}
 
 // TestUnknownSubcommandGuard asserts an unknown subcommand and a bare dispatch
 // invocation both exit non-zero with usage on stderr.

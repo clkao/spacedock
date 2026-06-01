@@ -375,6 +375,17 @@ func runBuild(probe claudeteam.TeamStateProbe, workflowDir string, stdin io.Read
 		"### Completion checklist\n\n%s\n\n### Summary\n{brief description of what was accomplished}\n",
 		checklistText))
 
+	// 9. Standing-teammate fetch line — appended only when at least one declared
+	// standing teammate exists for this workflow. Bare-mode (empty team_name) and
+	// zero-standing dispatches omit the line, so show-standing never runs where it
+	// would render nothing. The enumeration is runtime-neutral; the native fetch
+	// line targets `spacedock dispatch show-standing` (the same documented
+	// claude-team→spacedock dispatch rewrite as the show-stage-def line).
+	if len(EnumerateDeclaredStandingTeammates(workflowDir, teamName)) > 0 {
+		fetchCommands = append(fetchCommands,
+			fmt.Sprintf("spacedock dispatch show-standing --workflow-dir %s", shlexQuote(workflowDir)))
+	}
+
 	// Emit the `### Fetch commands` block.
 	fetchLines := []string{"### Fetch commands", ""}
 	for _, cmd := range fetchCommands {
