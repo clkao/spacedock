@@ -131,3 +131,16 @@ From the session-1 debrief ergonomics list. Auto-discovery is the biggest single
 ### Summary
 
 Fleshed-out design for forgiving/discoverable `spacedock status` plus two top-level verbs. The two riskiest mechanisms — the discovery walk-up and the state-checkout detector — were SPIKED against the production binary on the real `docs/dev` split-root layout (no state README, sd-b32 ids), confirming both the misdiagnosis symptom and that detection works. Key decision: the new errors fire only on the no-flag discovery path and the detected state-checkout path, leaving arbitrary explicit-`--workflow-dir` behavior unchanged to preserve existing tests. Staff review recommended; flagged the empty-explicit-dir and completion-exit-code choices for reviewers.
+
+## Stage Report: implementation
+
+- DONE: Discovery walk-up + state-checkout detector land with the design's exact error strings and exit codes; explicit --workflow-dir / PIPELINE_DIR precedence preserved (existing TestSplitRoot* and empty-explicit-dir behavior stay green)
+  `discoverWorkflowDir`/`stateCheckoutParent` in `internal/status/discover_walkup.go`; wired in `native_runner.go` dispatch (discovery before resolveRoots, state-checkout gate after). Exact strings pinned in `discovery_dispatch_test.go`; `TestExplicitWorkflowDirSkipsDiscovery` + `TestExplicitEmptyDirUnchanged` + all 263 status tests green. Commit 4dd31f1e.
+- DONE: AC-2 regression fixture reproduces the real symptom: sd-b32 entities in a no-README state dir, asserted under --validate, with a guard that the 'non-numeric sequential id' line is gone (M-9 + M-4)
+  `TestStateCheckoutPointedAtError`: sd-b32 entities, lstat-guarded no state README (M-9), run with `--workflow-dir <state> --validate` (M-4 pins command context), asserts named error ending in def dir + regression guard that `non-numeric sequential id` is absent. Confirmed against the real `docs/dev/.spacedock-state` layout via the built binary.
+- DONE: new + completion verbs and --help lines exist; discovery walk-up is innermost-wins with a nested-workflow test (M-1); completion bad-shell exits 2
+  `new`/`completion` cases in `cli.go` `run` switch; `new` aliases `status --new` (reuses runNew), `completion bash|zsh` emits static script (exit 0), bad/missing shell exit 2 (FO decision on M-5). `--help` lists both. M-1: `discoverWorkflowDir` first-match-wins documented as innermost-wins in code comment + `TestDiscoverWorkflowDirInnermostWins`. Tests in `verbs_test.go`.
+
+### Summary
+
+Implemented per the Design section with TDD (failing tests first, then minimal code). Two detectors (`discoverWorkflowDir`, `stateCheckoutParent`) reuse the existing `commissioned-by`/`state:` frontmatter rules; dispatch gains a discovery step (no-flag path only) and a state-checkout gate (detected case only), leaving every explicit-dir path unchanged. CLI gains `new` (alias) and `completion` (static script) verbs plus `--help` lines. All behavioral oracles are runNative/cli.Run exit/stderr/stdout — no greps-as-proof. `go vet` clean; 23 targeted + full suite green except the pre-existing env-dependent `TestCodexResolveManifestAgainstInstalledHost` (fails identically on the clean base branch — unrelated codex-host failure). Code commit 4dd31f1e on `spacedock-ensign/cli-ergonomics`.
