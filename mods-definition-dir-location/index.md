@@ -6,7 +6,7 @@ source: captain (2026-06-01) — "mods live with the workflow definition"
 started:
 completed:
 verdict:
-score: "0.28"
+score: 0.34
 worktree:
 issue:
 ---
