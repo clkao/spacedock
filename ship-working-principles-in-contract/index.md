@@ -1,7 +1,7 @@
 ---
 id: segh9j67xb7hv1qxgqzxe90g
 title: Ship the team's proven working habits in the tool's own instructions
-status: implementation
+status: validation
 source: hx decomposition (B of 3) — captain 2026-06-01; staff review
 score: "0.30"
 started: 2026-06-01T06:04:55Z
