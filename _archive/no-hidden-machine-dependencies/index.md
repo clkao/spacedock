@@ -11,6 +11,7 @@ worktree:
 issue:
 mod-block: 
 pr: #249
+archived: 2026-06-01T13:21:00Z
 ---
 
 **What this is for (plain).** Add a test that fails the moment the shipped tool quietly starts
