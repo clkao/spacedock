@@ -128,7 +128,7 @@ func runSet(roots roots, set *setUpdate, args []string, whereFilters []whereFilt
 	}
 
 	if !force && isTerminalUpdate() && modBlock == "" && postUpdatePR == "" && postUpdateVerdict != "rejected" {
-		mergeHooks := scanMods(roots.entityDir)["merge"]
+		mergeHooks := scanMods(roots.definitionDir)["merge"]
 		if len(mergeHooks) > 0 {
 			return errExit(stderr, fmt.Sprintf(
 				"entity %s cannot advance to terminal — workflow has merge hook(s) [%s] that have not run "+

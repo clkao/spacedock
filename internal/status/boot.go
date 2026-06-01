@@ -156,7 +156,7 @@ type bootData struct {
 // minted here (timestamp-dependent for sd-b32); on a minting error it returns
 // the error after the caller has emitted the stderr diagnostic.
 func gatherBoot(probe claudeteam.TeamStateProbe, entities []*entity, stages []Stage, definitionDir, entityDir, gitRoot, idStyle string, e env, stderr io.Writer) (*bootData, error) {
-	d := &bootData{idStyle: idStyle, hooks: scanMods(entityDir)}
+	d := &bootData{idStyle: idStyle, hooks: scanMods(definitionDir)}
 
 	if idStyle == "slug" {
 		d.nextID = "n/a (id-style: slug)"

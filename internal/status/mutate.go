@@ -151,10 +151,12 @@ func atomicWrite(path string, data []byte) error {
 // runArchive archives an entity (flat or folder form), stamping archived: before
 // the move and printing `archived: {dest}`. Enforces the source-missing,
 // already-archived, mod-block, and merge-hook guards. Matches run_archive.
-// entityDir is the absolute entity root for I/O; spellingDir is the as-passed
-// spelling used for the printed dest (so a relative --workflow-dir renders a
-// relative `archived:` path, matching the oracle's literal os.path.join).
-func runArchive(entityDir, spellingDir, slug string, force, quiet, asJSON bool, stdout, stderr io.Writer) int {
+// entityDir is the absolute entity root for I/O; definitionDir is the README root
+// used to resolve merge-hook mods (definitionDir/_mods/, plus entityDir/_mods/
+// during a split-root mod migration); spellingDir is the as-passed spelling used
+// for the printed dest (so a relative --workflow-dir renders a relative
+// `archived:` path, matching the oracle's literal os.path.join).
+func runArchive(definitionDir, entityDir, spellingDir, slug string, force, quiet, asJSON bool, stdout, stderr io.Writer) int {
 	flatPath := filepath.Join(entityDir, slug+".md")
 	folderRoot := filepath.Join(entityDir, slug)
 	folderIndex := filepath.Join(folderRoot, "index.md")
@@ -195,7 +197,7 @@ func runArchive(entityDir, spellingDir, slug string, force, quiet, asJSON bool, 
 	// Merge-hook invariant: archival is terminal. Refuse unless the hook ran
 	// (pr set), is in flight (mod-block set, handled above), or --force.
 	if !force && modBlock == "" && pr == "" {
-		mergeHooks := scanMods(entityDir)["merge"]
+		mergeHooks := scanMods(definitionDir)["merge"]
 		if len(mergeHooks) > 0 {
 			fmt.Fprintf(stderr,
 				"Error: entity %s cannot be archived — workflow has merge hook(s) [%s] "+
@@ -278,10 +280,15 @@ func PyJoin(parts ...string) string {
 	return result
 }
 
-// scanMods scans entityDir/_mods/*.md for `## Hook:` headings, returning
-// hookPoint -> sorted mod names. Matches scan_mods.
-func scanMods(entityDir string) map[string][]string {
-	modsDir := filepath.Join(entityDir, "_mods")
+// scanMods scans definitionDir/_mods/*.md for `## Hook:` headings, returning
+// hookPoint -> sorted mod names. Mods are workflow definition (lifecycle hooks
+// declared for the workflow, kin to the README stages), so they live next to the
+// README in definitionDir/_mods/, not in the entity/state checkout. In
+// single-root (definitionDir == entityDir) this is the same dir the oracle's
+// scan_mods reads, so it matches byte-for-byte; under split-root it reads the
+// definition dir, never the state checkout.
+func scanMods(definitionDir string) map[string][]string {
+	modsDir := filepath.Join(definitionDir, "_mods")
 	info, err := os.Stat(modsDir)
 	if err != nil || !info.IsDir() {
 		return map[string][]string{}

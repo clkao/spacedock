@@ -337,7 +337,7 @@ func dispatch(probe claudeteam.TeamStateProbe, args []string, dir string, e env,
 		if rc != 0 {
 			return rc
 		}
-		return runArchive(roots.entityDir, roots.entityDirSpelling, resolved.slug, contains(args, "--force"), quiet, asJSON, stdout, stderr)
+		return runArchive(roots.definitionDir, roots.entityDir, roots.entityDirSpelling, resolved.slug, contains(args, "--force"), quiet, asJSON, stdout, stderr)
 	}
 
 	if setResult != nil {
