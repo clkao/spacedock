@@ -4,10 +4,10 @@ title: Mod files live with the workflow definition (docs/dev/_mods/), not the st
 status: validation
 source: captain (2026-06-01) — "mods live with the workflow definition"
 started: 2026-06-01T04:46:06Z
-completed:
-verdict:
+completed: 2026-06-01T14:42:45Z
+verdict: PASSED
 score: 0.34
-worktree: .worktrees/spacedock-ensign-mods-definition-dir-location
+worktree: 
 issue:
 mod-block: 
 pr: #252
