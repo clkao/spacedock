@@ -176,11 +176,11 @@ func tooOldBinaryRemedy(c int, rangeStr, branch string) string {
 }
 
 // tooOldPluginRemedy is the pinned too-old-plugin remedy line, parameterized by
-// the detected host for the init/update hint.
+// the detected host for the install/update hint.
 func tooOldPluginRemedy(c int, rangeStr, host string) string {
 	return fmt.Sprintf(
 		"too-old-plugin: your installed plugin (needs %s) predates this binary (contract %d). "+
-			"Update it: spacedock init --host %s (or '%s plugin update spacedock').",
+			"Update it: spacedock install --host %s (or '%s plugin update spacedock').",
 		rangeStr, c, host, host)
 }
 
@@ -207,6 +207,6 @@ func pluginPredatesContractRemedy(host, branch string) string {
 // by the caller's policy.
 func noPluginMessage(host string) string {
 	return fmt.Sprintf(
-		"no installed Spacedock plugin found for host %s. Install it: spacedock init --host %s.",
+		"no installed Spacedock plugin found for host %s. Install it: spacedock install --host %s.",
 		host, host)
 }

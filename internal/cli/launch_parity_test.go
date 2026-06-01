@@ -174,13 +174,14 @@ func TestUnknownSafehouseKeyErrors(t *testing.T) {
 	}
 }
 
-// LP-AC-1: a fenced trailing task becomes base + " " + task as the LAST inner
-// token; bare → base exactly; a host flag before the fence still forwards.
+// LP-AC-1 (Option-2 grammar): a task positional (BEFORE any `--`) becomes
+// base + " " + task as the LAST inner token; bare → base exactly; a host flag
+// AFTER the `--` still forwards verbatim, with the task riding before the fence.
 func TestFenceTaskPromptOverride(t *testing.T) {
-	t.Run("claude-fenced-task", func(t *testing.T) {
+	t.Run("claude-task-positional", func(t *testing.T) {
 		fake := &fakeHost{manifest: compatibleManifest(t)}
 		var stdout, stderr bytes.Buffer
-		code := runClaude(context.Background(), []string{"--", "do the thing"}, t.TempDir(), fake, lookFound, &stdout, &stderr)
+		code := runClaude(context.Background(), []string{"do the thing"}, t.TempDir(), fake, lookFound, &stdout, &stderr)
 		if code != 0 {
 			t.Fatalf("exit = %d, want 0 (stderr=%q)", code, stderr.String())
 		}
@@ -201,10 +202,10 @@ func TestFenceTaskPromptOverride(t *testing.T) {
 			t.Fatalf("last token = %q, want bare base prompt (no trailing space)", last)
 		}
 	})
-	t.Run("claude-host-flag-before-fence", func(t *testing.T) {
+	t.Run("claude-task-before-fenced-host-flag", func(t *testing.T) {
 		fake := &fakeHost{manifest: compatibleManifest(t)}
 		var stdout, stderr bytes.Buffer
-		code := runClaude(context.Background(), []string{"--model", "gpt-x", "--", "do the thing"}, t.TempDir(), fake, lookFound, &stdout, &stderr)
+		code := runClaude(context.Background(), []string{"do the thing", "--", "--model", "gpt-x"}, t.TempDir(), fake, lookFound, &stdout, &stderr)
 		if code != 0 {
 			t.Fatalf("exit = %d, want 0 (stderr=%q)", code, stderr.String())
 		}
@@ -213,10 +214,10 @@ func TestFenceTaskPromptOverride(t *testing.T) {
 			t.Fatalf("launch argv = %v, want %v", fake.launchedArg, want)
 		}
 	})
-	t.Run("codex-fenced-task", func(t *testing.T) {
+	t.Run("codex-task-positional", func(t *testing.T) {
 		fake := &fakeHost{manifest: compatibleManifest(t)}
 		var stdout, stderr bytes.Buffer
-		code := runCodex(context.Background(), []string{"--", "do the thing"}, t.TempDir(), fake, lookFound, &stdout, &stderr)
+		code := runCodex(context.Background(), []string{"do the thing"}, t.TempDir(), fake, lookFound, &stdout, &stderr)
 		if code != 0 {
 			t.Fatalf("exit = %d, want 0 (stderr=%q)", code, stderr.String())
 		}
@@ -232,7 +233,7 @@ func TestCodexResumeSubcommandSuppressesPrompt(t *testing.T) {
 	t.Run("resume-no-prompt", func(t *testing.T) {
 		fake := &fakeHost{manifest: compatibleManifest(t)}
 		var stdout, stderr bytes.Buffer
-		code := runCodex(context.Background(), []string{"resume", "abc-123"}, t.TempDir(), fake, lookFound, &stdout, &stderr)
+		code := runCodex(context.Background(), []string{"--", "resume", "abc-123"}, t.TempDir(), fake, lookFound, &stdout, &stderr)
 		if code != 0 {
 			t.Fatalf("exit = %d, want 0 (stderr=%q)", code, stderr.String())
 		}
@@ -266,7 +267,7 @@ func TestPluginDirRelaxesGate(t *testing.T) {
 	t.Run("claude-relaxes-on-failing-manifest", func(t *testing.T) {
 		fake := &fakeHost{manifest: tooOldBinaryManifest(t)} // gate would FAIL
 		var stdout, stderr bytes.Buffer
-		code := runClaude(context.Background(), []string{"--plugin-dir", "/a", "--plugin-dir", "/b"}, t.TempDir(), fake, lookFound, &stdout, &stderr)
+		code := runClaude(context.Background(), []string{"--", "--plugin-dir", "/a", "--plugin-dir", "/b"}, t.TempDir(), fake, lookFound, &stdout, &stderr)
 		if code != 0 {
 			t.Fatalf("exit = %d, want 0 (--plugin-dir relaxes the gate); stderr=%q", code, stderr.String())
 		}
@@ -278,7 +279,7 @@ func TestPluginDirRelaxesGate(t *testing.T) {
 	t.Run("codex-relaxes-on-failing-manifest", func(t *testing.T) {
 		fake := &fakeHost{manifest: tooOldBinaryManifest(t)}
 		var stdout, stderr bytes.Buffer
-		code := runCodex(context.Background(), []string{"--plugin-dir", "/a"}, t.TempDir(), fake, lookFound, &stdout, &stderr)
+		code := runCodex(context.Background(), []string{"--", "--plugin-dir", "/a"}, t.TempDir(), fake, lookFound, &stdout, &stderr)
 		if code != 0 {
 			t.Fatalf("exit = %d, want 0 (--plugin-dir relaxes the gate); stderr=%q", code, stderr.String())
 		}

@@ -40,7 +40,7 @@ func TestClaudeSafehousePresentWrapsArgv(t *testing.T) {
 	fake := &fakeHost{manifest: compatibleManifest(t)}
 	var stdout, stderr bytes.Buffer
 
-	code := runClaude(context.Background(), []string{"--foo"}, dir, fake, lookFound, &stdout, &stderr)
+	code := runClaude(context.Background(), []string{"--", "--foo"}, dir, fake, lookFound, &stdout, &stderr)
 
 	if code != 0 {
 		t.Fatalf("exit = %d, want 0 (stderr=%q)", code, stderr.String())
@@ -79,7 +79,7 @@ func TestClaudeNoSafehouseLaunchesPlain(t *testing.T) {
 	fake := &fakeHost{manifest: compatibleManifest(t)}
 	var stdout, stderr bytes.Buffer
 
-	code := runClaude(context.Background(), []string{"--foo"}, dir, fake, lookFound, &stdout, &stderr)
+	code := runClaude(context.Background(), []string{"--", "--foo"}, dir, fake, lookFound, &stdout, &stderr)
 
 	if code != 0 {
 		t.Fatalf("exit = %d, want 0 (stderr=%q)", code, stderr.String())
@@ -114,7 +114,7 @@ func TestClaudePluginGateShortCircuitsBeforeSafehouse(t *testing.T) {
 	if fake.launchedArg != nil {
 		t.Fatalf("Launch invoked despite plugin-gate failure: %v", fake.launchedArg)
 	}
-	if !strings.Contains(stderr.String(), "spacedock init") && !strings.Contains(stderr.String(), "spacedock doctor") {
+	if !strings.Contains(stderr.String(), "spacedock install") && !strings.Contains(stderr.String(), "spacedock doctor") {
 		t.Fatalf("stderr missing plugin-gate remedy: %q", stderr.String())
 	}
 	if strings.Contains(stderr.String(), ".safehouse profile") {
@@ -156,7 +156,7 @@ func TestCodexSafehousePresentWrapsArgv(t *testing.T) {
 	fake := &fakeHost{manifest: compatibleManifest(t)}
 	var stdout, stderr bytes.Buffer
 
-	code := runCodex(context.Background(), []string{"--foo"}, dir, fake, lookFound, &stdout, &stderr)
+	code := runCodex(context.Background(), []string{"--", "--foo"}, dir, fake, lookFound, &stdout, &stderr)
 
 	if code != 0 {
 		t.Fatalf("exit = %d, want 0 (stderr=%q)", code, stderr.String())
@@ -201,7 +201,7 @@ func TestCodexNoSafehouseLaunchesPlainNoBypass(t *testing.T) {
 	fake := &fakeHost{manifest: compatibleManifest(t)}
 	var stdout, stderr bytes.Buffer
 
-	code := runCodex(context.Background(), []string{"--foo"}, dir, fake, lookFound, &stdout, &stderr)
+	code := runCodex(context.Background(), []string{"--", "--foo"}, dir, fake, lookFound, &stdout, &stderr)
 
 	if code != 0 {
 		t.Fatalf("exit = %d, want 0 (stderr=%q)", code, stderr.String())
@@ -237,7 +237,7 @@ func TestCodexPluginGateShortCircuitsBeforeSafehouse(t *testing.T) {
 	if fake.launchedArg != nil {
 		t.Fatalf("Launch invoked despite plugin-gate failure: %v", fake.launchedArg)
 	}
-	if !strings.Contains(stderr.String(), "spacedock init") && !strings.Contains(stderr.String(), "spacedock doctor") {
+	if !strings.Contains(stderr.String(), "spacedock install") && !strings.Contains(stderr.String(), "spacedock doctor") {
 		t.Fatalf("stderr missing plugin-gate remedy: %q", stderr.String())
 	}
 	if strings.Contains(stderr.String(), ".safehouse profile") {
@@ -285,7 +285,7 @@ func TestClaudeResumeFamilySuppressesBootstrapPrompt(t *testing.T) {
 			fake := &fakeHost{manifest: compatibleManifest(t)}
 			var stdout, stderr bytes.Buffer
 
-			code := runClaude(context.Background(), []string{tc.arg}, dir, fake, lookFound, &stdout, &stderr)
+			code := runClaude(context.Background(), []string{"--", tc.arg}, dir, fake, lookFound, &stdout, &stderr)
 
 			if code != 0 {
 				t.Fatalf("exit = %d, want 0 (stderr=%q)", code, stderr.String())

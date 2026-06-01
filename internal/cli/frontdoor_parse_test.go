@@ -1,15 +1,16 @@
-// ABOUTME: Table test for splitFrontDoorArgs — the front-door grammar that pulls
-// ABOUTME: --skip-contract-check/--safehouse(-*) and the post-fence task off args.
+// ABOUTME: Table test for parseFrontDoorArgs — the Option-2 grammar that takes the
+// ABOUTME: task before --, host flags after --, and the safehouse/skip knobs anywhere.
 package cli
 
 import "testing"
 
-// TestSplitFrontDoorArgs pins the front-door grammar (LP-1 fence convention +
-// cycle-2 safehouse knobs). Host value-taking flags ride before the `--` fence
-// and forward verbatim; the task is the bare text AFTER the fence; the
-// front-door flags (--skip-contract-check, bare --safehouse, --safehouse-<key>=)
-// are consumed wherever they appear and never forwarded.
-func TestSplitFrontDoorArgs(t *testing.T) {
+// TestParseFrontDoorArgs pins the Option-2 front-door grammar (AC-3 + AC-6). The
+// task is the joined non-flag positionals BEFORE `--`; host value-taking flags
+// ride AFTER `--` and forward verbatim as passthrough; the spacedock-owned flags
+// (--skip-contract-check, --safehouse, the three repeatable --safehouse-* knobs)
+// are consumed wherever they appear before `--` in BOTH space and equals form and
+// are never forwarded.
+func TestParseFrontDoorArgs(t *testing.T) {
 	cases := []struct {
 		name           string
 		args           []string
@@ -22,21 +23,27 @@ func TestSplitFrontDoorArgs(t *testing.T) {
 	}{
 		{name: "bare"},
 		{
-			name:    "fenced-task",
-			args:    []string{"--", "do the thing"},
+			name:    "task-positional",
+			args:    []string{"do the thing"},
 			task:    "do the thing",
 			hasTask: true,
 		},
 		{
-			name:        "host-flag-then-fenced-task",
-			args:        []string{"--plugin-dir", "/p", "--", "do the thing"},
+			name:    "multi-word-task-joins",
+			args:    []string{"do", "the", "thing"},
+			task:    "do the thing",
+			hasTask: true,
+		},
+		{
+			name:        "task-then-fenced-host-flag",
+			args:        []string{"do the thing", "--", "--plugin-dir", "/p"},
 			passthrough: []string{"--plugin-dir", "/p"},
 			task:        "do the thing",
 			hasTask:     true,
 		},
 		{
-			name:        "no-fence-all-passthrough",
-			args:        []string{"--model", "gpt-x"},
+			name:        "host-flags-after-fence-no-task",
+			args:        []string{"--", "--model", "gpt-x"},
 			passthrough: []string{"--model", "gpt-x"},
 		},
 		{
@@ -50,29 +57,29 @@ func TestSplitFrontDoorArgs(t *testing.T) {
 			forceSafehouse: true,
 		},
 		{
-			name:           "safehouse-knob-deprefixed",
+			name:           "safehouse-knob-equals-form",
 			args:           []string{"--safehouse-enable=docker"},
 			safehouseFlags: []string{"enable=docker"},
 		},
 		{
-			name:           "knob-after-fence-still-consumed",
-			args:           []string{"--", "--safehouse-enable=ssh", "task text"},
-			safehouseFlags: []string{"enable=ssh"},
-			task:           "task text",
-			hasTask:        true,
+			name:           "safehouse-knob-space-form",
+			args:           []string{"--safehouse-enable", "docker"},
+			safehouseFlags: []string{"enable=docker"},
 		},
 		{
-			name:    "fenced-empty-task-string-counts",
-			args:    []string{"--", ""},
-			task:    "",
-			hasTask: true,
+			name:           "knob-and-task-and-fenced-host-flags",
+			args:           []string{"--safehouse-enable=ssh", "task text", "--", "--model", "x"},
+			safehouseFlags: []string{"enable=ssh"},
+			passthrough:    []string{"--model", "x"},
+			task:           "task text",
+			hasTask:        true,
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			fd, err := splitFrontDoorArgs(tc.args)
+			fd, err := parseFrontDoorArgs(tc.args)
 			if err != nil {
-				t.Fatalf("splitFrontDoorArgs(%v) err = %v, want nil", tc.args, err)
+				t.Fatalf("parseFrontDoorArgs(%v) err = %v, want nil", tc.args, err)
 			}
 			if !equalArgv(fd.passthrough, tc.passthrough) {
 				t.Errorf("passthrough = %v, want %v", fd.passthrough, tc.passthrough)

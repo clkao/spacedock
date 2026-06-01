@@ -37,19 +37,23 @@ func (h *resolveErrHost) ResolveManifest(string) (string, error) {
 	return "", errors.New("ResolveManifest must not be called on the --plugin-dir dev lane")
 }
 
-// TestDevLanePluginDirReachesLaunchSeam locks AC-2(a): `spacedock claude
-// --plugin-dir <vendored-repo> -- "task"` reaches the launch seam with the inner
-// argv beginning `claude --agent spacedock:first-officer`, the fenced task
-// appended, and NO contract-gate rejection — proving the manifest this entity
-// vendors flows through the dev lane. The host's ResolveManifest is wired to
-// fail; a launch on exit 0 with the FO seam present proves the gate was relaxed
-// (ResolveManifest never consulted).
+// TestDevLanePluginDirReachesLaunchSeam locks AC-2(a) under the Option-2 grammar:
+// `spacedock claude "task" -- --plugin-dir <vendored-repo>` reaches the launch
+// seam with the inner argv beginning `claude --agent spacedock:first-officer`, the
+// task-bearing prompt appended LAST, and NO contract-gate rejection — proving the
+// manifest this entity vendors flows through the dev lane. The host's
+// ResolveManifest is wired to fail; a launch on exit 0 with the FO seam present
+// proves the gate was relaxed (ResolveManifest never consulted). The prompt is
+// always the last spacedock-built token and --plugin-dir rides in the post-`--`
+// passthrough with its value bound, so the host never binds the prompt here
+// (AC-3). The narrow limit — a dangling value-taking flag as the FINAL passthrough
+// token — is covered by TestDanglingValueTakingHostFlagStillSwallows.
 func TestDevLanePluginDirReachesLaunchSeam(t *testing.T) {
 	repo := vendoredRepoRoot(t)
 	host := &resolveErrHost{}
 	var stdout, stderr bytes.Buffer
 
-	code := runClaude(context.Background(), []string{"--plugin-dir", repo, "--", "do the thing"}, t.TempDir(), host, lookFound, &stdout, &stderr)
+	code := runClaude(context.Background(), []string{"do the thing", "--", "--plugin-dir", repo}, t.TempDir(), host, lookFound, &stdout, &stderr)
 
 	if code != 0 {
 		t.Fatalf("exit = %d, want 0 (--plugin-dir <repo> must relax the gate); stderr=%q", code, stderr.String())
@@ -64,5 +68,46 @@ func TestDevLanePluginDirReachesLaunchSeam(t *testing.T) {
 	}
 	if !equalArgv(host.launchedArg, want) {
 		t.Fatalf("launch argv = %v, want %v", host.launchedArg, want)
+	}
+	// The last token is the spacedock-built prompt, and --plugin-dir <repo> rides
+	// before it in passthrough with its value bound — the prompt is never adjacent
+	// to a value-starved host flag.
+	if last := host.launchedArg[len(host.launchedArg)-1]; last != wantBootstrapPrompt+" do the thing" {
+		t.Fatalf("last token = %q, want the spacedock prompt", last)
+	}
+}
+
+// TestDanglingValueTakingHostFlagStillSwallows pins the ACCURATE AC-3 property and
+// its honest limitation. The invariant the Option-2 grammar guarantees is narrow:
+// the spacedock prompt is ALWAYS the last assembled host-argv token and ALWAYS
+// spacedock-constructed (never sourced from a host token). It is NOT a structural
+// guarantee that the host can never bind the prompt: a user who dangles a
+// value-taking host flag as the FINAL post-`--` passthrough token (`-- --plugin-dir`
+// with no value) places that flag immediately before the prompt, so the host's
+// own parser binds the prompt as the flag's value. This is byte-identical to
+// origin/next and is a user error (the user gave a value-taking flag no value),
+// not a regression introduced by this change. The test proves both halves: the
+// prompt is still the last spacedock-built token (our invariant holds), and the
+// dangling flag is the one immediately before it (the host-side consequence).
+func TestDanglingValueTakingHostFlagStillSwallows(t *testing.T) {
+	fake := &fakeHost{manifest: compatibleManifest(t)}
+	var stdout, stderr bytes.Buffer
+
+	code := runClaude(context.Background(), []string{"do the thing", "--", "--plugin-dir"}, t.TempDir(), fake, lookFound, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (stderr=%q)", code, stderr.String())
+	}
+	argv := fake.launchedArg
+	wantPrompt := wantBootstrapPrompt + " do the thing"
+	// Our invariant: the prompt is the last token and spacedock-constructed.
+	if last := argv[len(argv)-1]; last != wantPrompt {
+		t.Fatalf("last token = %q, want the spacedock prompt (the always-last invariant must hold)", last)
+	}
+	// The honest limitation: a dangling value-taking flag sits right before the
+	// prompt, so the host parser will bind the prompt as that flag's value. This is
+	// a user error identical to origin/next, NOT a structural impossibility.
+	if before := argv[len(argv)-2]; before != "--plugin-dir" {
+		t.Fatalf("token before prompt = %q, want the dangling --plugin-dir (the host would bind the prompt as its value)", before)
 	}
 }
