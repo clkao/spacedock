@@ -6,7 +6,7 @@ source: sprint — architecture review (must-fix #2/#3 + now-safe nice-to-haves)
 score: "0.28"
 worktree: .worktrees/spacedock-ensign-architecture-review-cleanups
 started: 2026-06-01T06:04:55Z
-mod-block: merge:pr-merge
+mod-block: 
 pr: #247
 ---
 
