@@ -48,10 +48,30 @@ advancing to terminal when the merge hook never ran.
 
 ### #217 is a prose/mechanism contradiction, not just friction
 
-The state-installed `_mods/pr-merge.md` no-PR fallback (line 100) instructs the FO to clear
-`mod-block` *after* the local merge lands, and then claims: "clearing `mod-block` only after the
-local merge lands keeps that guard satisfied through the no-PR path." **That claim is false.** The
-guard does not look at merge ordering — it looks at the *post-update* state. The FO ceremony per
+The state-installed `_mods/pr-merge.md` no-PR fallback (the `### Fallback: no PR host available`
+section, line 100) instructs the FO to clear `mod-block` *after* the local merge lands, and then
+claims: "clearing `mod-block` only after the local merge lands keeps that guard satisfied through the
+no-PR path." **That claim is false.** The guard does not look at merge ordering — it looks at the
+*post-update* state.
+
+**Which file carries the false claim (pin, to avoid the review file-mixup).** The false claim lives
+in the **LIVE state-checkout mod**:
+`docs/dev/.spacedock-state/_mods/pr-merge.md`, in its `### Fallback: no PR host available`
+section at line 100 (verified this session: the parenthetical "(The mechanism-level guard refuses
+terminalizing while `pr` and `mod-block` are both empty and a merge hook is registered; clearing
+`mod-block` only after the local merge lands keeps that guard satisfied through the no-PR path.)").
+It does NOT live in the code-repo copy `mods/pr-merge.md`, whose fallback prose (lines 49/51) merely
+says "fall back to local merge" with no guard-satisfaction claim. A prior staff review reported the
+line-100 claim as a false positive because it inspected the code-repo `mods/pr-merge.md` copy rather
+than the live state-checkout mod; the claim is **real** in the state-checkout file. The prose fix
+targets `docs/dev/.spacedock-state/_mods/pr-merge.md`. **Coordinate with f2.** The
+`mods-definition-dir-location` entity (id `f2yr32fgw3pfxp7ekq4wy1np`) relocates this mod from the
+state checkout to `docs/dev/_mods/pr-merge.md` (delete-from-state-branch + add-to-main-repo, atomic
+with its `scanMods(definitionDir)` swap). If f2 lands first, the corrected fallback prose lands in
+`docs/dev/_mods/pr-merge.md`; if this entity's prose fix lands first, it corrects the state-checkout
+copy and f2 carries the corrected text across in its move. Either order is fine as long as the false
+claim is corrected in whichever copy is live at the time — the two entities touch the same file and
+must not silently overwrite each other's edit to that section. The FO ceremony per
 the shared core (`first-officer-shared-core.md:227-233`) is: set `mod-block` → local merge → clear
 `mod-block` in its OWN standalone `--set` → then terminalize (`completed verdict= worktree=`). At
 the terminalize step `mod-block == ""` and `pr == ""`, so the guard fires. There is no merge order
@@ -106,6 +126,25 @@ merge: local        # or: merge: pr  (default when absent)
   regardless of policy, because that catches a genuinely interrupted ceremony. Under `merge: local`
   the guard's question becomes "did the FO complete the merge ceremony (mod-block cleared)?" rather
   than "is there a PR?".
+- **`merge: local` relaxes the guard CHECK, NOT the ceremony STRUCTURE (the safety invariant).**
+  This is the load-bearing distinction and must not be conflated. What `merge: local` changes is the
+  *terminal-guard predicate at `handlers.go:128`*: instead of demanding a non-empty `pr` (or a
+  satisfied `mod-block`) before permitting a terminal transition when a merge hook is registered, it
+  validates that the merge-hook ceremony actually completed via the `mod-block` lifecycle — i.e. the
+  guard accepts a cleared `mod-block` as proof the hook ran, without also requiring a `pr`. What
+  `merge: local` does NOT change is the *ceremony the FO must perform*: when a `merge` hook is
+  registered, the **set `mod-block=merge:{hook}` → invoke the hook → clear `mod-block`** sequence
+  stays MANDATORY. `merge: local` does not authorize an FO to skip the hook, nor to manually clear
+  `mod-block` and terminalize *without having run the hook*. Concretely: an FO that sets
+  `mod-block=merge:pr-merge`, does NOT invoke the hook (no local merge actually performed), then
+  clears `mod-block` and terminalizes, has produced a wrongful terminalization — the entity reads
+  `done` but no merge landed. `merge: local` must not open that hole. The mechanism cannot, on its
+  own, verify a merge physically happened (it only sees the `mod-block` lifecycle); the ceremony
+  structure is therefore the load-bearing control, and the sentinel (below) is the preferred
+  truthful artifact that records *which* commit shipped, so the cleared-`mod-block` claim is
+  backed by an on-entity record rather than by trust alone. The merge-hook invariant's purpose —
+  catch a terminal transition when the hook never ran — survives `merge: local` intact; only the
+  "must be a PR" framing is relaxed.
 - **FO honoring:** the FO reads `merge:` at boot (it already reads README via `--boot`) and, under
   `merge: local`, runs the local-merge ceremony without ever reaching for `--force`. The shared-core
   Merge-and-Cleanup prose gains a branch: when `merge: local` (or no PR host), terminalize without
@@ -115,14 +154,29 @@ merge: local        # or: merge: pr  (default when absent)
 
 Two sub-parts:
 
-1. **Fix the contradictory prose immediately** (a bug, fix-on-sight): the `_mods/pr-merge.md`
-   fallback claim that clearing `mod-block` "keeps that guard satisfied" is false and must be
-   corrected. Under `merge: local` the corrected prose says terminalize succeeds because the policy
+1. **Fix the contradictory prose immediately** (a bug, fix-on-sight): the live state-checkout mod
+   `docs/dev/.spacedock-state/_mods/pr-merge.md` `### Fallback: no PR host available` claim (line 100)
+   that clearing `mod-block` "keeps that guard satisfied" is false and must be corrected (NOT the
+   code-repo `mods/pr-merge.md` copy, which lacks the claim — see the pin in "#217 is a
+   prose/mechanism contradiction" above; coordinate the edit with f2's relocation of this file). Under `merge: local` the corrected prose says terminalize succeeds because the policy
    exempts the guard. For workflows that have NOT declared `merge: local`, the fallback sets a
-   sentinel before clearing `mod-block`:
+   sentinel:
    `spacedock status --set {slug} pr=local-merge:{short-sha}` (#217 option 1). The guard then sees
    a non-empty `pr` and is satisfied honestly — `pr` truthfully records that a merge landed, just
    not a remote PR.
+   **Sentinel ordering (the safe primary path):** the sentinel `pr=local-merge:{short-sha}` is set
+   ONLY after the local `--no-ff` merge has truly landed — `{short-sha}` is the SHA of the merge
+   commit that exists on `next`, computed after the merge, not before. This ordering is what makes
+   the sentinel a *truthful* record: the entity carries a `pr` value if and only if a real commit
+   shipped, so a reviewer or a future debugger can resolve `local-merge:{sha}` to an actual merge in
+   the log. The corrected sequence is therefore: invoke the hook → local merge lands → set the
+   sentinel (records the landed SHA) → clear `mod-block` → terminalize. Setting the sentinel before
+   the merge lands would re-introduce the same dishonesty the false prose had (a guard satisfied by
+   a signal that does not yet correspond to a merge), so the prose MUST set it post-merge. This
+   sentinel-first-after-merge path is the **safe primary** mechanism for un-declared workflows: it
+   needs no guard-code change, satisfies the existing guard in both runners, and leaves an
+   on-entity artifact tying terminalization to a concrete commit — strictly safer than relying on a
+   bare cleared `mod-block`.
 2. **Display recognizes the sentinel** (#217 AC-3): the `status` table renders a `pr` value with the
    `local-merge:` prefix as `{short-sha} (local)` rather than as a PR reference. This is the only
    piece that touches display/format code and therefore the parity surface.
@@ -178,9 +232,12 @@ entity carrying the sentinel.
 A README declaring `merge: local` lets the terminal `--set` and `--archive` succeed with empty `pr`
 and empty `mod-block` (no `--force`), while the `mod-block`-pending guard still blocks if `mod-block`
 is non-empty. Absent the key (default `pr`), behavior is byte-identical to today.
-Verified by: a fixture workflow with `merge: local` + a registered merge hook where the terminal
-guard does not demand a PR or `--force`; plus the existing guard fixtures (default policy) continuing
-to pass unchanged in both runners.
+Verified by: a NEW fixture workflow with `merge: local` **and a registered merge hook** (a `_mods/`
+dir containing a file with `## Hook: merge`) where the terminal guard does not demand a PR or
+`--force`; plus the existing guard fixtures (default policy) continuing to pass unchanged in both
+runners. The registered-hook part is mandatory — without a `_mods/` dir `scanMods` returns empty and
+the merge-hook branch is never reached, so the fixture would pass vacuously (see "Test fixtures"
+below).
 
 **AC-4 — Existing GitHub-PR-shaped runs and the parity suite are unaffected.**
 The PR path (push → `gh pr create` → `pr=#N` → block → detect-merge → terminalize) is unchanged, and
@@ -195,15 +252,54 @@ Verified by: a static skill/prose check that the ceremony block exists, referenc
 branch, and contains no `--force` in the documented happy path; the runtime collapse is exercised by
 the AC-1 behavioral test (the steps the ceremony names).
 
+## Test fixtures
+
+**A NEW fixture with a REGISTERED merge hook is required — the existing guard fixture cannot
+exercise the invariant this entity relaxes.** Verified this session: the only guard fixture is
+`internal/status/testdata/guard-workflow/` (a `README.md` + `010-blocked.md` with
+`mod-block: merge:pr-merge`), and there is **no `_mods/` directory anywhere under
+`internal/status/testdata/`**. Because `scanMods(entityDir)` (`mutate.go:282`) returns an empty map
+when no `_mods/` dir exists, the merge-hook branch at `handlers.go:128-135` — `len(mergeHooks) > 0`
+— is **never reached** by the current fixtures. Today's `010-blocked.md` only exercises the
+`mod-block`-pending guard (`handlers.go:112`), NOT the merge-hook-unsatisfied guard that line 128
+implements and that `merge: local` relaxes. A test written against `guard-workflow` would pass
+whether or not the relaxation is correct — a vacuous pass.
+
+The new fixture must therefore include:
+
+- a workflow `README.md` declaring `merge: local` (plus a sibling default-policy variant or reuse of
+  `guard-workflow` for the absent-key case), and
+- a `_mods/` directory containing at least one mod file with a `## Hook: merge` heading, so
+  `scanMods` returns a non-empty `["merge"]` and the line-128 branch actually fires. A minimal stub
+  (`name:`/`description:` frontmatter + a `## Hook: merge` section) is sufficient — the guard reads
+  only the hook registration, not the hook body.
+
+This single fixture (registered merge hook, `merge: local`) is what lets the guard tests below
+distinguish "guard correctly relaxed" from "guard never consulted." The companion negative cases
+(no-sentinel, no-policy, `mod-block`-pending) run against the SAME registered-hook fixture so the
+hook is present in every case and only the `pr`/`mod-block`/policy state varies.
+
+**Single-root, for oracle parity.** The fixture must be single-root (the `_mods/` dir lives
+alongside the README and entities, `definitionDir == entityDir`) so the guard tests can run as
+`runNative`-vs-`runOracle` parity assertions. The Python oracle has no split-root concept and
+resolves `scan_mods(pipeline_dir)` from its single dir (established by the `mods-definition-dir-location`
+entity); a single-root fixture resolves `_mods/` identically in both runners, keeping the parity
+suite green. Do not make this fixture split-root — that would diverge native from oracle on mod
+resolution and force the merge-hook guard tests to native-only, losing the parity coverage AC-4
+requires.
+
 ## Test plan
 
 - **Guard behavior (AC-1, AC-3, AC-4):** Go unit/behavioral tests over the terminal-transition guard
-  in `internal/status` for: (a) sentinel-satisfied no-PR terminalize succeeds without `--force`;
-  (b) no-sentinel/no-policy still refuses (the catch is preserved); (c) `merge: local` policy exempts
-  the empty-`pr`/empty-`mod-block` case; (d) `mod-block`-pending still blocks under any policy. Each
-  guard test must be mirrored as an oracle-parity assertion (`runNative` vs `runOracle`) — the oracle
-  `bin/status` and the Go native runner change together. Cost: moderate — touches the serialized
-  `internal/status` lane and the vendored oracle; sequence after `zs` + architecture-review-cleanups.
+  in `internal/status`, **all run against the new registered-merge-hook fixture** (see "Test
+  fixtures" above — without a registered `## Hook: merge` mod the merge-hook branch is never reached
+  and the tests pass vacuously), for: (a) sentinel-satisfied no-PR terminalize succeeds without
+  `--force`; (b) no-sentinel/no-policy still refuses (the catch is preserved); (c) `merge: local`
+  policy exempts the empty-`pr`/empty-`mod-block` case; (d) `mod-block`-pending still blocks under
+  any policy. Each guard test must be mirrored as an oracle-parity assertion (`runNative` vs
+  `runOracle`) — the oracle `bin/status` and the Go native runner change together. Cost: moderate —
+  touches the serialized `internal/status` lane and the vendored oracle; sequence after `zs` +
+  architecture-review-cleanups.
 - **Display (AC-2):** golden/snapshot test of the `status` table with a `local-merge:` sentinel,
   native + oracle parity. Cost: low.
 - **Policy parsing:** unit test that `merge: local` / `merge: pr` / absent parse correctly from README
@@ -257,3 +353,16 @@ the AC-1 behavioral test (the steps the ceremony names).
 ### Summary
 
 Consolidated #225/#217/#223 into one coherent design: a `merge: local|pr` README key (default `pr`) is the durable policy layer; a `pr=local-merge:{sha}` sentinel is the per-entity honest merge record for un-declared workflows; an FO-prose ship-local ceremony collapses the repetition. Key finding: #217's live `--force` friction is rooted in a FALSE claim in `_mods/pr-merge.md:100` — clearing mod-block does not satisfy the guard, which checks post-update `pr`/`mod-block` state regardless of merge order. The guard relaxation must land in BOTH the Go native runner and the vendored Python oracle to keep `zz_independent_parity_test.go` green; that parity cost, plus the security-relevant guard relaxation and the new README default, is why staff review is recommended. Impl touches the serialized `internal/status` lane (handlers.go/stages.go/format.go) and sequences after zs + architecture-review-cleanups.
+
+## Stage Report: ideation (cycle 2)
+
+- DONE: [M-1, the safety-critical one] Close the merge:local guard-relaxation ambiguity. State EXPLICITLY: merge:local changes only the guard CHECK (it exempts the pr-field requirement, validating instead that the merge-hook ceremony completed via mod-block), NOT the ceremony STRUCTURE — the mod-block set then invoke-hook then clear ceremony stays MANDATORY when a merge hook is registered. An FO must NOT manually clear mod-block and terminalize without running the hook under merge:local. Reaffirm the sentinel path (pr=local-merge:{sha} set ONLY after the local merge truly lands) as the safe primary. Net: no wrongful-terminalization path.
+  Added the "relaxes the guard CHECK, NOT the ceremony STRUCTURE" bullet under #225 (it pins handlers.go:128 as the predicate that changes, names the wrongful-terminalization scenario explicitly — set mod-block, skip hook, clear, terminalize → entity reads done with no merge — and states merge:local must not authorize it). Reaffirmed the sentinel as the safe primary in #217 sub-part 1: sentinel set ONLY post-merge with the landed merge-commit SHA, sequence invoke→merge-lands→set-sentinel→clear-mod-block→terminalize, noting the mechanism cannot verify a physical merge so ceremony structure is the load-bearing control.
+- DONE: [M-2 clarification] Pin the false-claim reference precisely: it is the LIVE state-checkout mod docs/dev/.spacedock-state/_mods/pr-merge.md (the `### Fallback: no PR host available` section, ~line 100, which claims clearing mod-block keeps the guard satisfied — false, the guard checks post-update state). The reviewer looked at a different/stale code-repo copy (mods/pr-merge.md); note that the live state-checkout mod is the one with the claim, and that the f2 (mods-definition-dir) entity relocates it — coordinate the prose fix with f2's move.
+  Verified the file-mixup directly: docs/dev/.spacedock-state/_mods/pr-merge.md:100 carries the verbatim false claim; the code-repo mods/pr-merge.md (lines 49/51) has no guard-satisfaction claim at all. Pinned both the problem-analysis reference and the #217 fix sub-part to the state-checkout file, noted the reviewer inspected the code-repo copy, and added the f2 (mods-definition-dir-location, id f2yr32fgw3pfxp7ekq4wy1np) coordination note — f2 relocates this mod to docs/dev/_mods/ as delete-state + add-main, either landing order is fine as long as the correction lands in whichever copy is live.
+- DONE: [M-3] Specify that the guard tests need a NEW fixture with a REGISTERED merge hook (a _mods/ dir with a `## Hook: merge`) to exercise the merge-hook-unsatisfied guard — the existing guard-workflow fixture only has mod-block-pending and no _mods/, so it never tests the merge-hook invariant this entity relaxes. Keep the merge:pr default + parity (Go + Python oracle) requirements.
+  Confirmed live: the only guard fixture is internal/status/testdata/guard-workflow (README + 010-blocked.md with mod-block: merge:pr-merge), and NO _mods/ dir exists anywhere under internal/status/testdata — so scanMods returns empty and the handlers.go:128 merge-hook branch is never reached today (a test there would pass vacuously). Added a "Test fixtures" section specifying a NEW single-root fixture with merge: local + a _mods/ dir carrying a `## Hook: merge` mod, tightened AC-3's "Verified by" and the guard-behavior test-plan bullet to require all guard tests run against it, and pinned single-root so the runNative-vs-runOracle parity holds. merge:pr default (AC-3) + Go/oracle parity (AC-4) requirements left intact.
+
+### Summary
+
+Rework of the PASS-WITH-CONCERNS ideation — design unchanged (merge: local|pr default pr, the sentinel, FO-prose ship-local all stand), three findings closed. M-1 (safety-critical): added an explicit invariant that merge:local relaxes only the guard CHECK at handlers.go:128 (exempts the pr requirement, validates the mod-block-cleared ceremony completed), never the MANDATORY set→invoke→clear ceremony structure, naming the wrongful-terminalization scenario it must not open; reaffirmed the sentinel set post-merge as the safe primary. M-2: verified the file-mixup (the false line-100 claim is in the LIVE state-checkout mod, not the code-repo copy the reviewer checked) and pinned both references plus the f2 relocation-coordination note. M-3: confirmed no _mods/ fixture exists, so the merge-hook branch is currently untested, and specified a NEW single-root fixture with a registered `## Hook: merge` mod that the guard tests must use, preserving the merge:pr default + Go/oracle parity requirements.
