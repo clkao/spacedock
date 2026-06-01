@@ -1,13 +1,13 @@
 ---
 id: segh9j67xb7hv1qxgqzxe90g
 title: Ship the team's proven working habits in the tool's own instructions
-status: validation
+status: done
 source: hx decomposition (B of 3) — captain 2026-06-01; staff review
 score: "0.30"
 started: 2026-06-01T06:04:55Z
-completed:
-verdict:
-worktree: .worktrees/spacedock-ensign-ship-working-principles-in-contract
+completed: 2026-06-01T13:13:10Z
+verdict: PASSED
+worktree: 
 issue:
 mod-block: 
 pr: #248
