@@ -164,13 +164,18 @@ func TestPluginPredatesContractRemedy(t *testing.T) {
 }
 
 // TestCompareHostSubstitution verifies the host parameter is woven into the
-// too-old-plugin remedy (the only place an init/update host appears).
+// too-old-plugin remedy (the only place an install/update host appears). The
+// remedy must name the live `spacedock install` command, not the removed `init`
+// (which now exits 2) — the remedy a user hits at the gate must run.
 func TestCompareHostSubstitution(t *testing.T) {
 	for _, host := range []string{"claude", "codex"} {
 		res := Compare(2, ">=1,<2", host, "")
-		want := "spacedock init --host " + host
+		want := "spacedock install --host " + host
 		if !strings.Contains(res.Message, want) {
 			t.Errorf("too-old-plugin remedy for host %q missing %q: %q", host, want, res.Message)
+		}
+		if strings.Contains(res.Message, "spacedock init") {
+			t.Errorf("too-old-plugin remedy for host %q names the removed init command: %q", host, res.Message)
 		}
 	}
 }

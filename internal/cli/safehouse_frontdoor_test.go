@@ -114,7 +114,7 @@ func TestClaudePluginGateShortCircuitsBeforeSafehouse(t *testing.T) {
 	if fake.launchedArg != nil {
 		t.Fatalf("Launch invoked despite plugin-gate failure: %v", fake.launchedArg)
 	}
-	if !strings.Contains(stderr.String(), "spacedock init") && !strings.Contains(stderr.String(), "spacedock doctor") {
+	if !strings.Contains(stderr.String(), "spacedock install") && !strings.Contains(stderr.String(), "spacedock doctor") {
 		t.Fatalf("stderr missing plugin-gate remedy: %q", stderr.String())
 	}
 	if strings.Contains(stderr.String(), ".safehouse profile") {
@@ -237,7 +237,7 @@ func TestCodexPluginGateShortCircuitsBeforeSafehouse(t *testing.T) {
 	if fake.launchedArg != nil {
 		t.Fatalf("Launch invoked despite plugin-gate failure: %v", fake.launchedArg)
 	}
-	if !strings.Contains(stderr.String(), "spacedock init") && !strings.Contains(stderr.String(), "spacedock doctor") {
+	if !strings.Contains(stderr.String(), "spacedock install") && !strings.Contains(stderr.String(), "spacedock doctor") {
 		t.Fatalf("stderr missing plugin-gate remedy: %q", stderr.String())
 	}
 	if strings.Contains(stderr.String(), ".safehouse profile") {

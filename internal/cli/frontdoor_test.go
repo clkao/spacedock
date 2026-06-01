@@ -5,6 +5,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -108,7 +109,7 @@ func TestClaudeFrontDoorUnresolvableManifestFailsFast(t *testing.T) {
 	if fake.launchedArg != nil {
 		t.Fatalf("launch seam invoked with unresolvable manifest: %v", fake.launchedArg)
 	}
-	if !strings.Contains(stderr.String(), "spacedock doctor") && !strings.Contains(stderr.String(), "spacedock init") {
+	if !strings.Contains(stderr.String(), "spacedock doctor") && !strings.Contains(stderr.String(), "spacedock install") {
 		t.Fatalf("stderr missing actionable remedy pointer: %q", stderr.String())
 	}
 }
@@ -131,8 +132,56 @@ func TestClaudeFrontDoorNonEmptyMissingManifestFailsFast(t *testing.T) {
 	if fake.launchedArg != nil {
 		t.Fatalf("launch seam invoked with a missing manifest: %v", fake.launchedArg)
 	}
-	if !strings.Contains(stderr.String(), "spacedock doctor") && !strings.Contains(stderr.String(), "spacedock init") {
+	if !strings.Contains(stderr.String(), "spacedock doctor") && !strings.Contains(stderr.String(), "spacedock install") {
 		t.Fatalf("stderr missing actionable remedy pointer: %q", stderr.String())
+	}
+}
+
+// TestGateRemedyNamesLiveInstallCommand: every gateHost remedy must point at a
+// command the binary actually recognizes. After the init->install rename a user
+// who hits the gate and is told to "run spacedock init --host …" runs a command
+// that now exits 2 (unknown command). Drive each remedy branch (resolve error,
+// no plugin, missing manifest) and assert the printed remedy names `spacedock
+// install` and never `spacedock init`; then prove the named command resolves by
+// feeding it through cli.Run and asserting it is not the unknown-command exit 2.
+func TestGateRemedyNamesLiveInstallCommand(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "no-such-dir", ".claude-plugin", "plugin.json")
+	cases := []struct {
+		name string
+		fake *fakeHost
+	}{
+		{"resolve error", &fakeHost{resolveErr: errors.New("host CLI failed")}},
+		{"no plugin", &fakeHost{manifest: ""}},
+		{"missing manifest", &fakeHost{manifest: missing}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var stderr bytes.Buffer
+			if ok := gateHost(tc.fake, "claude", &stderr); ok {
+				t.Fatalf("gateHost = ok, want denied for %s", tc.name)
+			}
+			remedy := stderr.String()
+			if !strings.Contains(remedy, "spacedock install") {
+				t.Fatalf("remedy does not name the live install command: %q", remedy)
+			}
+			if strings.Contains(remedy, "spacedock init") {
+				t.Fatalf("remedy names the removed init command (exits 2): %q", remedy)
+			}
+		})
+	}
+
+	// The command the remedy names must resolve in the live command tree. cobra's
+	// Find returns the matched command for a registered name and falls back to the
+	// root for an unknown one — so `install` must resolve to a non-root command
+	// while the removed `init` must fall back to root (the unknown-command path
+	// that exits 2). Resolution is deterministic and touches no host CLI.
+	var stdout, stderr bytes.Buffer
+	root := newRootCommand(context.Background(), nil, t.TempDir(), nil, &stdout, &stderr, &fakeRunner{})
+	if cmd, _, err := root.Find([]string{"install"}); err != nil || cmd == root {
+		t.Fatalf("`install` did not resolve to a registered command (cmd=%v, err=%v)", cmd.Name(), err)
+	}
+	if cmd, _, _ := root.Find([]string{"init"}); cmd != root {
+		t.Fatalf("`init` resolved to a command (%v) — the removed verb must fall back to the unknown-command path", cmd.Name())
 	}
 }
 

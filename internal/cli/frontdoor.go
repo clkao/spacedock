@@ -58,13 +58,13 @@ func gateHost(ops hostOps, host string, stderr io.Writer) (ok bool) {
 	if err != nil {
 		fmt.Fprintf(stderr,
 			"Spacedock: could not resolve the installed %s plugin (%v). "+
-				"Run `spacedock doctor` or `spacedock init --host %s`.\n", host, err, host)
+				"Run `spacedock doctor` or `spacedock install --host %s`.\n", host, err, host)
 		return false
 	}
 	if manifestPath == "" {
 		fmt.Fprintf(stderr,
 			"Spacedock: no installed %s plugin found. "+
-				"Run `spacedock init --host %s` (or `spacedock claude --skip-contract-check` to bootstrap).\n", host, host)
+				"Run `spacedock install --host %s` (or `spacedock claude --skip-contract-check` to bootstrap).\n", host, host)
 		return false
 	}
 	res := contract.ManifestVerdict(manifestPath, host, devBranch)
@@ -74,7 +74,7 @@ func gateHost(ops hostOps, host string, stderr io.Writer) (ok bool) {
 	if res.Verdict == contract.NoPluginFound {
 		fmt.Fprintf(stderr,
 			"Spacedock: the installed %s plugin reported a manifest path that does not exist (%s). "+
-				"Run `spacedock init --host %s` (or `spacedock claude --skip-contract-check` to bootstrap).\n",
+				"Run `spacedock install --host %s` (or `spacedock claude --skip-contract-check` to bootstrap).\n",
 			host, manifestPath, host)
 		return false
 	}
