@@ -10,6 +10,7 @@ score: "0.34"
 worktree: .worktrees/spacedock-ensign-cli-cobra-redesign
 issue:
 mod-block: merge:pr-merge
+pr: #241
 ---
 
 The top-level `spacedock --help` is a wall of mixed-altitude text: usage lines mix terse and verbose, some commands carry a wrapping inline sentence while others have none, the bottom is an unscannable prose paragraph, and flags (sandbox knobs, `--plugin-dir`) are buried in prose. This entity migrates the hand-rolled `internal/cli` dispatch to **cobra** and lands a grouped, jargon-free command surface. The design below was **brainstormed and captain-approved** (2026-05-31) — ideation formalizes it into entity-level ACs + a test plan; it does not re-decide.
