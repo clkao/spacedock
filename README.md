@@ -1,13 +1,16 @@
 # Spacedock
 
-Spacedock runs agent work through defined stages, so you can delegate in batches and make only the calls that need your judgment.
+Hand an agent a multi-step job and it drifts, skips steps, or invents its own path. Hand it a workflow and it follows the workflow.
 
-The first officer coordinates the flow: it dispatches workers to advance each work item and surfaces approval-worthy decisions to you, the captain, so batches move forward without pulling you into every session.
+Spacedock runs agent work through stages you define. Each stage gets a fresh context, an explicit gate, and a structured report. Reviewers are allowed to push back. State lives outside the agent, so work survives the context limit and picks up the next session where it left off.
+
+We built Spacedock because we were there. We lived the pipelines that didn't finish, the reviewers that rubber-stamped, the work that died at the context limit, and the routines spread across too many tools. The tool is the way we wished agent work had been organized from the start.
 
 **You want Spacedock if:**
 
-- **You're a human tired of context-switching** between agent sessions to make approval decisions. Spacedock batches the decisions an agent wants to hand back to you and presents each with evidence, so you approve or redirect without re-loading context.
-- **You're an agent delegating repeatable work** and want a structured place to queue up approval-worthy decisions for your human without interrupting them for every tiny step.
+- **You delegate repeatable work to agents** (the same pipeline run on many inputs: code reviews, content drafts, outreach batches) and you want each run to finish, not stop halfway. Spacedock dispatches a fresh agent per stage, with an approval gate where your judgment actually matters.
+- **You don't trust single-agent output** on its own. Spacedock review stages are allowed to push back, with a 3-strikes escalation so you only see what the reviewer couldn't resolve.
+- **Your work spans days or weeks.** A blog draft, a launch strategy, a multi-week benchmark. Spacedock holds artifact state outside the agent, so the next session resumes instead of restarts.
 
 ## What's Different
 
