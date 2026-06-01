@@ -3522,6 +3522,210 @@ def _read_frontmatter(filepath):
     return fields
 
 
+README_WITH_STAGE_REPORT_REQUIRED = textwrap.dedent("""\
+    ---
+    entity-type: task
+    entity-label: task
+    stages:
+      defaults:
+        worktree: false
+        concurrency: 2
+        require-stage-report: true
+      states:
+        - name: backlog
+          initial: true
+        - name: ideation
+          gate: true
+        - name: implementation
+          worktree: true
+        - name: validation
+          worktree: true
+          fresh: true
+          gate: true
+        - name: done
+          terminal: true
+    ---
+
+    # Test Pipeline (stage-report enforced)
+    """)
+
+
+def _entity_with_body(id, title, status, body, score='', worktree='', pr=''):
+    """Generate an entity file with a custom body section (after frontmatter).
+
+    Built as frontmatter + body concatenation so the body's own indentation is
+    not flattened by an outer `textwrap.dedent` (a multi-line `{body}`
+    interpolation produces inconsistent leading whitespace that defeats the
+    common-leading-whitespace calculation).
+    """
+    frontmatter = textwrap.dedent(f"""\
+        ---
+        id: {id}
+        title: {title}
+        status: {status}
+        source:
+        started:
+        completed:
+        verdict:
+        score: {score}
+        worktree: {worktree}
+        pr: {pr}
+        ---
+        """)
+    return frontmatter + "\n" + body
+
+
+class TestStageReportGuard(unittest.TestCase):
+    """Test stage-report-presence enforcement on status transitions.
+
+    Issue #235: in workflows where every stage produces an audit log section
+    (`## Stage Report: {stage}`), the FO can intermittently advance status
+    without writing the section. When the workflow opts in via
+    `stages.defaults.require-stage-report: true`, the status binary refuses
+    to advance `status: X -> Y` unless the entity body contains
+    `## Stage Report: X` (or `## Stage Report: X (cycle N)`).
+
+    Opt-in preserves backward compatibility with workflows that use pure
+    state-tracking stages (e.g. a `backlog` initial stage with no worker).
+    """
+
+    def setUp(self):
+        self._script_dir = tempfile.mkdtemp()
+        self.script_path = build_status_script(self._script_dir)
+
+    def tearDown(self):
+        os.unlink(self.script_path)
+        os.rmdir(self._script_dir)
+
+    def test_advance_refused_when_prior_stage_report_missing(self):
+        """Opt-in workflow: --set status=Y refused when body lacks '## Stage Report: X'."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            make_pipeline(tmpdir, README_WITH_STAGE_REPORT_REQUIRED, {
+                'task-a.md': _entity_with_body('001', 'Task A', 'ideation',
+                                               body='Description with no stage report.'),
+            })
+            result = run_status(tmpdir, '--set', 'task-a', 'status=implementation',
+                                script_path=self.script_path)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('Stage Report: ideation', result.stderr)
+            # Body unchanged, status field unchanged.
+            fields = _read_frontmatter(os.path.join(tmpdir, 'task-a.md'))
+            self.assertEqual(fields['status'], 'ideation')
+
+    def test_advance_allowed_when_prior_stage_report_present(self):
+        """Opt-in workflow: --set status=Y succeeds when body has '## Stage Report: X'."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            body = textwrap.dedent("""\
+                Description.
+
+                ## Stage Report: ideation
+
+                - DONE: chose approach
+                  Evidence: see commit abc123.
+
+                ### Summary
+
+                Approach selected.
+                """)
+            make_pipeline(tmpdir, README_WITH_STAGE_REPORT_REQUIRED, {
+                'task-a.md': _entity_with_body('001', 'Task A', 'ideation', body=body),
+            })
+            result = run_status(tmpdir, '--set', 'task-a', 'status=implementation',
+                                script_path=self.script_path)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            fields = _read_frontmatter(os.path.join(tmpdir, 'task-a.md'))
+            self.assertEqual(fields['status'], 'implementation')
+
+    def test_advance_allowed_from_initial_stage_without_report(self):
+        """Opt-in workflow: advancing OUT of the initial stage is exempt.
+
+        The initial stage is often a pure intake state without a worker.
+        Requiring a stage report for its exit would break the very first
+        advancement (entity creation -> first work stage).
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            make_pipeline(tmpdir, README_WITH_STAGE_REPORT_REQUIRED, {
+                'task-a.md': _entity_with_body('001', 'Task A', 'backlog',
+                                               body='Description with no stage report.'),
+            })
+            result = run_status(tmpdir, '--set', 'task-a', 'status=ideation',
+                                script_path=self.script_path)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            fields = _read_frontmatter(os.path.join(tmpdir, 'task-a.md'))
+            self.assertEqual(fields['status'], 'ideation')
+
+    def test_idempotent_status_update_allowed_without_report(self):
+        """Setting status to its current value is a no-op and bypasses the guard."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            make_pipeline(tmpdir, README_WITH_STAGE_REPORT_REQUIRED, {
+                'task-a.md': _entity_with_body('001', 'Task A', 'ideation',
+                                               body='Description with no stage report.'),
+            })
+            result = run_status(tmpdir, '--set', 'task-a', 'status=ideation',
+                                script_path=self.script_path)
+            self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_advance_allowed_with_force_bypass(self):
+        """--force bypasses the guard (escape hatch for manual repairs)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            make_pipeline(tmpdir, README_WITH_STAGE_REPORT_REQUIRED, {
+                'task-a.md': _entity_with_body('001', 'Task A', 'ideation',
+                                               body='Description with no stage report.'),
+            })
+            result = run_status(tmpdir, '--set', 'task-a',
+                                'status=implementation', '--force',
+                                script_path=self.script_path)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            fields = _read_frontmatter(os.path.join(tmpdir, 'task-a.md'))
+            self.assertEqual(fields['status'], 'implementation')
+
+    def test_advance_allowed_when_opt_in_absent(self):
+        """Default workflow (no require-stage-report) preserves prior behavior."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            make_pipeline(tmpdir, README_WITH_STAGES, {
+                'task-a.md': _entity_with_body('001', 'Task A', 'ideation',
+                                               body='Description with no stage report.'),
+            })
+            result = run_status(tmpdir, '--set', 'task-a', 'status=implementation',
+                                script_path=self.script_path)
+            self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_advance_matches_cycle_suffix(self):
+        """A report with the '(cycle N)' suffix from feedback rounds counts."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            body = textwrap.dedent("""\
+                Description.
+
+                ## Stage Report: ideation
+
+                - DONE: original cycle.
+
+                ## Stage Report: ideation (cycle 2)
+
+                - DONE: redone after feedback.
+                """)
+            make_pipeline(tmpdir, README_WITH_STAGE_REPORT_REQUIRED, {
+                'task-a.md': _entity_with_body('001', 'Task A', 'ideation', body=body),
+            })
+            result = run_status(tmpdir, '--set', 'task-a', 'status=implementation',
+                                script_path=self.script_path)
+            self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_error_message_names_the_missing_section(self):
+        """Error message is specific enough for an FO to fix without context."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            make_pipeline(tmpdir, README_WITH_STAGE_REPORT_REQUIRED, {
+                'task-a.md': _entity_with_body('001', 'Task A', 'implementation',
+                                               body='Description with no stage report.'),
+            })
+            result = run_status(tmpdir, '--set', 'task-a', 'status=validation',
+                                script_path=self.script_path)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('## Stage Report: implementation', result.stderr)
+            # Mentions --force as the documented escape hatch.
+            self.assertIn('--force', result.stderr)
+
+
 class TestEntityAsFolder(unittest.TestCase):
     """Test first-class entity-as-folder support (issue #99).
 

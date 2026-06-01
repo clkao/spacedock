@@ -288,6 +288,7 @@ stages:
   defaults:
     worktree: false
     concurrency: 2
+    {require-stage-report: true — opt-in (issue #235). When true, `status --set status=` refuses to advance unless the entity body contains a `## Stage Report: <prior_stage>` section (`(cycle N)`-suffixed reports also count). The initial stage is exempt. Reserves `--force` for explicit manual recovery. Recommended for workflows where every stage runs a worker that produces an audit log; skip for workflows whose initial-or-non-worker stages are pure state tracking.}
   states:
     - name: {first_stage}
       initial: true

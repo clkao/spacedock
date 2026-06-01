@@ -129,6 +129,8 @@ The checklist review produces an explicit count summary:
 
 **AC coverage cross-check.** Additionally, at every gate, scan the entity body's `## Acceptance criteria` section and confirm each `**AC-N**` item has at least one evidence citation from this stage's report or a prior stage report. Name any AC without evidence; REJECT if this stage was the natural place to address it. This cross-check is independent of checklist DONE/SKIPPED/FAILED accounting — checklist items are dispatch signals, AC items are entity properties.
 
+**Stage-report-presence enforcement.** Workflows can opt in to mechanical enforcement of stage-report presence by setting `stages.defaults.require-stage-report: true` in the workflow README. When opted in, the status binary refuses `status --set <slug> status=<next>` unless the entity body contains a `## Stage Report: <prior>` section (optionally `(cycle N)`-suffixed for feedback rounds). The initial stage is exempt because some workflows use a pure-state intake. The FO must ensure the section is appended before calling `--set status=`; if it is missing, fix the report rather than passing `--force` (the bypass exists for manual repairs, not for routine advancement).
+
 If the stage is not gated: if terminal, proceed to merge. Otherwise, decide reuse-or-fresh for the next stage.
 
 A completed worker is reusable only when both hold:
