@@ -11,6 +11,7 @@ worktree:
 issue:
 mod-block: 
 pr: #252
+archived: 2026-06-01T14:42:45Z
 ---
 
 The status tool resolves mods from the **entity** root, so in a split-root workflow mods must live in the state checkout (`docs/dev/.spacedock-state/_mods/`) — not next to the workflow definition (`docs/dev/README.md`). Captain decision: **mods belong with the workflow definition.** Change `scanMods` to read the definition dir, and migrate the `pr-merge` mod there.
