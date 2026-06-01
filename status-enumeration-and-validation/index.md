@@ -1,13 +1,13 @@
 ---
 id: s0cbyrbh9b2yb456exnsm72b
 title: status correctness — --next undercount, archive enumeration consistency, --set stage-name validation
-status: ideation
+status: implementation
 source: issue sweep (2026-05-31) — CL dev-workflow-ergonomics triage; consolidates #230, #207, #189, #163
 started: 2026-06-01T05:04:22Z
 completed:
 verdict:
 score: "0.28"
-worktree:
+worktree: .worktrees/spacedock-ensign-status-enumeration-and-validation
 issue:
 ---
 
