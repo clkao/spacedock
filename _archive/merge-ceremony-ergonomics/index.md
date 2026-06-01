@@ -11,6 +11,7 @@ worktree:
 issue:
 mod-block: 
 pr: #255
+archived: 2026-06-01T21:04:47Z
 ---
 
 Collapse the repetitive local-merge ceremony an FO performs at every terminal boundary when a
