@@ -1,9 +1,9 @@
 ---
 id: f2yr32fgw3pfxp7ekq4wy1np
 title: Mod files live with the workflow definition (docs/dev/_mods/), not the state checkout
-status: backlog
+status: ideation
 source: captain (2026-06-01) — "mods live with the workflow definition"
-started:
+started: 2026-06-01T04:46:06Z
 completed:
 verdict:
 score: 0.34
