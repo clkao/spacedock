@@ -4,10 +4,10 @@ title: Merge-ceremony ergonomics — ship-local combo, honest no-remote fallback
 status: validation
 source: issue sweep (2026-05-31) — CL dev-workflow-ergonomics triage; consolidates #223, #217, #225
 started: 2026-06-01T05:12:07Z
-completed:
-verdict:
+completed: 2026-06-01T21:04:47Z
+verdict: PASSED
 score: "0.30"
-worktree: .worktrees/spacedock-ensign-merge-ceremony-ergonomics
+worktree: 
 issue:
 mod-block: 
 pr: #255
