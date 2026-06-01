@@ -409,6 +409,202 @@ Total: 2 cheap Go-unit suites (B1/B2), 3 real-git e2es (B3/B4/B6, mechanisms all
 not discovery), and static skill-text assertions for the prose/contract changes (B3/B5/B6). No mocks
 anywhere (live git per the e2e rule).
 
+---
+
+# Ideation rework (2026-05-31) — staff-review findings M-1..M-4
+
+Independent staff review returned **PASS-WITH-CONCERNS**: the core design (orphan-branch state,
+`$inline`, state-init resume, FO sanity-check, push/pull sync) is sound and builds on Phase A
+correctly. This section reworks the four findings and re-affirms the recommended decomposition. The
+spikes (§Spike) are NOT re-run — they stand; this rework changes only the design's framing of the
+migration gate, the strength of the classifier requirement, the sync-conflict failure mode, and the
+e2e fidelity requirement. **Where this section conflicts with an earlier framing above, this section
+governs.** The earlier "Migration note" (operational/deferred) and the B1/B2 "recommendation" wording
+are superseded by M-1 and M-2 below.
+
+## Verified current state of THIS workflow's checkout (re-grounded for the rework, 2026-05-31)
+
+Re-inspected `docs/dev/.spacedock-state` directly before reworking, because M-1 hinges on its actual
+shape and the dispatch noted "state-remote already applied (origin=main repo, spacedock-state/dev
+pushed)":
+- Its `.git` is a **directory** (`hooks/`/`info/`/`logs/` present); `git rev-parse --git-common-dir`
+  returns its own `.git`. It is an **independent repo**, NOT a linked worktree.
+- It DOES now carry `origin = git@github.com:spacedock-dev/spacedock.git` (the main repo's origin) on
+  branch `spacedock-state/dev` — so the *remote* half of the migration is done (it is a clone of main
+  origin, branch pushed).
+- The main repo's `git worktree list` does **NOT** include `docs/dev/.spacedock-state` → it is not yet
+  a linked worktree of the main repo.
+- The path is currently ignored only via the **local, uncommitted** `.git/info/exclude`
+  (`**/.spacedock-state/`), NOT a committed `.gitignore` entry — so the ignore is invisible to a fresh
+  clone / to collaborators.
+
+**Net:** the checkout is structurally shape-(a) (independent repo) with the remote wired, but NOT yet
+shape-(c) (linked worktree on an orphan branch of the main repo). The remaining migration is the
+load-bearing step M-1 is about.
+
+## M-1 (CRITICAL) — the shape-(a)→(c) migration is a LOAD-BEARING PRE-GATE for B5/B6, not a post-ship step
+
+The earlier "Migration note" framed converting this checkout as a one-time *operational* step and
+explicitly said it "is not an AC of this entity." **That framing is wrong and is hereby superseded.**
+B5's halt-gate is keyed on `state_backend == "split-root" && entity_dir_present == "false"`. That
+condition is only **meaningfully testable** once the state checkout is a *linked worktree on the
+orphan branch* — because only then does the path's absence (fresh clone / `git worktree remove`)
+correspond to the real "orphan branch exists on origin but is not checked out → run `state init`" state
+the gate is designed to catch. While the checkout remains an *independent clone* sitting at the path,
+"absence" is not reachable through the shipped model (a fresh clone of main does not even reference
+that independent repo), so B5/B6 cannot be exercised against this workflow end-to-end. The migration
+is therefore **on the critical path** between B4 and B5, not an afterthought.
+
+**The migration as an explicit pre-gate (the remaining step, given the remote is already wired):**
+1. Confirm `spacedock-state/dev` is pushed to main `origin` (done — verified above).
+2. Commit the `.spacedock-state/` ignore to the code branch's tracked `.gitignore` (it is currently
+   only in local `.git/info/exclude`, so collaborators/fresh clones do not ignore it). This is R1
+   (zero code-branch churn) made durable, not just local.
+3. Replace the independent clone at `docs/dev/.spacedock-state` with a **linked worktree** of the main
+   repo on `spacedock-state/dev`: move/remove the standalone clone, then
+   `git worktree add docs/dev/.spacedock-state spacedock-state/dev` from the main repo. The branch
+   history is already on origin (step 1), so no history is lost.
+4. Verify: main repo `git worktree list` now lists `docs/dev/.spacedock-state`; `spacedock status`
+   still renders; the code branch `git status --porcelain` is empty (R1 holds).
+
+**Sequencing consequence (the gate):** B1/B2 (parser) and B3/B4 (commission + `state init`) stay on
+the critical path and do NOT depend on the migration — they are exercised in throwaway sandboxes /
+fresh fixtures (per the spikes), where the linked-worktree shape is created from scratch by commission
+itself. **B5 and B6 DEPEND ON the migration having landed for this workflow**, because their behavior
+is verified against this workflow's real checkout (the FO boots this workflow; the 2-writer sync rides
+this workflow's orphan branch on origin). Concretely: B5/B6 are blocked-by the migration; B1–B4 are
+not. The migration is an explicit pre-gate before B5/B6 implementation, surfaced for the captain to
+sequence, and it becomes a tracked gating item — not "not an AC."
+
+## M-2 — `classifyState` (all three sites) + the validator allowing `$inline` is a MUST, not a recommendation
+
+The earlier B1 said "Recommendation: a single shared classifier." **Elevated to MUST.** The grounding
+makes the necessity hard, not stylistic:
+
+- The only `state:` rejection set that exists today is in `resolveRoots` (roots.go:59-65): it rejects
+  **absolute** and **`..`-escaping** values. `$inline` is **neither** — it is a relative, non-escaping
+  token. Verified: there is no `$inline` handling anywhere in `internal/` today. So **without**
+  `classifyState`, every site treats `$inline` as an ordinary relative path and joins it:
+  - `resolveRoots` → `entityDir = definitionDir/$inline`,
+  - `splitRootStateCheckout` (helpers.go:127-135) → `workflowDir/$inline`,
+  - `discoverWorkflows` prune (handlers.go:378-383) → prunes `definitionDir/$inline`.
+  A literal `…/$inline` directory would be created/scanned. This is a correctness defect, not a
+  preference — hence MUST.
+- **The validator inherits this through `resolveRoots`.** Verified: `validateWorkflow` does NOT parse
+  `state:` itself; it receives `entityDir` from `resolveRoots` (handlers.go:229 and
+  native_runner.go:316 both pass `roots.entityDir`). There is therefore **no separate validator
+  rejection set to amend** — the requirement is precisely that the shared `classifyState` (which
+  `resolveRoots` MUST call) maps `$inline → inline` so `entityDir == definitionDir`. With that,
+  `--validate` enumerates entities beside the README (correct), instead of validating an empty/literal
+  `…/$inline` dir. "The validator MUST allow `$inline` through" = "the validator's `entityDir` comes
+  from a classifier that treats `$inline` as inline." Stating the mechanism so the implementer does not
+  hunt for a nonexistent second rejection list.
+
+**MUST, concretely:**
+- `classifyState(stateValue) → (mode, relPath, err)` MUST exist in `internal/status` and be the SINGLE
+  point where `state:` is interpreted. All three read sites (resolveRoots, splitRootStateCheckout,
+  discoverWorkflows prune) MUST call it. The existing absolute/`..` rejection MUST move INTO the
+  classifier so all three share one validation.
+- `classifyState` MUST map `$inline` (exact, post-`TrimSpace`) → `inline` and empty → `inline`,
+  returning no path to join; any other value → `split-root` after the absolute/`..` check.
+- **Negative test (MUST):** assert that `resolveRoots`, `splitRootStateCheckout`, and
+  `discoverWorkflows` do NOT create or reference a literal `$inline` directory — i.e.
+  `resolveRoots($inline).entityDir == definitionDir` (no `/$inline` suffix),
+  `splitRootStateCheckout($inline) == ""`, and the prune scan over a `$inline` workflow leaves no
+  `…/$inline` path on disk and prunes nothing. This negative is the regression guard that the three
+  sites never re-acquire the literal-join behavior.
+
+## M-3 — B6 sync rebase-conflict FAILURE MODE is contractual: HALT, surface, no force-push, no auto-resolve
+
+The earlier B6 "Conflict handling" said the writer "stops and surfaces it (does not force-push)."
+**Made explicit and contractual:**
+
+> **Rebase-conflict halt (B6 contract).** When a writer runs `git pull --rebase origin <state-branch>`
+> (at FO boot, or after a push rejection) and the rebase **conflicts** — the only realistic cause is
+> two writers editing the SAME entity's frontmatter concurrently, the path-scoped rule's known
+> boundary — the writer MUST:
+> 1. **HALT** the operation in progress (dispatch, at the FO; commit/push, at an ensign). Do not
+>    proceed against an unmerged state tree.
+> 2. **Abort the rebase** (`git rebase --abort`) to leave the checkout in a clean, known state.
+> 3. **Surface** the conflict to the captain/operator with the conflicting entity path(s) and the
+>    peer commit, and **stop**. This is manual intervention.
+> 4. MUST NOT `--force`/`--force-with-lease` push, and MUST NOT auto-resolve (no `-X ours/theirs`, no
+>    discarding either side). Either choice silently loses a peer's frontmatter edit.
+>
+> This matches the existing **escalate-rather-than-guess** discipline (ensign core: "If requirements
+> are unclear or ambiguous, escalate to the first officer rather than guessing"). A full lock model is
+> out of scope (per the entity); the halt IS the boundary behavior for the rare same-entity collision.
+
+Contract homes (unchanged from B6 above): the FO pull-on-boot + halt-on-conflict in first-officer
+SKILL.md; the ensign push-after-commit + pull-on-rejection + halt-on-conflict in the ensign shared
+core, alongside the path-scoped-commit rule. The static skill-text tests for B6 MUST assert the
+halt/abort/surface/no-force-push prose is present at both homes, not just the happy-path push/pull.
+
+## M-4 — B3/B4/B6 e2es MUST replicate the SPIKED mechanics with captured fixtures/assertions
+
+The spikes (§Spike) proved the mechanism in a throwaway sandbox. The e2es MUST **replicate those exact
+mechanics with captured fixtures and explicit assertions**, not re-derive the git steps from memory —
+otherwise the e2e can pass while exercising a subtly different (and unspiked) path. Per spiked
+mechanic, the e2e MUST capture and assert:
+
+- **B3 (commission, replicates §Spike (a) — orphan-as-linked-worktree):** the e2e MUST perform the
+  spiked sequence verbatim — birth orphan in a temp detached worktree, `--orphan`, **clear the
+  inherited index/tree** (`git rm -rf --cached . && rm -rf`), seed, `git worktree add` at the
+  gitignored path, push. Captured assertions: the orphan branch exists on origin; `docs/...` state
+  path is a **linked worktree** (appears in `git worktree list`); code-branch `git status --porcelain`
+  is **empty** (R1); `spacedock status` renders the seeded entity. The "clear inherited tree" step is
+  the spike-surfaced mechanic that MUST be present and asserted (assert the orphan's initial tree has
+  NO code-branch files), since omitting it silently regresses to a polluted state branch.
+- **B4 (`state init`, replicates §Spike (b) — fresh-clone resume + path-exists guard):** fixture = a
+  bare main remote with a commissioned split workflow + pushed orphan branch; fresh-clone main (state
+  path absent). Captured assertions: pre-init `status --boot --json` shows `entity_dir_present:false`;
+  `state init` (= `git fetch origin <branch>` + `git worktree add`) makes `spacedock status` render
+  the seeded entity; **a second `state init` is a no-op** and does NOT FATAL — the spike surfaced that
+  a 2nd `git worktree add` fatals "already exists", so the e2e MUST assert the path-exists guard skips
+  re-`worktree add` (exit 0, no fatal), not rely on git's behavior.
+- **B6 (2-writer sync, replicates §Spike (c) — push / rejection / pull-rebase / re-push):** fixture =
+  bare main origin + host-A clone + host-B clone. Captured assertions, both directions: A
+  commits+pushes a path-scoped entity commit; B's push is **rejected** (non-fast-forward); B
+  `pull --rebase` replays B's path-scoped commit atop A's with **zero conflict** (distinct entity
+  files) → both entities present + **linear history**; B re-pushes; A `pull --rebase` sees B's. PLUS a
+  **conflict-path assertion for M-3**: two writers edit the SAME entity's frontmatter, the
+  `pull --rebase` conflicts, and the e2e asserts the writer **aborts the rebase and halts** (clean
+  checkout, non-zero/surfaced, NO force-push) rather than silently merging — exercising the M-3
+  failure mode, not just the happy path.
+
+All three e2es use **real git, no mocks** (the e2e rule). Mechanisms are PROVEN by the spikes; the
+e2es harden the known-working path AND pin the spike-surfaced gotchas (clear-inherited-tree,
+path-exists guard, rebase-conflict halt) as regression guards.
+
+## Re-affirmed decomposition (the reviewer's cut)
+
+The staff review recommended, and this rework adopts, this implementation cut:
+- **B.1 = B1 + B2 + B3** — parser semantics (`classifyState` MUST + `state-branch` derivation) and
+  commission scaffolding. Self-contained Go-unit + commission-e2e work; no dependency on this
+  workflow's migration (commission builds the linked-worktree shape from scratch in a fixture).
+- **B.2 = B4** — `spacedock state init` (the fresh-clone resume subcommand), with its resume e2e.
+  Depends on B.1's mode classification + branch derivation.
+- **B.3 (post-migration) = B5 + B6** — the FO halt-gate contract (B5) and the multi-writer
+  push/pull-rebase + halt-on-conflict contract (B6), with the 2-writer e2e. **B.3 is gated on the
+  M-1 migration having landed for this workflow** (and on Phase A's boot fields, already merged), since
+  B5/B6 are verified against this workflow's real linked-worktree-on-orphan-branch checkout.
+
+This supersedes the earlier "Internal sequencing proposal" only in grouping (B3 joins B1/B2 in B.1)
+and in making the migration an explicit gate before B.3; the dependency reasoning (B1/B2 first, B5
+after Phase A) is unchanged.
+
+## Acceptance-criteria deltas from the rework
+
+The hardened AC-1..AC-6 above stand, with these strengthenings folded in:
+- **AC-1** — "via one shared classifier" is now a MUST; the no-literal-`$inline`-join negative is a
+  required test at all three sites (M-2).
+- **AC-5 / AC-6** — add an explicit **migration pre-gate** as a tracked gating item for B.3: B5/B6 are
+  verified only after `docs/dev/.spacedock-state` is a linked worktree on the orphan branch (M-1). The
+  migration is a gating deliverable, not "not an AC."
+- **AC-6** — adds the rebase-**conflict halt** assertion (abort + surface + no force-push) to the
+  2-writer e2e and the contract skill-text tests (M-3), and requires the e2es to replicate the spiked
+  mechanics with captured fixtures (M-4).
+
 ## Stage Report: ideation
 
 - DONE: Design B1 + B2 (semantics): finalize a non-colliding explicit-inline sentinel for `state:` (captain suggested `$inline`) with empty→inline backward-compat and path→split-root, and the resolveRoots/splitRootStateCheckout handling (sentinel treated as inline, NOT joined as a path); plus the workflow-slug-derived `state-branch` default (`spacedock-state/<slug>`, overridable via README). Give concrete parser behavior + proof altitude (status-parser tests over all three modes; branch-name derivation test).
@@ -421,3 +617,18 @@ anywhere (live git per the e2e rule).
 ### Summary
 
 Designed Phase B as the captain-fixed same-repo orphan-branch model, superseding Phase A's separate-repo recommendation. Headline findings: (1) `state:` is read at THREE sites that all treat non-empty as a path-to-join, so `$inline` needs ONE shared classifier or a site joins a literal `…/$inline` — the load-bearing B1 decision; (2) Phase A already ships the exact boot fields (`state_backend`, `entity_dir_present`) B5's halt-gate keys off, so B5 is a pure FO-contract addition with no new code; (3) all three riskiest unknowns were SPIKED end-to-end and PASS, surfacing two concrete mechanics (orphan checkout inherits the source tree → clear it before seeding; a 2nd `worktree add` fatals → `state init` must path-guard) now folded into the design. Sequencing: B1/B2 parser → B3/B4 commission+init → B5/B6 contracts, with B5 gated on Phase A merging. No code committed (ideation, design-only).
+
+## Stage Report: ideation (cycle 2 — staff-review rework M-1..M-4)
+
+- DONE: M-1 (CRITICAL) — recast the shape-(a)→(c) migration from "operational/not-an-AC" to a LOAD-BEARING PRE-GATE that explicitly gates B5/B6.
+  Re-grounded this workflow's checkout: independent repo (`.git` dir, own common-dir) with origin=main repo + `spacedock-state/dev` pushed, but NOT yet a linked worktree (main `git worktree list` excludes it; ignore is only in local `.git/info/exclude`). Stated the remaining migration (commit `.gitignore`, replace clone with `git worktree add` linked worktree) as an explicit pre-gate; B1–B4 not migration-dependent, B5/B6 blocked-by migration-landed; made it a tracked gating item, not "not an AC."
+- DONE: M-2 — elevated `classifyState` (all three sites) + validator-allows-`$inline` from recommendation to MUST.
+  Verified the only `state:` rejection set is roots.go:59-65 (absolute + `..`), and `$inline` is in neither set → without the classifier all three sites join a literal `…/$inline`. Verified the validator has NO own `state:` parse — it inherits `entityDir` from `resolveRoots` (handlers.go:229, native_runner.go:316), so "validator allows `$inline`" = "resolveRoots' classifier maps `$inline → inline`." Specified the MUST + the no-literal-`$inline`-join negative test at all three sites.
+- DONE: M-3 — specified B6's rebase-conflict FAILURE MODE as a contract: HALT, `git rebase --abort`, surface the conflicting entity + peer commit, stop; NO force-push, NO auto-resolve.
+  Tied to the existing escalate-rather-than-guess discipline; contract homes at FO + ensign-core; static skill-text tests MUST assert the halt/abort/surface prose at both homes.
+- DONE: M-4 — required B3/B4/B6 e2es to replicate the spiked mechanics with captured fixtures/assertions (clear-inherited-tree assert, path-exists-guard no-fatal assert, push-rejection→pull-rebase + the M-3 conflict-halt assert); re-affirmed the reviewer's B.1 (B1+B2+B3) / B.2 (B4) / B.3-post-migration (B5+B6) decomposition.
+  Folded the AC deltas: AC-1 classifier-is-MUST + negative; AC-5/AC-6 migration pre-gate as a tracked gating item; AC-6 conflict-halt assertion + spike-replication fixtures.
+
+### Summary
+
+Reworked the four staff-review findings without re-running the spikes (they stand). The substantive change is M-1: re-inspecting this workflow's `docs/dev/.spacedock-state` showed it is now a clone of main origin on `spacedock-state/dev` (remote wired) but still an independent repo, not a linked worktree — so the shape-(a)→(c) migration is the remaining load-bearing step and B5/B6 (verified against this workflow's real checkout) genuinely depend on it; recast as an explicit pre-gate, not a post-ship operational note. M-2 hardened to a MUST after grounding that `$inline` is in no current rejection set and the validator inherits `entityDir` from `resolveRoots` (no separate validator list to amend). M-3 made the rebase-conflict failure mode a halt/abort/surface/no-force-push contract; M-4 required the e2es to replicate the spiked git mechanics with captured assertions and re-affirmed the B.1/B.2/B.3-post-migration cut. Design-only; the entity body + this report committed to the .spacedock-state checkout, no code changed.
