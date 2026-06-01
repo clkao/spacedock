@@ -10,6 +10,7 @@ mod-block:
 pr: #246
 completed: 2026-06-01T06:03:03Z
 verdict: PASSED
+archived: 2026-06-01T06:03:03Z
 ---
 
 The `claude-team` helper carries a runtime-coupled surface that `native-dispatch-helper` deliberately scopes OUT of the native dispatch path: `context-budget` (reads Claude Code's `~/.claude/.../agent-*.jsonl` transcripts + team `config.json`), and the standing-teammate / team subcommands `spawn-standing`, `list-standing`, `show-standing` (emit Agent() specs, probe team membership, enumerate `_mods/`). These are Claude-Code-specific and not on the initial-dispatch critical path — but the FO still shells to `python3 + claude-team` for **every ensign-reuse decision** (`context-budget`), the feedback-rejection flow, and standing-teammate spawn. So a "Python-free self-hosted" handoff is, today, only Python-free for *initial dispatch*; the steady-state FO loop is not.
