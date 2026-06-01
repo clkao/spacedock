@@ -11,6 +11,7 @@ worktree:
 issue:
 mod-block: 
 pr: #256
+archived: 2026-06-01T22:07:23Z
 ---
 
 Phase B of the split-root model (Phase A = boot surfacing + absolute path + commission rule +
