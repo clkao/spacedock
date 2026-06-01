@@ -57,3 +57,18 @@ surface, the project-specific good/bad examples) and only adds the new slots.
 - The code guard (part A) and the portability test (part C).
 - The README's keep-or-remove decision on the during-migration compatibility commands is a **captain
   sub-decision** to surface at the ideation gate, not a silent cleanup.
+
+## Stage Report: implementation
+
+- DONE: Encode the team's proven habits into the THREE shipped instruction files in PLAIN language with ZERO insider jargon (the word 'oracle' appears nowhere in the shipped text)
+  README (ideation/validation/done slots) + FO `## Working Principles` + ensign `## Working Practices`; `grep -ci oracle` = 0 across all three (worktree commit 105310c2).
+- DONE: In first-officer-shared-core.md add the content as a NEW `## Working Principles` section + the FO-posture, in sections DISJOINT from zs's now-merged relocations
+  New `## Working Principles` section (code-gate preference + FO posture) placed after `## Clarification and Communication`; spike-first bullet prepended in `## Probe and Ideation Discipline` — neither touches Standing-Teammates / reuse-condition-0 / feedback-rejection (zs #246).
+- DONE: AC-1 — a text-presence test confirms the principles + FO posture + test-first rule are present and that the shipped files contain zero insider-jargon tokens
+  skills/integration/working_principles_test.go: 4 tests, all pass; written test-first (3 red, then green). Full integration package 20/20.
+- DONE: AC-2 — nothing project-specific is lost; only new slots are added; KEEP the during-migration compatibility commands; go test ./... green; gofmt/vet clean
+  Preserved-content check passes (split-root model, Testing Resources table, native `spacedock status` surface, project-specific good/bad, `native-go-status/index.md`, sd-b32); python compat command KEPT. `go test ./...` 590 passed; gofmt -l empty; vet clean.
+
+### Summary
+
+Added the four working principles (real checkable change; prove by exercising not re-reading; spike the riskiest unknown first; prefer a code gate over a prose-only rule), the no-hidden-machine-dependencies principle, the FO posture (name the end value, lead with a yes-able recommendation, do obvious reversible work without ceremony), and the write-the-failing-test-first rule — each placed by audience: workflow-specific principles in the README's stage slots, cross-workflow gate discipline + posture in the FO contract's new `## Working Principles` section, and the worker practices (test-first, no-hidden-deps) in the ensign contract's new `## Working Practices` section. Per the companion TDD study, the test-first rule lives in the ensign worker contract (standing practice), not the gate-facing README. Small task-template ergonomics added (`## Out of scope`, promoted `## Problem`/`## Proposed approach`/`## Test plan` headings, `--next` doc). FO sub-decision resolved KEEP for the during-migration python compatibility command (Python status not retired). One pre-existing test fails on this host — `TestCodexResolveManifestAgainstInstalledHost` (`internal/cli`) — a live `codex plugin list` host-config probe untouched by this prose-only change; verified it lies outside all four edited files.
