@@ -6,7 +6,7 @@ source: captain (2026-06-01) — confirmed root cause + fix; fresh `brew install
 started:
 completed:
 verdict:
-score: "0.38"
+score: 0.25
 worktree:
 issue:
 ---
