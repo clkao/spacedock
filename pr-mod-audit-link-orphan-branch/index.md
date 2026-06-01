@@ -6,7 +6,7 @@ source: captain (2026-06-01) — pr-mod audit link 404s; entity lives on the orp
 started:
 completed:
 verdict:
-score: "0.22"
+score: 0.34
 worktree:
 issue:
 ---
