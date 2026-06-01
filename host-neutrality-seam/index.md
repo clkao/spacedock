@@ -9,6 +9,7 @@ verdict:
 score: "0.34"
 worktree: .worktrees/spacedock-ensign-host-neutrality-seam
 issue:
+mod-block: merge:pr-merge
 ---
 
 The prerequisite carved out of `claude-runtime-segregation` (zs) per the staff-review decomposition (zs
