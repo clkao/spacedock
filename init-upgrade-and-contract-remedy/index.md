@@ -10,6 +10,7 @@ score: "0.36"
 worktree: .worktrees/spacedock-ensign-init-upgrade-and-contract-remedy
 issue:
 mod-block: merge:pr-merge
+pr: #240
 ---
 
 A first-run on a stale installed plugin dead-ends with a misleading error and no working remedy. Two coupled defects, both in the v0.19.0 binary:
