@@ -1,13 +1,13 @@
 ---
 id: 0mxzm82mpjbv0tjd51pv2t5j
 title: Host-neutrality seam — relocate ~/.claude team-state reads behind an injected probe (zs prerequisite)
-status: validation
+status: done
 source: zs claude-runtime-segregation decomposition (CL 2026-05-31 "zs - split"; staff review M-3) — the riskiest-first prerequisite
 started: 2026-05-31T20:45:00Z
-completed:
-verdict:
+completed: 2026-06-01T04:43:59Z
+verdict: PASSED
 score: "0.34"
-worktree: .worktrees/spacedock-ensign-host-neutrality-seam
+worktree: 
 issue:
 mod-block: 
 pr: #244
