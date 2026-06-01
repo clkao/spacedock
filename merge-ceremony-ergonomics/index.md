@@ -1,13 +1,13 @@
 ---
 id: 3qpv8qv6pbvejajejs2dn3v8
 title: Merge-ceremony ergonomics — ship-local combo, honest no-remote fallback, workflow merge-policy
-status: ideation
+status: implementation
 source: issue sweep (2026-05-31) — CL dev-workflow-ergonomics triage; consolidates #223, #217, #225
 started: 2026-06-01T05:12:07Z
 completed:
 verdict:
 score: "0.30"
-worktree:
+worktree: .worktrees/spacedock-ensign-merge-ceremony-ergonomics
 issue:
 ---
 
