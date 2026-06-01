@@ -55,9 +55,9 @@ func scanOrphans(entities []*entity, gitRoot string) []orphan {
 		}
 		// os.path.join(git_root, wt): an absolute wt discards git_root, so an
 		// absolute worktree path is probed as-is. filepath.Join would instead
-		// graft it under git_root and miss the existing dir. pyJoin matches the
+		// graft it under git_root and miss the existing dir. PyJoin matches the
 		// oracle's os.path.join absolute-component-reset semantics.
-		dirPath := pyJoin(gitRoot, wt)
+		dirPath := PyJoin(gitRoot, wt)
 		dirExists := "no"
 		if st, err := os.Stat(dirPath); err == nil && st.IsDir() {
 			dirExists = "yes"

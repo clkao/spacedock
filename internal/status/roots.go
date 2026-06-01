@@ -65,7 +65,7 @@ func resolveRoots(workflowDir, baseDir string) (roots, error) {
 	}
 
 	r.entityDir = filepath.Join(abs, cleaned)
-	r.entityDirSpelling = pyJoin(spellingOr(workflowDir, abs), stateValue)
+	r.entityDirSpelling = PyJoin(spellingOr(workflowDir, abs), stateValue)
 	return r, nil
 }
 

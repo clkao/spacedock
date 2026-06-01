@@ -221,11 +221,11 @@ func runBuild(probe claudeteam.TeamStateProbe, workflowDir string, stdin io.Read
 	var worktreePath, gitRoot string
 	if entityWorktree != "" {
 		gitRoot = status.FindGitRoot(workflowDir)
-		// os.path.join (pyJoin) lets an absolute worktree value win, matching the
+		// os.path.join (status.PyJoin) lets an absolute worktree value win, matching the
 		// oracle (claude-team:329). filepath.Join would graft an absolute value
 		// under gitRoot and double the path, missing the existing worktree dir —
 		// the FO stamps absolute worktree: values on live entities.
-		worktreePath = pyJoin(gitRoot, entityWorktree)
+		worktreePath = status.PyJoin(gitRoot, entityWorktree)
 		if info, err := os.Stat(worktreePath); err != nil || !info.IsDir() {
 			return buildError(stderr, 1, "worktree path '%s' does not exist", worktreePath)
 		}
@@ -351,7 +351,7 @@ func runBuild(probe claudeteam.TeamStateProbe, workflowDir string, stdin io.Read
 	// checkout; a non-split worktree stage rewrites the path into the worktree.
 	if worktreePath != "" && !splitRoot {
 		entityRel := pyRelpath(entityPath, gitRoot)
-		worktreeEntityPath = pyJoin(worktreePath, entityRel)
+		worktreeEntityPath = status.PyJoin(worktreePath, entityRel)
 		parts = append(parts, fmt.Sprintf(
 			"Read the entity file at %s for the full spec. It contains:\n", worktreeEntityPath))
 	} else {

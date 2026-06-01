@@ -164,14 +164,14 @@ func scanEntities(directory string, stderr io.Writer) []*entity {
 // worktreeMirrorPath computes the worktree-side path mirroring entityPath under
 // pipelineDir, preserving entity form: a flat {slug}.md maps to
 // {gitRoot}/{worktree}/{slug}.md and a {slug}/index.md maps to
-// {gitRoot}/{worktree}/{slug}/index.md. pyJoin matches os.path.join so an
+// {gitRoot}/{worktree}/{slug}/index.md. PyJoin matches os.path.join so an
 // absolute worktree value is honored as-is. Matches _worktree_mirror_path.
 func worktreeMirrorPath(entityPath, pipelineDir, gitRoot, worktree string) string {
 	rel, err := filepath.Rel(pipelineDir, entityPath)
 	if err != nil {
 		rel = filepath.Base(entityPath)
 	}
-	return pyJoin(gitRoot, worktree, rel)
+	return PyJoin(gitRoot, worktree, rel)
 }
 
 // loadActiveEntityFields loads an entity's frontmatter, overlaying the

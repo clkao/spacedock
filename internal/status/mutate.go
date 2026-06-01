@@ -209,14 +209,14 @@ func runArchive(entityDir, spellingDir, slug string, force, quiet, asJSON bool, 
 	var destPath, destSpelling string
 	if isFolder {
 		destPath = filepath.Join(archiveDir, slug)
-		destSpelling = pyJoin(spellingDir, "_archive", slug)
+		destSpelling = PyJoin(spellingDir, "_archive", slug)
 		if fileExists(destPath) {
 			fmt.Fprintf(stderr, "Error: already archived: %s/\n", slug)
 			return 1
 		}
 	} else {
 		destPath = filepath.Join(archiveDir, slug+".md")
-		destSpelling = pyJoin(spellingDir, "_archive", slug+".md")
+		destSpelling = PyJoin(spellingDir, "_archive", slug+".md")
 		if fileExists(destPath) {
 			fmt.Fprintf(stderr, "Error: already archived: %s.md\n", slug)
 			return 1
@@ -254,12 +254,12 @@ func runArchive(entityDir, spellingDir, slug string, force, quiet, asJSON bool, 
 	return 0
 }
 
-// pyJoin concatenates path components the way Python's os.path.join does: it
+// PyJoin concatenates path components the way Python's os.path.join does: it
 // joins with the OS separator without cleaning a leading "." (so
-// pyJoin(".", "_archive", "x.md") == "./_archive/x.md", unlike filepath.Join
+// PyJoin(".", "_archive", "x.md") == "./_archive/x.md", unlike filepath.Join
 // which would collapse it to "_archive/x.md"). An absolute later component
 // resets the accumulated path, matching os.path.join.
-func pyJoin(parts ...string) string {
+func PyJoin(parts ...string) string {
 	sep := string(filepath.Separator)
 	result := ""
 	for _, p := range parts {
