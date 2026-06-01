@@ -470,15 +470,9 @@ func stateCommitGuidance(stateCheckout, entityPath string) string {
 		stateCheckout, entityPath, stateCheckout, entityPath)
 }
 
-// emitBuildJSON writes out as two-space-indented JSON with HTML escaping off and
-// a trailing newline, matching Python json.dumps(indent=2) followed by print().
+// emitBuildJSON writes out as two-space-indented JSON with a trailing newline,
+// matching Python json.dumps(indent=2) followed by print() byte-for-byte,
+// including its ensure_ascii escaping of any non-ASCII entity title / prompt.
 func emitBuildJSON(stdout io.Writer, out buildOutput) int {
-	enc := json.NewEncoder(stdout)
-	enc.SetEscapeHTML(false)
-	enc.SetIndent("", "  ")
-	// Encoder.Encode appends the trailing newline print() also emits.
-	if err := enc.Encode(out); err != nil {
-		return 1
-	}
-	return 0
+	return claudeteam.EmitPythonJSON(stdout, out)
 }

@@ -145,7 +145,10 @@ func runSpawnStanding(home, modPath, teamName string, stdout, stderr io.Writer) 
 		// already-alive: a one-line JSON object matching the oracle's json.dumps
 		// without indent — Python's default ", " / ": " separators, not Go's
 		// space-free Marshal. The two keys are fixed, so format directly to match.
+		// Escape the name through the same ensure_ascii routine the emitters use,
+		// so a non-ASCII declared name stays byte-identical to json.dumps.
 		nameJSON, _ := json.Marshal(declaredName)
+		nameJSON = claudeteam.EscapeNonASCII(nameJSON)
 		fmt.Fprintf(stdout, "{\"status\": \"already-alive\", \"name\": %s}\n", nameJSON)
 		return 0
 	}
@@ -171,16 +174,11 @@ type spawnSpec struct {
 	Prompt       string `json:"prompt"`
 }
 
-// emitSpawnJSON writes the spec as two-space-indented JSON with HTML escaping off
-// and a trailing newline, matching Python json.dumps(spec, indent=2) + print().
+// emitSpawnJSON writes the spec as two-space-indented JSON with a trailing
+// newline, matching Python json.dumps(spec, indent=2) + print() byte-for-byte,
+// including its ensure_ascii escaping of a non-ASCII Agent Prompt.
 func emitSpawnJSON(stdout io.Writer, spec spawnSpec) int {
-	enc := json.NewEncoder(stdout)
-	enc.SetEscapeHTML(false)
-	enc.SetIndent("", "  ")
-	if err := enc.Encode(spec); err != nil {
-		return 1
-	}
-	return 0
+	return claudeteam.EmitPythonJSON(stdout, spec)
 }
 
 // toClaudeTeammates maps the runtime-neutral StandingTeammate to the Claude

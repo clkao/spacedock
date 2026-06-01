@@ -446,14 +446,9 @@ func pyStrList(items []string) string {
 	return "[" + strings.Join(parts, ", ") + "]"
 }
 
-// emitJSON writes v as two-space-indented JSON with HTML escaping off and a
-// trailing newline, matching Python json.dumps(indent=2) + print().
+// emitJSON writes v as two-space-indented JSON with a trailing newline, matching
+// Python json.dumps(indent=2) + print() byte-for-byte including its ensure_ascii
+// escaping of non-ASCII content (e.g. an em-dash in the mixed-models warning).
 func emitJSON(w io.Writer, v any) int {
-	enc := json.NewEncoder(w)
-	enc.SetEscapeHTML(false)
-	enc.SetIndent("", "  ")
-	if err := enc.Encode(v); err != nil {
-		return 1
-	}
-	return 0
+	return EmitPythonJSON(w, v)
 }

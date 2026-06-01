@@ -149,6 +149,48 @@ func TestBuildParityCrossProduct(t *testing.T) {
 	}
 }
 
+// TestBuildParityNonASCIITitle is the A-2 non-ASCII parity case for the build
+// emitter. A non-ASCII entity title (em-dash U+2014) lands in the stdout JSON's
+// description field ("{title}: {stage}"); Python json.dumps escapes it to \u2014
+// where Go's encoder emitted it raw before the EmitPythonJSON
+// ensure_ascii fix, so the build stdout diverged byte-for-byte. This asserts
+// native == Python on all channels (and the escaped description), with the
+// dispatch-body header also carrying the title at parity.
+func TestBuildParityNonASCIITitle(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "README.md"), readmeWorktree(false))
+	entityPath := filepath.Join(root, "thing.md")
+	// A title with an em-dash, so the description field carries a non-ASCII rune.
+	writeFile(t, entityPath, entityFM("Segregate Claude — generic split", "backlog", ""))
+	gitInit(t, root)
+
+	stdin := mergeStdin(map[string]any{
+		"schema_version": 2,
+		"entity_path":    entityPath,
+		"workflow_dir":   root,
+		"stage":          "backlog",
+		"checklist":      []string{"- a", "- b"},
+		"team_name":      "fixture-team",
+		"bare_mode":      false,
+	}, nil)
+
+	oracle := runOracle(t, root, home, stdin, "build", "--workflow-dir", root)
+	oracleBody := readDispatchBody(t, dispatchFilePathFromStdout(t, oracle.stdout))
+	native := runNative(stdin, "build", "--workflow-dir", root)
+	nativeBody := readDispatchBody(t, dispatchFilePathFromStdout(t, native.stdout))
+
+	assertParity(t, "build-nonascii-title", native, oracle)
+	assertEmDashEscaped(t, native.stdout)
+	wantBody := stripStateCommitGuidance(rewriteOracleFetch(oracleBody))
+	gotBody := stripStateCommitGuidance(nativeBody)
+	if gotBody != wantBody {
+		t.Errorf("build-nonascii-title: dispatch body mismatch\n--- native ---\n%s\n--- oracle(rewritten) ---\n%s",
+			gotBody, wantBody)
+	}
+}
+
 // mergeStdin merges extra into base (extra wins) and returns the JSON string.
 func mergeStdin(base, extra map[string]any) string {
 	for k, v := range extra {

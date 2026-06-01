@@ -4,6 +4,7 @@ package dispatch
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -117,6 +118,54 @@ func TestSpawnStandingParitySpecEmit(t *testing.T) {
 	oracle := runOracle(t, wd, home, "", "spawn-standing", "--mod", modPath, "--team", "fixture-team")
 	native := runNative("", "spawn-standing", "--mod", modPath, "--team", "fixture-team")
 	assertParity(t, "spawn-standing-spec", native, oracle)
+}
+
+// TestSpawnStandingParitySpecNonASCIIPrompt is the A-2 non-ASCII parity case for
+// the spawn-standing spec-emit path. The FO forwards spec.prompt VERBATIM, so a
+// non-ASCII Agent Prompt (em-dash U+2014 here) must serialize byte-identically
+// to the oracle: Python json.dumps escapes it to \u2014, where Go's encoder
+// emitted it raw before the EmitPythonJSON ensure_ascii fix. Driving the
+// spec-emit path with such a prompt asserts native == Python bytes including the
+// escaped prompt, and the escape guard makes the parity assertion load-bearing.
+func TestSpawnStandingParitySpecNonASCIIPrompt(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	wd := t.TempDir()
+	modPath := filepath.Join(wd, "_mods", "comm-officer.md")
+	// An Agent Prompt with an em-dash, so spec.prompt carries a non-ASCII rune.
+	mod := "---\nstanding: true\nname: comm-officer\n---\n" +
+		"## Hook: startup\n" +
+		"- subagent_type: general-purpose\n" +
+		"- name: comm-officer\n" +
+		"- model: sonnet\n" +
+		"## Agent Prompt\nYou are comm-officer — the prose polisher.\n"
+	writeFile(t, modPath, mod)
+	// A team config that does NOT list comm-officer, so member_exists is false and
+	// both sides take the spec-emit branch.
+	claudeFixture{
+		team:    "fixture-team",
+		session: "s",
+		members: []fixtureMember{{name: "team-lead", model: "opus"}},
+		jsonls:  map[string]string{},
+	}.write(t, home)
+
+	oracle := runOracle(t, wd, home, "", "spawn-standing", "--mod", modPath, "--team", "fixture-team")
+	native := runNative("", "spawn-standing", "--mod", modPath, "--team", "fixture-team")
+	assertParity(t, "spawn-standing-spec-nonascii", native, oracle)
+	assertEmDashEscaped(t, native.stdout)
+}
+
+// assertEmDashEscaped asserts stdout carries the literal \u2014 escape and no raw
+// UTF-8 em-dash, so the ensure_ascii fix is demonstrably what makes the byte
+// parity hold (a guard against the harness comparing raw == raw if reverted).
+func assertEmDashEscaped(t *testing.T, stdout string) {
+	t.Helper()
+	if !strings.Contains(stdout, "\\u2014") {
+		t.Errorf("stdout missing the \\u2014 ensure_ascii escape (em-dash emitted raw?):\n%s", stdout)
+	}
+	if strings.ContainsRune(stdout, '—') {
+		t.Errorf("stdout contains a raw em-dash (ensure_ascii escaping not applied):\n%s", stdout)
+	}
 }
 
 // TestSpawnStandingParityAlreadyAlive drives the already-alive path: the team

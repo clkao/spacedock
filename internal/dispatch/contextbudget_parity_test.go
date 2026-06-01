@@ -72,6 +72,24 @@ func assistantLine(model string, input, cacheCreation, cacheRead int) string {
 	return string(b)
 }
 
+// assistantLineNoModel builds an assistant jsonl entry carrying usage but no
+// model field, so extract_runtime_models yields nothing and the budget falls
+// back to the config-declared model (the config_fallback_warning path).
+func assistantLineNoModel(input, cacheCreation, cacheRead int) string {
+	entry := map[string]any{
+		"type": "assistant",
+		"message": map[string]any{
+			"usage": map[string]any{
+				"input_tokens":                input,
+				"cache_creation_input_tokens": cacheCreation,
+				"cache_read_input_tokens":     cacheRead,
+			},
+		},
+	}
+	b, _ := json.Marshal(entry)
+	return string(b)
+}
+
 // runBudget runs both native and oracle context-budget for name over the fixture
 // home and asserts three-channel parity (no fetch rewrite — context-budget emits
 // no fetch lines). It returns the native result for follow-on field assertions.
@@ -190,6 +208,76 @@ func TestContextBudgetLoudFailures(t *testing.T) {
 		res := runBudget(t, home, "orphan")
 		assertFailSafe(t, res, "no team config found for member")
 	})
+}
+
+// TestContextBudgetWarningNonASCIIParity is the A-2 non-ASCII parity case for
+// context-budget. Both warning strings the budget emits carry an em-dash
+// (U+2014) in their fixed text — the mixed_models_warning ("… — using smallest
+// context window") and the config_fallback_warning ("… entries — using config-
+// declared model …"). Python json.dumps escapes that em-dash to \u2014 while
+// Go's encoder emits it raw, so before the EmitPythonJSON ensure_ascii fix the
+// native stdout diverged byte-for-byte from the oracle on exactly these paths.
+// Driving each path through the parity harness asserts native == Python bytes,
+// including the escaped em-dash in the warning value.
+func TestContextBudgetWarningNonASCIIParity(t *testing.T) {
+	t.Run("mixed-models-warning", func(t *testing.T) {
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+		fix := claudeFixture{
+			team:    "fixture-team",
+			session: "sess-mm",
+			members: []fixtureMember{{name: "ensign-mm", model: "claude-opus-4-8"}},
+			jsonls: map[string]string{
+				// Two distinct runtime models trigger the mixed_models_warning, whose
+				// fixed text contains the em-dash the parity must escape-match.
+				"ensign-mm": assistantLine("claude-opus-4-8", 1000, 0, 0) + "\n" +
+					assistantLine("claude-sonnet-4-6", 2000, 0, 0) + "\n",
+			},
+		}
+		fix.write(t, home)
+		res := runBudget(t, home, "ensign-mm")
+		assertBudgetWarningEscaped(t, res.stdout, "mixed_models_warning")
+	})
+
+	t.Run("config-fallback-warning", func(t *testing.T) {
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+		fix := claudeFixture{
+			team:    "fixture-team",
+			session: "sess-cf",
+			members: []fixtureMember{{name: "ensign-cf", model: "claude-opus-4-8"}},
+			jsonls: map[string]string{
+				// Usage present but no model field → extract_runtime_models empty →
+				// config_fallback_warning, whose fixed text also carries the em-dash.
+				"ensign-cf": assistantLineNoModel(1000, 0, 0) + "\n",
+			},
+		}
+		fix.write(t, home)
+		res := runBudget(t, home, "ensign-cf")
+		assertBudgetWarningEscaped(t, res.stdout, "config_fallback_warning")
+	})
+}
+
+// assertBudgetWarningEscaped asserts the named warning is present and that the
+// raw stdout bytes carry the literal — escape (not a raw UTF-8 em-dash), so
+// the ensure_ascii fix is demonstrably what makes the byte-parity assertion in
+// runBudget pass — a guard against the parity harness silently comparing raw ==
+// raw if the fix were reverted on both sides.
+func assertBudgetWarningEscaped(t *testing.T, stdout, warningKey string) {
+	t.Helper()
+	var m map[string]any
+	if err := json.Unmarshal([]byte(stdout), &m); err != nil {
+		t.Fatalf("context-budget stdout not JSON: %v\n%s", err, stdout)
+	}
+	if _, ok := m[warningKey]; !ok {
+		t.Fatalf("expected %q in context-budget stdout:\n%s", warningKey, stdout)
+	}
+	if !strings.Contains(stdout, "\\u2014") {
+		t.Errorf("stdout missing the \\u2014 ensure_ascii escape (em-dash emitted raw?):\n%s", stdout)
+	}
+	if strings.ContainsRune(stdout, '—') {
+		t.Errorf("stdout contains a raw em-dash (ensure_ascii escaping not applied):\n%s", stdout)
+	}
 }
 
 // assertBudgetField decodes the context-budget stdout and asserts one field.
