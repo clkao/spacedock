@@ -9,6 +9,7 @@ completed:
 verdict:
 worktree: .worktrees/spacedock-ensign-no-hidden-machine-dependencies
 issue:
+mod-block: merge:pr-merge
 ---
 
 **What this is for (plain).** Add a test that fails the moment the shipped tool quietly starts
