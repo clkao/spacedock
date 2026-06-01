@@ -83,6 +83,28 @@ func runSet(roots roots, set *setUpdate, args []string, whereFilters []whereFilt
 		}
 	}
 
+	// Membership guard: a --set status=X must name a stage the workflow
+	// declares. This is distinct from validateWorkflowStageNames' format regex —
+	// it checks the *value* against stages.states[].name membership. When the
+	// workflow declares no stages block we cannot validate membership, so the
+	// guard is a no-op. A non-member value exits non-zero and leaves the
+	// frontmatter unchanged.
+	if len(stages) > 0 {
+		stageNames := make([]string, len(stages))
+		stageNameSet := map[string]bool{}
+		for i, s := range stages {
+			stageNames[i] = s.Name
+			stageNameSet[s.Name] = true
+		}
+		for _, u := range set.updates {
+			if u.field == "status" && u.hasValue && !stageNameSet[u.value] {
+				return errExit(stderr, fmt.Sprintf(
+					"'%s' is not a defined stage in workflow %s — known stages: [%s]",
+					u.value, roots.definitionDir, strings.Join(stageNames, ", ")))
+			}
+		}
+	}
+
 	isTerminalUpdate := func() bool {
 		for _, u := range set.updates {
 			if u.field == "status" && u.hasValue && terminalNames[u.value] {

@@ -2376,6 +2376,24 @@ def main():
         stages = parse_stages_block(readme_path) if os.path.exists(readme_path) else None
         terminal_names = {s['name'] for s in (stages or []) if s.get('terminal')}
 
+        # Membership guard: a --set status=X must name a stage the workflow
+        # declares. This is distinct from validate_workflow_stage_names' format
+        # regex — it checks the *value* against stages.states[].name membership.
+        # When the workflow declares no stages block we cannot validate
+        # membership, so the guard is a no-op. A non-member value exits non-zero
+        # and leaves the frontmatter unchanged.
+        if stages:
+            stage_names = [s['name'] for s in stages]
+            stage_name_set = set(stage_names)
+            for field, value in updates:
+                if field == 'status' and value not in stage_name_set:
+                    print(
+                        f"Error: '{value}' is not a defined stage in workflow "
+                        f"{pipeline_dir} — known stages: [{', '.join(stage_names)}]",
+                        file=sys.stderr,
+                    )
+                    sys.exit(1)
+
         def is_terminal_update():
             """True when this --set applies any terminal field."""
             for field, value in updates:

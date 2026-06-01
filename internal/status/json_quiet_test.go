@@ -93,11 +93,11 @@ func TestSetJSONEnvelope(t *testing.T) {
 	env := pinnedEnv(t)
 	root := stageFixture(t, "seq-workflow")
 
-	out, errOut, code := runNative(t, root, env, "--workflow-dir", root, "--set", "002-vendor-script", "status=design", "--json")
+	out, errOut, code := runNative(t, root, env, "--workflow-dir", root, "--set", "002-vendor-script", "status=implementation", "--json")
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errOut)
 	}
-	want := `{"command":"set","slug":"002-vendor-script","changes":[{"field":"status","old":"ideation","new":"design"}]}` + "\n"
+	want := `{"command":"set","slug":"002-vendor-script","changes":[{"field":"status","old":"ideation","new":"implementation"}]}` + "\n"
 	if out != want {
 		t.Fatalf("--set --json stdout = %q, want %q", out, want)
 	}
