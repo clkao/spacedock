@@ -1,13 +1,13 @@
 ---
 id: 38mavcnhs16tq7qhhvh2rj23
 title: Contract-gate dead-end — actionable remedy for empty requires-contract + make init actually upgrade a stale plugin
-status: validation
+status: done
 source: captain (2026-05-31, hand-push/release session) — `spacedock claude --safehouse` on a stale 0.12.1 plugin
 started: 2026-05-31T20:51:24Z
-completed:
-verdict:
+completed: 2026-06-01T02:56:03Z
+verdict: PASSED
 score: "0.36"
-worktree: .worktrees/spacedock-ensign-init-upgrade-and-contract-remedy
+worktree: 
 issue:
 mod-block: 
 pr: #240
