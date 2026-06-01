@@ -6,7 +6,7 @@ source: sprint — FO/captain (native-dispatch-helper scope split)
 score: "0.32"
 worktree: .worktrees/spacedock-ensign-claude-runtime-segregation
 started: 2026-05-30T22:10:50Z
-mod-block: merge:pr-merge
+mod-block: 
 pr: #246
 ---
 
