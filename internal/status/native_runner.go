@@ -74,7 +74,7 @@ func dispatch(probe claudeteam.TeamStateProbe, args []string, dir string, e env,
 		pipelineDir = e.get("PIPELINE_DIR")
 	}
 	if pipelineDir == "" && rootPath == "" {
-		if discovered, ok := discoverWorkflowDir(dir); ok {
+		if discovered, ok := DiscoverWorkflowDir(dir); ok {
 			pipelineDir = discovered
 		} else {
 			return errExit(stderr, "no Spacedock workflow here — pass --workflow-dir or run inside a workflow")

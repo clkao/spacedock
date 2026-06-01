@@ -127,6 +127,7 @@ func newRootCommand(ctx context.Context, env []string, dir string, stdin io.Read
 		newDoctorCommand(ctx, env, stdout, stderr),
 		newStatusCommand(ctx, env, dir, stdin, stdout, stderr, runner),
 		newNewCommand(ctx, env, dir, stdin, stdout, stderr, runner),
+		newStateCommand(ctx, env, dir, stdout, stderr),
 		newCompletionCommand(stdout, stderr),
 		newDispatchCommand(dispatchProbe, stdin, stdout, stderr),
 	)
@@ -287,6 +288,32 @@ func newNewCommand(ctx context.Context, env []string, dir string, stdin io.Reade
 	}
 }
 
+// newStateCommand wires `spacedock state init` for split-root state-checkout
+// management. Flag parsing is disabled so the post-subcommand argv (the optional
+// --workflow-dir) reaches runStateInit verbatim. `init` is the only subcommand;
+// an unknown or missing subcommand is a usage error (exit 2).
+func newStateCommand(ctx context.Context, env []string, dir string, stdout, stderr io.Writer) *cobra.Command {
+	return &cobra.Command{
+		Use:                "state init [--workflow-dir DIR]",
+		Short:              "Initialize a cloned split-root workflow's state checkout",
+		GroupID:            "workflow",
+		DisableFlagParsing: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if wantsHelp(args) {
+				return cmd.Help()
+			}
+			if len(args) == 0 || args[0] != "init" {
+				fmt.Fprintln(stderr, "spacedock state: unknown subcommand (want: init)")
+				return exitCodeError{2}
+			}
+			if code := runStateInit(ctx, args[1:], env, dir, stdout, stderr); code != 0 {
+				return exitCodeError{code}
+			}
+			return nil
+		},
+	}
+}
+
 // newCompletionCommand wires `spacedock completion bash|zsh`, emitting a static
 // completion script to stdout (exit 0). An unknown or missing shell prints the
 // named usage error and returns 2 — the CLI-layer usage-error code, matching the
@@ -434,7 +461,7 @@ _spacedock() {
   local cur prev verbs status_flags
   cur="${COMP_WORDS[COMP_CWORD]}"
   prev="${COMP_WORDS[COMP_CWORD-1]}"
-  verbs="claude codex install doctor status new completion dispatch --version --help"
+  verbs="claude codex install doctor status new state completion dispatch --version --help"
   status_flags="--workflow-dir --next --next-id --boot --validate --archived --json --quiet --new --folder --set --where --archive --resolve --short-id --discover --root"
   if [ "$COMP_CWORD" -eq 1 ]; then
     COMPREPLY=( $(compgen -W "$verbs" -- "$cur") )
@@ -442,6 +469,7 @@ _spacedock() {
   fi
   case "${COMP_WORDS[1]}" in
     status) COMPREPLY=( $(compgen -W "$status_flags" -- "$cur") ) ;;
+    state) COMPREPLY=( $(compgen -W "init --workflow-dir" -- "$cur") ) ;;
     completion) COMPREPLY=( $(compgen -W "bash zsh" -- "$cur") ) ;;
   esac
 }
@@ -453,7 +481,7 @@ const zshCompletion = `#compdef spacedock
 # spacedock zsh completion
 _spacedock() {
   local -a verbs status_flags
-  verbs=(claude codex install doctor status new completion dispatch --version --help)
+  verbs=(claude codex install doctor status new state completion dispatch --version --help)
   status_flags=(--workflow-dir --next --next-id --boot --validate --archived --json --quiet --new --folder --set --where --archive --resolve --short-id --discover --root)
   if (( CURRENT == 2 )); then
     compadd -- $verbs
@@ -461,6 +489,7 @@ _spacedock() {
   fi
   case "${words[2]}" in
     status) compadd -- $status_flags ;;
+    state) compadd -- init --workflow-dir ;;
     completion) compadd -- bash zsh ;;
   esac
 }

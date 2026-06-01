@@ -7,13 +7,13 @@ import (
 	"strings"
 )
 
-// discoverWorkflowDir walks up from startDir to the nearest ancestor whose
+// DiscoverWorkflowDir walks up from startDir to the nearest ancestor whose
 // README.md frontmatter declares a `commissioned-by: spacedock@` field, the
 // same predicate discoverWorkflows uses to recognize a workflow. The first
 // match on the way up wins — when workflows are nested, this resolves to the
 // innermost enclosing workflow. Returns (dir, true) on a match, ("", false) at
 // the filesystem root with no match.
-func discoverWorkflowDir(startDir string) (string, bool) {
+func DiscoverWorkflowDir(startDir string) (string, bool) {
 	d, err := filepath.Abs(startDir)
 	if err != nil {
 		d = startDir
