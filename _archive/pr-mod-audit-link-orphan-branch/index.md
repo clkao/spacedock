@@ -9,6 +9,7 @@ verdict: PASSED
 score: 0.34
 worktree:
 issue:
+archived: 2026-06-01T14:43:16Z
 ---
 
 The `pr-merge` mod builds the PR body's audit link pointing at the **code worktree's commit** (`git -C {worktree} rev-parse --short HEAD`), but the entity file it links to lives in the `.spacedock-state` checkout — a separate orphan-branch checkout (`spacedock-state/dev`) that the code commit never contains. So `/blob/{code-sha}/{path}` resolves to nothing → 404. Fix the link to reference the **state** checkout, using an immutable state-commit SHA so it survives archival.
