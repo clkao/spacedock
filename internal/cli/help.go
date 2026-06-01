@@ -23,8 +23,10 @@ Setup
   install  [--host claude|codex]     Install the Spacedock plugin for a host, then check it
   doctor   [--host claude|codex]     Check the installed plugin and this binary are compatible
 Workflow
-  status    [args]                   Show or update workflow state
-  dispatch  build | show-stage-def   Build worker dispatch artifacts
+  status      [args]                 Show or update workflow state
+  new         [--folder] SLUG        Create an entity from a stdin body (auto-discovers the workflow)
+  completion  bash|zsh               Print a bash or zsh completion script
+  dispatch    build | show-stage-def Build worker dispatch artifacts
 
 Run "spacedock <command> --help" for details.  ·  --version prints the version.
 `
