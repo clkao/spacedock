@@ -14,14 +14,16 @@ import (
 	"github.com/spacedock-dev/spacedock/internal/claudeteam"
 )
 
-// oracleFetchPrefix and nativeFetchPrefix are the one intentional divergence:
-// the oracle emits a claude-team show-stage-def fetch line; the native emitter
-// rewrites it to spacedock dispatch show-stage-def. Parity assertions rewrite
-// the oracle bytes with this substitution before byte-comparing.
-const (
-	oracleFetchPrefix = "claude-team show-stage-def"
-	nativeFetchPrefix = "spacedock dispatch show-stage-def"
-)
+// fetchPrefixRewrites is the one intentional divergence: the oracle emits
+// claude-team fetch lines (show-stage-def, and show-standing under _mods); the
+// native emitter rewrites them to spacedock dispatch so the dispatch path stays
+// Python-free. Parity assertions apply every substitution to the oracle bytes
+// before byte-comparing. The order is longest-prefix-first is unnecessary here —
+// the two prefixes share no overlap.
+var fetchPrefixRewrites = [][2]string{
+	{"claude-team show-stage-def", "spacedock dispatch show-stage-def"},
+	{"claude-team show-standing", "spacedock dispatch show-standing"},
+}
 
 // vendoredOracle returns the project-vendored claude-team path (not the plugin
 // copy — it carries the Stage-4 slug-not-stem + split-root amendments).
@@ -81,11 +83,14 @@ func runNative(stdin string, args ...string) runResult {
 	return runResult{stdout.String(), stderr.String(), exit}
 }
 
-// rewriteOracleFetch substitutes the oracle's claude-team show-stage-def fetch
-// prefix with the native spacedock dispatch show-stage-def prefix, so the
-// non-fetch bytes can be byte-compared after carving out the one rewritten line.
+// rewriteOracleFetch substitutes every oracle claude-team fetch prefix with its
+// native spacedock dispatch counterpart, so the non-fetch bytes byte-compare
+// after carving out the rewritten lines.
 func rewriteOracleFetch(s string) string {
-	return strings.ReplaceAll(s, oracleFetchPrefix, nativeFetchPrefix)
+	for _, r := range fetchPrefixRewrites {
+		s = strings.ReplaceAll(s, r[0], r[1])
+	}
+	return s
 }
 
 // stateCommitGuidanceLine matches the split-root state-commit guidance sentence

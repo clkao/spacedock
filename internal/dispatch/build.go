@@ -375,6 +375,17 @@ func runBuild(probe claudeteam.TeamStateProbe, workflowDir string, stdin io.Read
 		"### Completion checklist\n\n%s\n\n### Summary\n{brief description of what was accomplished}\n",
 		checklistText))
 
+	// 9. Standing-teammate fetch line — appended only when at least one declared
+	// standing teammate exists for this workflow. Bare-mode (empty team_name) and
+	// zero-standing dispatches omit the line, so show-standing never runs where it
+	// would render nothing. The enumeration is runtime-neutral; the native fetch
+	// line targets `spacedock dispatch show-standing` (the same documented
+	// claude-team→spacedock dispatch rewrite as the show-stage-def line).
+	if len(EnumerateDeclaredStandingTeammates(workflowDir, teamName)) > 0 {
+		fetchCommands = append(fetchCommands,
+			fmt.Sprintf("spacedock dispatch show-standing --workflow-dir %s", shlexQuote(workflowDir)))
+	}
+
 	// Emit the `### Fetch commands` block.
 	fetchLines := []string{"### Fetch commands", ""}
 	for _, cmd := range fetchCommands {
@@ -459,15 +470,9 @@ func stateCommitGuidance(stateCheckout, entityPath string) string {
 		stateCheckout, entityPath, stateCheckout, entityPath)
 }
 
-// emitBuildJSON writes out as two-space-indented JSON with HTML escaping off and
-// a trailing newline, matching Python json.dumps(indent=2) followed by print().
+// emitBuildJSON writes out as two-space-indented JSON with a trailing newline,
+// matching Python json.dumps(indent=2) followed by print() byte-for-byte,
+// including its ensure_ascii escaping of any non-ASCII entity title / prompt.
 func emitBuildJSON(stdout io.Writer, out buildOutput) int {
-	enc := json.NewEncoder(stdout)
-	enc.SetEscapeHTML(false)
-	enc.SetIndent("", "  ")
-	// Encoder.Encode appends the trailing newline print() also emits.
-	if err := enc.Encode(out); err != nil {
-		return 1
-	}
-	return 0
+	return claudeteam.EmitPythonJSON(stdout, out)
 }

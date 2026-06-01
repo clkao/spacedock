@@ -5,25 +5,18 @@ package dispatch
 import (
 	"fmt"
 	"io"
+	"os"
 
 	"github.com/spacedock-dev/spacedock/internal/claudeteam"
 )
 
-// deferredSubcommands are the claude-team subcommands moved to the sibling
-// claude-runtime-segregation entity. Naming them in the usage diagnostic makes
-// the deferral observable rather than a silent unknown-command rejection.
-var deferredSubcommands = map[string]bool{
-	"context-budget": true,
-	"list-standing":  true,
-	"show-standing":  true,
-	"spawn-standing": true,
-}
-
-// Run routes a `spacedock dispatch <subcommand> [flags]` invocation. build reads
-// stdin JSON and writes the dispatch envelope to stdout; show-stage-def writes a
-// README subsection to stdout. A deferred or unknown subcommand fails with exit
-// 2 and a usage diagnostic on stderr. probe is the host-supplied team-state probe
-// gating the bare-mode advisory (nil on a non-Claude host → no advisory).
+// Run routes a `spacedock dispatch <subcommand> [flags]` invocation. build and
+// show-stage-def are the host-neutral surface (assembled here); context-budget,
+// list-standing, show-standing, and spawn-standing are the Claude-coupled surface
+// (their ~/.claude and standing-mod reads live in internal/claudeteam). An unknown
+// subcommand fails with exit 2 and a usage diagnostic on stderr. probe is the
+// host-supplied team-state probe gating the bare-mode advisory (nil on a non-Claude
+// host → no advisory).
 func Run(probe claudeteam.TeamStateProbe, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
 		printUsage(stderr)
@@ -43,14 +36,34 @@ func Run(probe claudeteam.TeamStateProbe, args []string, stdin io.Reader, stdout
 			return code
 		}
 		return runShowStageDef(workflowDir, stage, stdout, stderr)
-	default:
-		if deferredSubcommands[args[0]] {
-			fmt.Fprintf(stderr,
-				"error: 'dispatch %s' is not implemented by this binary; it is deferred "+
-					"to the claude-runtime-segregation surface. Native dispatch implements "+
-					"only: build, show-stage-def.\n", args[0])
+	case "context-budget":
+		name, code := requireSubcommandFlag(args[1:], "context-budget", "--name", stderr)
+		if code != 0 {
+			return code
+		}
+		return claudeteam.ContextBudget(os.Getenv("HOME"), name, stdout, stderr)
+	case "list-standing":
+		workflowDir, code := requireSubcommandFlag(args[1:], "list-standing", "--workflow-dir", stderr)
+		if code != 0 {
+			return code
+		}
+		return runListStanding(workflowDir, stdout, stderr)
+	case "show-standing":
+		workflowDir, code := requireSubcommandFlag(args[1:], "show-standing", "--workflow-dir", stderr)
+		if code != 0 {
+			return code
+		}
+		return runShowStanding(workflowDir, stdout, stderr)
+	case "spawn-standing":
+		flags := parseFlags(args[1:], map[string]bool{"--mod": true, "--team": true})
+		mod, okMod := flags["--mod"]
+		team, okTeam := flags["--team"]
+		if !okMod || !okTeam {
+			fmt.Fprintln(stderr, "error: dispatch spawn-standing requires --mod and --team")
 			return 2
 		}
+		return runSpawnStanding(os.Getenv("HOME"), mod, team, stdout, stderr)
+	default:
 		fmt.Fprintf(stderr, "error: unknown dispatch subcommand: %s\n", args[0])
 		printUsage(stderr)
 		return 2
@@ -63,6 +76,20 @@ func requireFlag(args []string, name string, stderr io.Writer) (string, int) {
 	val, ok := parseFlags(args, map[string]bool{name: true})[name]
 	if !ok {
 		fmt.Fprintf(stderr, "error: dispatch build requires %s\n", name)
+		return "", 2
+	}
+	return val, 0
+}
+
+// requireSubcommandFlag returns the value of a single required flag for a
+// claude-coupled subcommand, with a usage error (exit 2) naming the subcommand
+// and flag when missing. The diagnostic is the native CLI's own ergonomic — the
+// command-logic loud-failures (not this argument-parse error) are what the parity
+// harness byte-compares.
+func requireSubcommandFlag(args []string, subcommand, name string, stderr io.Writer) (string, int) {
+	val, ok := parseFlags(args, map[string]bool{name: true})[name]
+	if !ok {
+		fmt.Fprintf(stderr, "error: dispatch %s requires %s\n", subcommand, name)
 		return "", 2
 	}
 	return val, 0
