@@ -1,10 +1,10 @@
 ---
 id: xdt3cjnppc89amm5g23s86mm
 title: CLI ergonomics — workflow auto-discovery and actionable errors
-status: ideation
+status: implementation
 source: session 1 debrief — ergonomics
 score: "0.30"
-worktree:
+worktree: .worktrees/spacedock-ensign-cli-ergonomics
 started: 2026-05-30T21:28:40Z
 ---
 
