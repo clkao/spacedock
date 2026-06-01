@@ -1,13 +1,13 @@
 ---
 id: scz5x5sbr1gy06z36qhh2py5
 title: Split-root collaboration (Phase B) — same-repo orphan-branch state, $inline sentinel, workflow-slug state-branch, state init + FO sanity-check + push/pull sync
-status: ideation
+status: implementation
 source: FO/captain (2026-05-31) — Phase-B follow-on to split-root-ergonomics (Phase A); captain-directed orphan-branch model + three journeys
 score: "0.30"
 started: 2026-05-31T21:15:12Z
 completed:
 verdict:
-worktree:
+worktree: .worktrees/spacedock-ensign-split-root-collaboration-remote-resume
 issue:
 ---
 
