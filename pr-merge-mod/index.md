@@ -1,13 +1,13 @@
 ---
 id: 0mg8zaseaffrjcs8n8qtrfcj
 title: pr-merge mod — open a code-branch PR at the merge boundary, composing with state-root
-status: ideation
+status: implementation
 source: FO/captain (2026-06-01) — get pr-mod initialized + make it work well with state-root
 score: "0.30"
 started: 2026-06-01T02:30:24Z
 completed:
 verdict:
-worktree:
+worktree: .worktrees/spacedock-ensign-pr-merge-mod
 issue:
 ---
 
