@@ -237,3 +237,19 @@ Read the actual `internal/status` Go path and the vendored Python oracle and ran
 ### Summary
 
 Landed three of the four ACs and the fold-in, all parity-paired Go+oracle where the surface is parity-pinned, internal/status fully green (279 tests; the lone full-run cli failure is the pre-existing env-only TestCodexResolveManifestAgainstInstalledHost the dispatch flagged as not-a-regression). #207 needed no behavior change — the Go path already matched the oracle; the deliverable was declaring + locking the single placement-based scope rule. #189 and the #163 stage-field strip are real fixes. Two items remain BLOCKED on genuine design rulings I escalated and did not get: AC-4's generic entity-value strip (blanket strip truncates real source/title `#NNN` tokens — A vs B/C) and AC-1's #230 surface (field shape/materialization + whether the FO advance-after-report prose contract is mine to edit). Both touch parity-pinned/cross-skill contract surfaces, so I held rather than guess.
+
+## Stage Report: implementation (cycle 2)
+
+- DONE: AC-1 (#230) additive next-suppressed-by visibility surface, parity-paired Go + oracle
+  Per team-lead ruling: field `next-suppressed-by` ∈ {""|worktree-set|concurrency-full|gate|terminal}, surfaced via the EXISTING --fields/--where machinery (no new flag), GATED out of --all-fields (materialization option ii). Extracted dispatchAnalysis (shared with computeDispatchable) so the reason mirrors --next exactly; --next/computeDispatchable output unchanged. Mirrored in the oracle (compute_suppressed_by/materialize_suppressed_by, source+vendored). Behavioral test next_suppressed_by_test.go distinguishes all three reasons + the "" dispatchable case, native-vs-oracle, and asserts --all-fields excludes the computed column. Fixture suppress-workflow. Commit 21838fa7.
+- DONE: AC-1 documented-behavior note in the entity body
+  Added "## #230 shipped behavior" note: the surface is the code deliverable; --next suppression is by-design; advance-after-report ENFORCEMENT is a separate FO/ensign prose-contract follow-up (NOT a status-binary change, intentionally not made here per the ruling); a dropped hand-off is now diagnosable as next-suppressed-by: worktree-set. State-checkout commit a231552.
+- DONE: AC-2 (#207) — see cycle-1 report (no change)
+- DONE: AC-3 (#189) — see cycle-1 report (no change)
+- DONE: AC-4 (#163) stage-field strip — see cycle-1 report (no change)
+- FAILED: AC-4 part (ii) GENERIC ParseFrontmatter entity-value strip — STILL ON HOLD per team-lead
+  Team-lead relayed the captain chose option (C): blanket strip per the YAML whitespace-# rule + require quoting + the WRITER must auto-quote values containing ` #` so they round-trip (no silent re-truncate on --set). Team-lead is confirming one more disposition with the captain — whether to ALSO migrate-and-quote existing #-bearing entities in the state checkout (to avoid truncating live source/title on first read). Explicit instruction: do NOT implement AC-4 until the final instruction (including the migration disposition) is relayed. Holding as directed.
+
+### Summary
+
+AC-1 (#230) landed this cycle exactly to the ratified shape: an additive, parity-paired next-suppressed-by surface over the existing --fields/--where machinery, gated out of --all-fields, with --next semantics untouched (dispatchAnalysis is shared so the reason can't drift from dispatch). The advance-after-report enforcement was correctly left as a separate prose-contract follow-up per the ruling and recorded as a documented-behavior note. internal/status fully green (285). Three of four ACs + AC-4's stage-field half + the fold-in are now complete and committed. The ONLY remaining work is AC-4's generic entity-value strip (captain chose option C: blanket + auto-quote-on-write), which team-lead explicitly instructed me to hold until the existing-entity migration disposition is finalized. I am holding as directed, not blocked on my own analysis.
