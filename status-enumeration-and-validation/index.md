@@ -9,6 +9,7 @@ verdict:
 score: "0.28"
 worktree: .worktrees/spacedock-ensign-status-enumeration-and-validation
 issue:
+mod-block: merge:pr-merge
 ---
 
 Fix three correctness/ergonomics gaps in `spacedock status` that mislead the FO's scheduling and
