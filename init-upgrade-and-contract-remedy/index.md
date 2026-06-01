@@ -9,7 +9,7 @@ verdict:
 score: "0.36"
 worktree: .worktrees/spacedock-ensign-init-upgrade-and-contract-remedy
 issue:
-mod-block: merge:pr-merge
+mod-block: 
 pr: #240
 ---
 
