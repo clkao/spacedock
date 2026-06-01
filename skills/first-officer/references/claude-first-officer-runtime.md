@@ -31,7 +31,7 @@ When filing a new task, read `id_style` from `status --boot --json`, then use `s
 
 After team creation succeeds (the ladder has resolved and the returned `team_name` is known) and BEFORE entering the normal dispatch event loop, run the standing-teammate discovery pass:
 
-1. Run `claude-team list-standing --workflow-dir {wd}` and consume its newline-delimited output (one absolute mod path per line, sorted alphabetically, empty stdout on zero matches). Do NOT grep mod frontmatter yourself; authoritative parsing is deferred to the helper.
+1. Run `spacedock dispatch list-standing --workflow-dir {wd}` and consume its newline-delimited output (one absolute mod path per line, sorted alphabetically, empty stdout on zero matches). Do NOT grep mod frontmatter yourself; authoritative parsing is deferred to the helper.
 2. Record the returned mod paths in session memory. **No spawn calls at boot.** Spawn is deferred to the first team-mode dispatch (see lazy-spawn below).
 
 In single-entity (bare) mode and in Degraded Mode, discovery still runs (it is cheap — just `list-standing`), but lazy-spawn is skipped in those modes (no team to spawn into). Standing teammates are a team-scope concept; without a live team they have no lifecycle anchor.
@@ -41,14 +41,23 @@ In single-entity (bare) mode and in Degraded Mode, discovery still runs (it is c
 Before the first `Agent()` call that uses a `team_name` (i.e., the first non-bare dispatch), spawn all declared standing teammates:
 
 1. For each declared standing-teammate mod path recorded during the discovery pass:
-   a. Run `claude-team spawn-standing --mod {abs_path_to_mod} --team {team_name}`.
-   b. If the helper emits JSON with top-level `status: "already-alive"`, log the reported `name` and skip to the next mod. Standing teammates are first-boot-wins across the captain session; subsequent workflows sharing the team pick up the live member.
-   c. Otherwise the helper emits an Agent() call spec JSON with keys `subagent_type`, `name`, `team_name`, `model`, `prompt`. **Forward that spec verbatim** to the Agent tool — copy each field into the corresponding Agent() argument without paraphrasing the prompt, rewriting the name, or substituting the team. Same "forward verbatim" discipline as `claude-team build` output.
+   a. Run `spacedock dispatch spawn-standing --mod {abs_path_to_mod} --team {team_name}`.
+   b. If the helper emits JSON with top-level `status: "already-alive"`, log the reported `name` and skip to the next mod. Standing teammates are first-boot-wins across the captain session; subsequent workflows sharing the team pick up the live member. (The helper resolves already-alive via the team-membership predicate — a member named in the team `config.json` members list — which is also the predicate the prose-polish routing check uses.)
+   c. Otherwise the helper emits an Agent() call spec JSON with keys `subagent_type`, `name`, `team_name`, `model`, `prompt`. **Forward that spec verbatim** to the Agent tool — copy each field into the corresponding Agent() argument without paraphrasing the prompt, rewriting the name, or substituting the team. Same "forward verbatim" discipline as `spacedock dispatch build` output.
    d. The spawn is fire-and-forget. Do NOT block on the teammate's first idle notification before continuing to dispatch.
    e. If the helper exits non-zero on any mod (missing Agent Prompt section, invalid model enum, convention-violating trailing heading), surface the error to the captain and continue with the remaining mods. A broken mod does not block the workflow.
 2. After all standing teammates are spawned (or skipped), proceed with the ensign `Agent()` dispatch.
 
 This is a one-time cost at first dispatch. Subsequent dispatches skip the spawn pass entirely — the FO tracks "standing teammates spawned for this team" in session memory. In single-entity (bare) mode and in Degraded Mode, skip lazy-spawn (same as the discovery-pass skip note above). Prose-polish round-trips can reach several minutes on long drafts — ensigns and the FO MUST treat polish routing as non-blocking regardless of round-trip duration.
+
+### Standing teammate declaration and routing mechanics
+
+These are the Claude realization of the shared core's `## Standing Teammates` concepts — the concrete declaration layout, routing call, and teardown trigger the cross-runtime concept defers to the adapter:
+
+- **Declaration layout.** One mod file per standing teammate under `{workflow_dir}/_mods/{name}.md`. Frontmatter carries `standing: true` and an optional `description`. The `## Hook: startup` section declares spawn config as `- key: value` bullets (`subagent_type`, `name`, `model` from the `sonnet|opus|haiku` enum). The `## Agent Prompt` section MUST be the LAST top-level section; its body from the line after the heading to EOF is the verbatim prompt passed to Agent(). Any `## ` heading after `## Agent Prompt` is rejected loudly by `spacedock dispatch spawn-standing`.
+- **Routing call.** Address a standing teammate by its declared `name` via `SendMessage`. Best-effort, non-blocking, 2-minute timeout (the shared-core routing-contract concept).
+- **Teardown trigger.** The teammate dies when Claude Code tears down the team — session end, `TeamDelete`, or captain-initiated shutdown. Mid-session death is detected on the next routing attempt; respawn via `spawn-standing` or proceed without.
+- **Dispatch-time injection.** When assembling an ensign dispatch, `spacedock dispatch build` appends a `spacedock dispatch show-standing --workflow-dir {wd}` fetch line whenever the workflow declares at least one standing teammate. `show-standing` renders the `### Standing teammates available in your team` routing block (a mod's `## Routing Usage` body when present, else a one-line fallback) so each ensign discovers the teammates without the FO adding per-dispatch opt-ins.
 
 ## Worker Resolution
 
@@ -157,9 +166,17 @@ Exempt any agent whose entity is in an active feedback-cycle state (tracked via 
 
 ## Context Budget and Dead Ensign Handling
 
-**Context budget check:** Run `{project_root}/skills/commission/bin/claude-team context-budget --name {ensign-name}`. Parse the JSON output. If `reuse_ok` is `false`, log to captain and fresh-dispatch with a recovery clause.
+This section is the Claude realization of the shared core's reuse-condition-0 budget probe (and the feedback-rejection budget check). On Claude, the probe IS provided — Codex declares none.
 
-**Model-to-context mapping:** Lives in the `claude-team` script, not in the runtime adapter prose.
+**Context budget check:** Run `spacedock dispatch context-budget --name {ensign-name}`. Parse the JSON output. If `reuse_ok` is `false`, log to captain and fresh-dispatch with a recovery clause. The probe reads the named member's most recent `~/.claude/.../subagents/agent-*.jsonl` transcript and its team-`config.json` model.
+
+**Budget-unavailable is fail-safe (never silent-reuse).** The probe exits non-zero with no `reuse_ok` field in three conditions, and the FO treats every one identically — fresh-dispatch:
+- **missing jsonl** — no `agent-*.jsonl` exists for the named member (stderr: `no subagent jsonl found for '{name}'`).
+- **unreadable/empty jsonl** — the jsonl exists but carries no assistant entry with non-zero `usage` (stderr: `no assistant entries with usage in {path}`).
+- **agent-not-in-team-config** — no team `config.json` lists a member with that name (stderr: `no team config found for member '{name}'`).
+A non-zero exit with no `reuse_ok: true` means the FO never silent-reuses on an absent reading.
+
+**Model-to-context mapping:** Resolved by `spacedock dispatch context-budget` from the member's runtime/config model. The opus context window follows a forward family rule (an `claude-opus-4-{minor}` with minor ≥ 7 → 1M; the `[1m]` suffix → 1M; else 200k), so a new opus release stays correct without an edit. This is also the model-for-member lookup reuse-condition-4 references: the same team-`config.json` member-model read.
 
 **Recovery clause** (only when replacing a prior ensign): The prior ensign was shut down due to context budget limits. Its worktree may hold uncommitted changes. Run `git status` and `git diff` first; commit legitimate WIP or reset broken changes.
 
