@@ -9,7 +9,7 @@ verdict:
 score: "0.30"
 worktree: .worktrees/spacedock-ensign-merge-ceremony-ergonomics
 issue:
-mod-block: merge:pr-merge
+mod-block: 
 pr: #255
 ---
 
