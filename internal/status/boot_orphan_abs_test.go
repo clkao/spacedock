@@ -67,11 +67,9 @@ func TestBootAbsoluteWorktreeDirExists(t *testing.T) {
 		t.Fatalf("DIR_EXISTS for absolute existing worktree = %q, want \"yes\"\n%s", got, nativeOut)
 	}
 
-	// Oracle parity (skips when python3/oracle unavailable).
-	oracle := oraclePath()
-	if oracle == "" {
-		t.Skip("oracle not found; direct DIR_EXISTS assertion already proved the fix")
-	}
+	// Oracle parity. The oracle is resolved in-tree, so this comparison always
+	// runs (and hard-fails on a real divergence) on top of the direct DIR_EXISTS
+	// assertion above.
 	oracleOut, _, oracleCode := runOracle(t, root, env, args...)
 	if oracleCode != 0 {
 		t.Fatalf("oracle --boot exit=%d", oracleCode)

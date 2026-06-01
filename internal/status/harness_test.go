@@ -19,12 +19,9 @@ import (
 var update = flag.Bool("update", false, "regenerate golden files from the oracle")
 
 // oracleEnvVar names an env var that overrides the path to the live status
-// oracle script. When unset, the harness falls back to the plugin location.
+// oracle script. When unset, the harness falls back to the in-tree vendored
+// oracle, which is always present in a checkout.
 const oracleEnvVar = "SPACEDOCK_ORACLE"
-
-// defaultOraclePath is the plugin-shipped oracle the vendored copy was taken
-// from. Tests that compare against the live oracle skip when it is absent.
-const defaultOraclePath = "/Users/clkao/git/spacedock/skills/commission/bin/status"
 
 // pinnedEnv returns the locale/id/timestamp-pinned environment both the oracle
 // and the launcher must run under so env-dependent output is reproducible. The
@@ -44,18 +41,29 @@ func pinnedEnv(t *testing.T) []string {
 	}
 }
 
-// oraclePath returns the live oracle path, or "" if it cannot be found.
-func oraclePath() string {
+// oraclePath returns the oracle script the parity tests run against. A
+// SPACEDOCK_ORACLE override, when set, must point at an existing file — a
+// misconfigured override is a hard failure, not a skip. With no override the
+// in-tree vendored oracle is used; a missing vendored copy is a hard failure
+// too. The oracle is therefore always resolvable in a checkout, so the parity
+// assertions hard-fail on a real divergence instead of green-by-skip on CI or a
+// fresh clone (the test-integrity contract this enforces).
+func oraclePath(t *testing.T) string {
+	t.Helper()
 	if p := os.Getenv(oracleEnvVar); p != "" {
-		if _, err := os.Stat(p); err == nil {
-			return p
+		if _, err := os.Stat(p); err != nil {
+			t.Fatalf("%s=%s does not exist: %v", oracleEnvVar, p, err)
 		}
-		return ""
+		return p
 	}
-	if _, err := os.Stat(defaultOraclePath); err == nil {
-		return defaultOraclePath
+	p, err := filepath.Abs(filepath.Join("vendor", "status"))
+	if err != nil {
+		t.Fatal(err)
 	}
-	return ""
+	if _, err := os.Stat(p); err != nil {
+		t.Fatalf("vendored oracle not found at %s: %v", p, err)
+	}
+	return p
 }
 
 // runLauncher runs the vendored-exec runner (the launcher path) with the given
@@ -77,15 +85,12 @@ func runLauncher(t *testing.T, dir string, env []string, args ...string) (string
 	return stdout.String(), stderr.String(), code
 }
 
-// runOracle runs the live oracle script directly under python3 with the given
-// args/dir/env and returns stdout, stderr, exit code. Skips the test when the
-// oracle cannot be located.
+// runOracle runs the oracle script directly under python3 with the given
+// args/dir/env and returns stdout, stderr, exit code. A missing oracle is a hard
+// failure (see oraclePath), never a skip.
 func runOracle(t *testing.T, dir string, env []string, args ...string) (string, string, int) {
 	t.Helper()
-	oracle := oraclePath()
-	if oracle == "" {
-		t.Skipf("oracle not found (set %s to the status script path)", oracleEnvVar)
-	}
+	oracle := oraclePath(t)
 	var stdout, stderr bytes.Buffer
 	cmd := exec.Command("python3", append([]string{oracle}, args...)...)
 	cmd.Dir = dir
