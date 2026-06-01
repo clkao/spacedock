@@ -9,7 +9,7 @@ completed:
 verdict:
 worktree: .worktrees/spacedock-ensign-pr-merge-mod
 issue:
-mod-block: merge:pr-merge
+mod-block: 
 ---
 
 Initialize the workflow's first **merge-lifecycle mod**: a `_mods/pr-merge.md` with a `## Hook: merge`
