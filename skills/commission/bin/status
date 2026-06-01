@@ -142,11 +142,8 @@ def parse_frontmatter(filepath):
                 if ':' in line:
                     key, _, val = line.partition(':')
                     key = key.strip()
-                    val = val.strip()
-                    if len(val) >= 2 and val[0] == val[-1] and val[0] in ('"', "'"):
-                        val = val[1:-1]
                     if not line[0].isspace():
-                        fields[key] = val
+                        fields[key] = parse_value(val)
     return fields
 
 
@@ -223,10 +220,10 @@ def strip_inline_comment(val):
 
     A `#` preceded by whitespace (or at the start of the value) begins a comment
     and is dropped along with everything after it; the surviving text is
-    right-trimmed. A `#` NOT preceded by whitespace (e.g. an issue token like
-    `#163`) is kept, so values such as `consolidates #163` are preserved. Used
-    for stage numeric/bool/token fields, which never legitimately carry a
-    literal ` #`.
+    right-trimmed. A `#` NOT preceded by whitespace (e.g. an unspaced token like
+    `v1.0#163`) is kept. A space-preceded `#` IS a comment, so an unquoted
+    `consolidates #163` truncates to `consolidates` — to keep such a value the
+    writer quotes it (see quote_for_write).
     """
     for i, ch in enumerate(val):
         if ch != '#':
@@ -234,6 +231,49 @@ def strip_inline_comment(val):
         if i == 0 or val[i - 1].isspace():
             return val[:i].rstrip()
     return val
+
+
+def parse_value(raw):
+    """Resolve a frontmatter value: trim, then unwrap a quoted scalar (dropping
+    any trailing inline comment after the close quote) or strip an inline
+    comment from an unquoted scalar.
+
+    A quoted scalar protects an interior `#` (literal, not a comment); an
+    unquoted scalar drops a whitespace-preceded `#…` per the YAML rule. Mirrors
+    the Go parse_value.
+    """
+    val = raw.strip()
+    if val and val[0] in ('"', "'"):
+        q = val[0]
+        j = val.find(q, 1)
+        if j >= 0:
+            rest = val[j + 1:].lstrip(' \t')
+            if rest == '' or rest[0] == '#':
+                return val[1:j]
+        # Unterminated or trailing non-comment content: preserve the historical
+        # matched-surrounding-quotes behavior, no comment strip.
+        if len(val) >= 2 and val[0] == val[-1] and val[0] in ('"', "'"):
+            return val[1:-1]
+        return val
+    return strip_inline_comment(val)
+
+
+def quote_for_write(val):
+    """Wrap a value in quotes when it carries a space-then-`#` (` #`) so the
+    reader's inline-comment strip does not later truncate it — the writer half
+    of the option-C round-trip. A value already wrapped in matched surrounding
+    quotes, or one with no ` #`, is written verbatim (byte preservation). The
+    quote char avoids clashing with a quote the value already holds (the parser
+    does not unescape): prefer `"`, fall back to `'` when the value contains `"`
+    but not `'`. Mirrors the Go quote_for_write.
+    """
+    if ' #' not in val and '\t#' not in val:
+        return val
+    if len(val) >= 2 and val[0] == val[-1] and val[0] in ('"', "'"):
+        return val
+    if '"' in val and "'" not in val:
+        return "'" + val + "'"
+    return '"' + val + '"'
 
 
 def parse_stages_block(filepath):
@@ -1577,13 +1617,13 @@ def update_frontmatter(filepath, updates):
             key, _, _ = line.partition(':')
             key_stripped = key.strip()
             if key_stripped in resolved:
-                lines[i] = f'{key_stripped}: {resolved[key_stripped]}'
+                lines[i] = f'{key_stripped}: {quote_for_write(resolved[key_stripped])}'
                 written.add(key_stripped)
 
     # Insert fields not already present in frontmatter before closing ---
     missing = [f for f in resolved if f not in written]
     for field in missing:
-        lines.insert(fm_end, f'{field}: {resolved[field]}')
+        lines.insert(fm_end, f'{field}: {quote_for_write(resolved[field])}')
         fm_end += 1
 
     with open(filepath, 'w') as f:
