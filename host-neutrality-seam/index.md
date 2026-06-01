@@ -68,3 +68,150 @@ split-root; entity body + reports stay in the state checkout).
 `claude-runtime-segregation` (zs) — its implementation starts after this seam lands (zs `### Decision 4`).
 Coordinate the `first-officer-shared-core.md` edits with zs (zs owns the Standing-Teammates rewrite +
 reuse-condition prose; this entity touches only the code seam + the boot/build paths).
+
+## Seam design (finalized — ideation)
+
+### Seam-parity SPIKE evidence (AC-P2 riskiest mechanism, run BEFORE locking the design)
+
+Two throwaway SPIKE tests drove the CURRENT (probe-not-yet-injected) boot and build code on one
+workflow fixture under two `~/.claude` trees — populated+recent (the future Claude real-probe path,
+`present:true` / no WARN) and empty (the future Codex/bare nil path, `present:false` / WARN) — and
+asserted the observable diff is confined to exactly the two predicted surfaces. Both PASSED:
+
+- **Boot** (`status --boot --json`): every top-level key (`mods`, `id_style`, `next_id`, `orphans`,
+  `pr_state`, `dispatchable`, `state_backend`, `definition_dir`, `entity_dir`, `entity_dir_present`)
+  is BYTE-IDENTICAL between the two runs; the ONLY divergence is `team_state.present` and
+  `team_state.hint`. stderr identical. Evidence: `--- PASS: TestSpikeBootTeamStateProbeParity`.
+- **Build** (`dispatch build`, bare_mode): stdout (the dispatch envelope) is BYTE-IDENTICAL between
+  the two runs; the ONLY stderr divergence is the bare-mode WARN line (stripping it makes the two
+  stderrs identical). Evidence: `--- PASS: TestSpikeBuildBareWarnProbeParity`.
+
+Verdict: the injected-probe seam's observable effect IS confined to the boot `TEAM_STATE`
+`present`/`hint` fields plus the bare-mode WARN's presence — no structural or other-field divergence.
+The riskiest contract (does the seam quarantine cleanly without leaking into the envelope/other boot
+sections?) is de-risked; the design below is sound to lock. The SPIKE files were removed (ideation
+ships no code; the persistent AC-P2 regression test is an implementation-stage deliverable). This
+closes zs's open re-review item [M-1-seam-validation].
+
+### The probe seam (exact signature)
+
+One host-supplied predicate consumed by both surfaces. `internal/claudeteam` defines and fills it; the
+generic packages receive it as a value and the Codex/bare path passes nil.
+
+```go
+// internal/claudeteam (the Claude seam — owns the ~/.claude reads + the moved text).
+//
+// TeamStateProbe reports recent local team-runtime evidence. present drives the
+// boot TEAM_STATE; hint is the boot present:true hint line. recent drives the
+// build bare-mode WARN gate. now is injected so the 30-minute window is testable.
+type TeamStateProbe func(home string, now time.Time) (present bool, hint string, recent bool)
+
+// Probe is the concrete Claude implementation (reads ~/.claude/teams/*/config.json
+// mtimes). The Claude CLI front door passes claudeteam.Probe; Codex/bare pass nil.
+func Probe(home string, now time.Time) (present bool, hint string, recent bool) { … }
+```
+
+Rationale for ONE probe with three returns (not two probes): `probeTeamState` (boot) and
+`recentTeamEvidence` (build) read the SAME `~/.claude/teams/*/config.json` mtimes over the SAME
+30-minute window — they differ only in what they project (`present`+`hint` vs a bool). Collapsing them
+into one probe removes the duplicate read logic the relocation would otherwise copy into the seam, and
+matches the entity-body Approach ("a host-supplied probe"). A func type (not an interface) is the
+lighter seam for a single-method capability and mirrors the existing `exec.LookPath`-style func
+injection already used in `internal/cli` (`runClaude(..., exec.LookPath, ...)`).
+
+### What each generic consumer takes, and the nil contract
+
+- **`internal/status` boot.** `gatherBoot` and `printBoot` gain a leading `probe claudeteam.TeamStateProbe`
+  parameter (threaded from the `status.Request`/`NativeRunner` seam). `gatherBoot` replaces
+  `d.teamPresent, d.teamHint = probeTeamState(e)` with: if `probe == nil` → `present=false, hint=""`;
+  else `present, hint, _ = probe(home, time.Now())` where `home` is resolved from `e.get("HOME")` (the
+  HOME resolution stays generic; only the `.claude`-path read moves). `probeTeamState` (boot.go:128-163)
+  is DELETED from `internal/status`.
+- **`internal/dispatch` build.** `runBuild` and `Run` thread the same `probe` value. The bare-mode gate
+  becomes: `if bareMode && (probe == nil || !recentOf(probe)) { …WARN… }` — but the WARN STRING itself
+  moves to the Claude seam (it names `~/.claude/teams/*/config.json`, a `.claude` literal the code-side
+  oracle forbids in `internal/dispatch`). Cleanest split per zs Decision-2 ("defers the whole advisory
+  to the Claude package"): the generic `build.go` calls a seam-supplied advisory writer
+  `claudeteam.BareModeAdvisory(stderr)` only when `probe != nil && !recent`; when `probe == nil`
+  (Codex/bare) NO advisory is emitted at all. `recentTeamEvidence` (helpers.go:137-162) and the WARN
+  literal (build.go:116-120) are DELETED from `internal/dispatch`.
+
+  Note on the nil-probe WARN: today's bare-mode build WITHOUT recent evidence emits the WARN. After the
+  seam, a `probe == nil` (Codex/bare) build emits NO WARN. The SPIKE's nil-probe arm modeled the
+  empty-`~/.claude` Claude case (probe present, returns false → WARN). The Codex case is probe==nil →
+  no WARN, which is the CORRECT host-neutral behavior (the WARN is Claude-specific advice: "run
+  TeamCreate", a Claude-only tool). This is a deliberate, documented behavior refinement, NOT a parity
+  regression: the byte-for-byte AC-P2 parity claim is scoped to the Claude path (probe supplied) where
+  the WARN behavior is unchanged. The Codex/bare path GAINS host-neutrality (no Claude-only advice on a
+  non-Claude host) — exactly AC-3's intent. Flagged for the implementation stage + the staff review.
+
+### Where the moved text lives (the two relocated literals)
+
+- The boot `present:true` hint (`"recent team directory: " + name`) and the `present:false` hint
+  (`"run TeamCreate before first team-mode dispatch (claude runtime supports it)"`, boot.go:294) move
+  INTO `internal/claudeteam`: the present-true hint is the probe's `hint` return; the present-false
+  hint is a `claudeteam` constant the boot renderer reads only when `probe != nil`. When `probe == nil`,
+  boot emits a host-neutral `present:false` with an empty/host-neutral hint (no "claude runtime
+  supports it" string in generic `internal/status`). **Open implementation choice flagged for the
+  gate:** whether the `present:false` line keeps a generic hint or the whole hint string is
+  seam-supplied. Either satisfies the code-side oracle; the staff review should pick.
+- The bare-mode WARN string literal (build.go:116-120) moves verbatim into `claudeteam.BareModeAdvisory`.
+
+### Composition root (where the Claude package supplies the probe)
+
+`internal/cli/cli.go` `Run`/`run` is the composition root. The `claude` front door
+(`runClaude`) supplies `claudeteam.Probe`; `codex`, `init`, `doctor`, and the bare `status`/`dispatch`
+paths supply nil. Concretely: `status.NativeRunner` and `dispatch.Run` gain a probe field/param wired
+in `run()`. NOTE per zs Decision-2: this means `internal/cli` MAY import `internal/claudeteam` — the
+oracle forbids `.claude` literals in `internal/dispatch`+`internal/status` SOURCE, not in the transitive
+import graph. The binary as a whole still reads `~/.claude` through the seam.
+
+### AC oracle falsifiability (confirmed)
+
+- **AC-P1** (`go/parser` over `internal/dispatch`+`internal/status` finds no `~/.claude`/
+  `os.UserHomeDir`-rooted team/transcript literal): falsifiable — RED today on `probeTeamState`,
+  `recentTeamEvidence`, the build WARN literal; GREEN after they move to `internal/claudeteam`.
+  Re-introducing any of the three flips it RED. Sound oracle.
+- **AC-P2** (boot `TEAM_STATE` + build WARN byte-identical with probe supplied; nil-probe differs ONLY
+  in `present`/WARN-presence): falsifiable and DEMONSTRATED by the SPIKE above; the persistent
+  regression pins it. Sound oracle. (Caveat: the nil-probe WARN-presence assertion must be written
+  against the Claude-empty-tree case, not the Codex probe==nil case — see the behavior-refinement note.)
+- **AC-P3** (no new native subcommand handlers; the five still route via Python; parity harness green):
+  falsifiable — adding a `context-budget`/`list-standing`/`show-standing`/`spawn-standing` handler or a
+  `build` `_mods` branch flips it. Sound oracle. This entity adds ONLY the package + probe seam.
+
+### Coordination boundary with zs (`first-officer-shared-core.md`) — CONFIRMED
+
+Verified against the real file. zs's prose leaks live at `first-officer-shared-core.md:142` & `:206`
+(`claude-team context-budget`), `:117` (`member_exists`), `:323`/`:325` (`## Standing Teammates` +
+`list-standing`). **This entity touches NONE of them** — it edits only Go source
+(`internal/claudeteam`, `internal/dispatch`, `internal/status`, `internal/cli`). The boundary is clean
+and non-overlapping: zs owns the Standing-Teammates concept-vs-mechanics rewrite + the reuse-condition /
+feedback-rejection / prose-polish prose relocations; this entity owns the code seam + the boot/build
+paths. No shared file is edited by both, so they can land in either order (this one first, per zs
+Decision 4) without a merge collision.
+
+### Independent staff review — recommended YES
+
+The finalized seam design DOES warrant an independent staff review before the gate, for two reasons the
+SPIKE surfaced: (1) the **nil-probe-WARN behavior refinement** (Codex/bare emits NO bare-mode WARN,
+vs today's unconditional WARN-without-evidence) is a deliberate behavior change the review should
+confirm is intended host-neutrality and not a silent regression; (2) the **moved-hint open choice**
+(generic `present:false` hint vs fully seam-supplied) wants a second opinion. The review should also
+sanity-check that one probe with three returns (vs two probes) is the right seam shape, and that
+threading the probe through `gatherBoot`/`printBoot`/`runBuild`/`Run` does not balloon the signatures
+unacceptably. The mechanism itself is de-risked by the SPIKE; the review is design-soundness, not
+mechanism-uncertainty.
+
+## Stage Report: ideation
+
+- DONE: Run the seam-parity SPIKE (AC-P2 riskiest-mechanism check, BEFORE locking the design): instrument boot/build with a real team-state probe vs a nil probe on fixture trees and record the behavioral evidence that the observable diff is confined to the boot TEAM_STATE 'present'/'hint' fields + the bare-mode WARN's presence — no structural or other-field divergence. If divergence is found, the seam design must change before implementation.
+  Two throwaway SPIKE tests drove the current boot+build code on populated vs empty `~/.claude` fixtures; both PASSED. Boot: all 10 other top-level `--boot --json` keys byte-identical, diff confined to `team_state.present`/`hint`. Build: stdout byte-identical, only stderr diff is the WARN line. No divergence found — design locked. SPIKE files removed (ideation ships no code). See `### Seam-parity SPIKE evidence`.
+- DONE: Finalize the injected-probe seam design so implementation is unambiguous: the exact func/interface signature gatherBoot and runBuild take, how internal/claudeteam supplies it (and the Codex/bare nil path), and where the boot TEAM_STATE text + the bare-mode WARN literal move. Confirm AC-P1/AC-P2/AC-P3 are falsifiable oracles as written.
+  `### Seam design (finalized)` specifies one `claudeteam.TeamStateProbe` func (present/hint/recent), threaded into `gatherBoot`/`printBoot`/`runBuild`/`Run`, supplied by the `claude` front door in `internal/cli` and nil elsewhere; the two `.claude`-naming literals (boot hint + build WARN) move into `internal/claudeteam`. All three ACs confirmed falsifiable; surfaced the Codex-nil-probe WARN behavior refinement and the present:false-hint open choice for the gate.
+- DONE: Confirm the first-officer-shared-core.md coordination boundary with zs (this entity = the code seam + boot/build paths ONLY; zs owns the Standing-Teammates rewrite + reuse-condition prose), and state whether the finalized seam design warrants an independent staff review.
+  Verified against the real file: zs's prose leaks (lines 142/206/117/323/325) are untouched by this entity, which edits only Go source — boundary clean and non-overlapping. Recommending YES on an independent staff review (the nil-probe-WARN behavior refinement + the moved-hint open choice want a second opinion; mechanism itself already de-risked by the SPIKE).
+
+### Summary
+
+Ran the AC-P2 riskiest-mechanism SPIKE first, per the running-research-spikes discipline: two throwaway tests drove the current boot+build code on populated vs empty `~/.claude` fixtures and PROVED the observable diff is confined to exactly the boot `TEAM_STATE present`/`hint` fields (10 other boot-JSON keys byte-identical) and the bare-mode WARN's presence (dispatch envelope byte-identical) — closing zs's open [M-1-seam-validation] item. Finalized the seam as one `claudeteam.TeamStateProbe` func (present/hint/recent over the shared `~/.claude/teams` read) threaded into `gatherBoot`/`printBoot`/`runBuild`/`Run`, supplied by the `claude` front door and nil for Codex/bare, with the two `.claude`-naming string literals relocated into `internal/claudeteam`. Confirmed the zs coordination boundary is clean (this entity = Go code only; zs = the `first-officer-shared-core.md` prose) and recommend an independent staff review for the one behavior refinement the SPIKE surfaced (Codex/bare now emits no Claude-specific bare-mode WARN). No worktree (state-checkout ideation); SPIKE files removed so no code ships from this stage.
