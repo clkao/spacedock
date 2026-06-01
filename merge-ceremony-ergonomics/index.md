@@ -9,6 +9,7 @@ verdict:
 score: "0.30"
 worktree: .worktrees/spacedock-ensign-merge-ceremony-ergonomics
 issue:
+mod-block: merge:pr-merge
 ---
 
 Collapse the repetitive local-merge ceremony an FO performs at every terminal boundary when a
