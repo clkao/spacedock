@@ -10,6 +10,7 @@ score: "0.30"
 worktree: .worktrees/spacedock-ensign-live-e2e-pr-trigger-ergonomics
 issue:
 mod-block: merge:pr-merge
+pr: #245
 ---
 
 Make the live-runtime e2e run on PRs without a manual per-PR step. Today `runtime-live-e2e.yml`
