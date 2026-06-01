@@ -1,7 +1,7 @@
 ---
 id: 0mxzm82mpjbv0tjd51pv2t5j
 title: Host-neutrality seam — relocate ~/.claude team-state reads behind an injected probe (zs prerequisite)
-status: implementation
+status: validation
 source: zs claude-runtime-segregation decomposition (CL 2026-05-31 "zs - split"; staff review M-3) — the riskiest-first prerequisite
 started: 2026-05-31T20:45:00Z
 completed:
@@ -159,12 +159,26 @@ injection already used in `internal/cli` (`runClaude(..., exec.LookPath, ...)`).
 
 ### Composition root (where the Claude package supplies the probe)
 
-`internal/cli/cli.go` `Run`/`run` is the composition root. The `claude` front door
-(`runClaude`) supplies `claudeteam.Probe`; `codex`, `init`, `doctor`, and the bare `status`/`dispatch`
-paths supply nil. Concretely: `status.NativeRunner` and `dispatch.Run` gain a probe field/param wired
-in `run()`. NOTE per zs Decision-2: this means `internal/cli` MAY import `internal/claudeteam` — the
-oracle forbids `.claude` literals in `internal/dispatch`+`internal/status` SOURCE, not in the transitive
-import graph. The binary as a whole still reads `~/.claude` through the seam.
+`internal/cli/cli.go` `Run`/`run` is the composition root. `status.NativeRunner` gains a
+`TeamStateProbe` field and `dispatch.Run` a leading probe param, both wired at the single
+construction site in `Run()`. NOTE per zs Decision-2: this means `internal/cli` MAY import
+`internal/claudeteam` — the oracle forbids `.claude` literals in `internal/dispatch`+`internal/status`
+SOURCE, not in the transitive import graph. The binary as a whole still reads `~/.claude` through the
+seam.
+
+**CORRECTION (implementation, FO-approved).** The ideation wording above originally read "the `claude`
+front door (`runClaude`) supplies `claudeteam.Probe`; … the bare `status`/`dispatch` paths supply nil."
+That framing is inaccurate: `runClaude`/`runCodex` only `Launch()` the host process — they never reach
+`status`/`dispatch` in-process. The Claude (and future Codex) FO re-invokes the binary FRESH as
+`spacedock status --boot` / `spacedock dispatch build`, hitting the single construction site
+(`cli.go` `Run`) with NO per-invocation host signal. The as-built wiring therefore supplies
+`claudeteam.Probe` to the workflow-facing `status`/`dispatch` surface unconditionally at that
+construction site, because the binary's only FO boot/dispatch consumer today IS Claude — this is what
+keeps AC-P2's byte-identical claim true LIVE (wiring nil there would make the live Claude FO lose
+`team_state present:true` + the bare-mode WARN). `codex`/`init`/`doctor` do not consume the probe. The
+`nil` path stays mechanism-ready (exercised by the AC-P2 regression) and is reserved for the future
+codex-runtime entry point zs adds; runtime host-detection (when to pass nil) is deliberately deferred to
+zs, not solved here (adding a `SPACEDOCK_HOST` signal now is scope creep beyond this seam).
 
 ### AC oracle falsifiability (confirmed)
 
@@ -225,9 +239,28 @@ Ran the AC-P2 riskiest-mechanism SPIKE first, per the running-research-spikes di
 - DONE: AC-P3: add NO native subcommand handlers (context-budget/list-standing/show-standing/spawn-standing + the build _mods branch still route via the vendored Python oracle); wire the composition root (internal/cli runClaude supplies claudeteam.Probe; codex/init/doctor/bare status+dispatch pass nil); go test ./... green (except the pre-existing env-gated TestCodexResolveManifestAgainstInstalledHost) + existing parity harness green; gofmt/vet clean.
   No handlers added: `no_native_subcommands_test.go` pins the deferred set to exactly the four + asserts a `_mods`-bearing build emits only the show-stage-def fetch line; existing TestDeferredSubcommandGuard still green. Composition-root wiring resolved below. `go test ./...` 542 passed / 1 pre-existing env-gated fail; gofmt -l clean; go vet clean.
 
-### Composition-root wiring (FO question raised; proceeded per stated recommendation)
+### DEVIATION FROM DESIGN (FO-APPROVED): composition-root probe wiring
 
-The design's "runClaude supplies the probe; bare status/dispatch supply nil" can't hold literally: runClaude/runCodex only `Launch()` the host — the FO re-invokes `spacedock status --boot` / `dispatch build` FRESH, hitting the single construction site (cli.go), with no per-invocation host env signal. Wiring nil there would make the LIVE Claude FO lose TEAM_STATE present:true + the bare WARN (AC-P2's Claude-path claim would fail in production though the injected-probe regression passes). Resolved by wiring `claudeteam.Probe` into the workflow-facing status/dispatch surface at cli.Run (the native binary is the Claude FO's companion today); the nil path is exercised by the regression test + reserved for the codex-runtime entry point zs adds later. `internal/cli` imports `internal/claudeteam` (allowed — the oracle forbids `.claude` literals in dispatch+status SOURCE, not the import graph). Flagged to team-lead; proceeded as I said I would absent a different instruction. Flipping the single call-site value is trivial if the FO wants nil-now.
+This is a deliberate, FO-approved correction to the ideation design's composition-root wording — NOT
+drift. Downstream validation and the adversarial audit should read it as such.
+
+- **Design said:** "the `claude` front door (`runClaude`) supplies `claudeteam.Probe`; … the bare
+  `status`/`dispatch` paths supply nil."
+- **Why that can't hold:** `runClaude`/`runCodex` only `Launch()` the host process — they never reach
+  `status`/`dispatch` in-process. The FO re-invokes the binary FRESH as `spacedock status --boot` /
+  `dispatch build`, hitting the single construction site (`cli.go` `Run`) with no per-invocation host
+  signal. Wiring nil there would make the LIVE Claude FO lose `team_state present:true` + the bare-mode
+  WARN — AC-P2's Claude-path byte-identical claim would FAIL in production even though the
+  injected-probe regression (which supplies the probe directly) passes.
+- **As-built:** wire `claudeteam.Probe` into the workflow-facing `status`/`dispatch` surface at the
+  single `cli.Run` construction site (the native binary is the Claude FO's companion today). `internal/cli`
+  imports `internal/claudeteam` (allowed — the oracle forbids `.claude` literals in dispatch+status
+  SOURCE, not the import graph). The nil path stays mechanism-ready (exercised by the AC-P2 regression)
+  and reserved for the future codex-runtime entry zs adds; runtime host-detection is deferred to zs.
+- **Approval:** raised to team-lead before and after implementing; FO approved this exact wiring
+  (construction-site `claudeteam.Probe`, reject nil-everywhere, defer host-detection to zs) and asked
+  that the ideation `### Composition root` text be corrected (done) and this deviation called out here.
+  Flipping the single call-site value to nil is trivial if a later FO call wants it.
 
 ### Open-choice resolution (present:false hint)
 
