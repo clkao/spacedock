@@ -1,10 +1,10 @@
 ---
 id: 5tsqmdd3vtj1s8d8gmf50efj
 title: Guarantee the shipped tool runs on anyone's machine — no hidden personal dependencies
-status: backlog
+status: ideation
 source: hx decomposition (C of 3) — captain 2026-06-01; staff review
 score: "0.28"
-started:
+started: 2026-06-01T06:04:55Z
 completed:
 verdict:
 worktree:
