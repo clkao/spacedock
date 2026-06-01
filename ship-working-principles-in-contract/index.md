@@ -9,7 +9,7 @@ completed:
 verdict:
 worktree: .worktrees/spacedock-ensign-ship-working-principles-in-contract
 issue:
-mod-block: merge:pr-merge
+mod-block: 
 pr: #248
 ---
 
