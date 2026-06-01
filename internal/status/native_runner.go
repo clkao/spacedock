@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/spacedock-dev/spacedock/internal/claudeteam"
@@ -492,7 +493,7 @@ func runDiscover(args []string, dir string, stderr, stdout io.Writer) int {
 		for k := range found {
 			names = append(names, k)
 		}
-		sortStrings(names)
+		sort.Strings(names)
 		return errExit(stderr, "--discover is incompatible with "+strings.Join(names, ", "))
 	}
 
@@ -507,7 +508,7 @@ func runDiscover(args []string, dir string, stderr, stdout io.Writer) int {
 		}
 	}
 	if rootPath == "" {
-		out, err := runGit(dir, "rev-parse", "--show-toplevel")
+		out, err := runGitCmd(dir, "rev-parse", "--show-toplevel")
 		if err == nil {
 			rootPath = strings.TrimSpace(out)
 		} else {
@@ -522,11 +523,6 @@ func runDiscover(args []string, dir string, stderr, stdout io.Writer) int {
 		fmt.Fprintln(stdout, p)
 	}
 	return 0
-}
-
-// runGit runs git in dir and returns stdout, or an error on non-zero exit.
-func runGit(dir string, args ...string) (string, error) {
-	return runGitCmd(dir, args...)
 }
 
 // resolveFromRootOrExit is the multi-workflow --root resolver. Matches

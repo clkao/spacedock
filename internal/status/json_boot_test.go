@@ -119,7 +119,7 @@ func TestBootJSONStructure(t *testing.T) {
 		t.Fatalf("next_id %q length=%d, want 24", boot.NextID, len(boot.NextID))
 	}
 	for _, c := range boot.NextID {
-		if !strings.ContainsRune(sdB32Alphabet, c) {
+		if !strings.ContainsRune(sdB32Chars, c) {
 			t.Fatalf("next_id %q has char %q outside SD-B32 alphabet", boot.NextID, c)
 		}
 	}

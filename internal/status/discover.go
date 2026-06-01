@@ -42,11 +42,6 @@ type entity struct {
 	displayID string
 }
 
-// get returns a frontmatter field value, "" when absent — matching dict.get.
-func (e *entity) get(key string) string {
-	return e.fields[key]
-}
-
 // discoverEntityFiles returns (slug, path) pairs for entities in directory,
 // sorted by slug. Flat {slug}.md and folder {slug}/index.md are both entities;
 // README.md, non-.md files, dotfiles, fence-less files, reserved dirs, and

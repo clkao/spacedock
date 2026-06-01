@@ -4,7 +4,6 @@ package status
 
 import (
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -63,7 +62,6 @@ func TestNativeUsageErrorsExitOneNotTwo(t *testing.T) {
 			if nOut != "" || oOut != "" {
 				t.Fatalf("stdout must be empty on usage error: native=%q oracle=%q", nOut, oOut)
 			}
-			_ = strings.TrimSpace
 		})
 	}
 }

@@ -81,7 +81,7 @@ func TestNativeNextIDMatchesOracle(t *testing.T) {
 		t.Fatalf("candidate %q length=%d, want 24", candidate, len(candidate))
 	}
 	for _, c := range candidate {
-		if !strings.ContainsRune(sdB32Alphabet, c) {
+		if !strings.ContainsRune(sdB32Chars, c) {
 			t.Fatalf("candidate %q has char %q outside SD-B32 alphabet", candidate, c)
 		}
 	}

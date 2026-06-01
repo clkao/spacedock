@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 )
@@ -296,7 +297,7 @@ func scanMods(entityDir string) map[string][]string {
 		}
 	}
 	// glob returns sorted order.
-	sortStrings(files)
+	sort.Strings(files)
 	hooks := map[string][]string{}
 	for _, name := range files {
 		modName := strings.TrimSuffix(name, ".md")
@@ -314,7 +315,7 @@ func scanMods(entityDir string) map[string][]string {
 		}
 	}
 	for k := range hooks {
-		sortStrings(hooks[k])
+		sort.Strings(hooks[k])
 	}
 	return hooks
 }
