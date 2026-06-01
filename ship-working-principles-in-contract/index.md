@@ -10,6 +10,7 @@ verdict:
 worktree: .worktrees/spacedock-ensign-ship-working-principles-in-contract
 issue:
 mod-block: merge:pr-merge
+pr: #248
 ---
 
 **What this is for (plain).** The ways of working we've learned the hard way currently live in one
