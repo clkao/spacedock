@@ -11,6 +11,7 @@ worktree:
 issue:
 mod-block: 
 pr: #244
+archived: 2026-06-01T04:43:59Z
 ---
 
 The prerequisite carved out of `claude-runtime-segregation` (zs) per the staff-review decomposition (zs
