@@ -6,7 +6,7 @@ source: session 1 debrief — ergonomics
 score: "0.30"
 worktree: .worktrees/spacedock-ensign-cli-ergonomics
 started: 2026-05-30T21:28:40Z
-mod-block: merge:pr-merge
+mod-block: 
 pr: #242
 ---
 
