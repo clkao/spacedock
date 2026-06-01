@@ -11,6 +11,7 @@ worktree:
 issue:
 mod-block: 
 pr: #245
+archived: 2026-06-01T05:22:19Z
 ---
 
 Make the live-runtime e2e run on PRs without a manual per-PR step. Today `runtime-live-e2e.yml`
