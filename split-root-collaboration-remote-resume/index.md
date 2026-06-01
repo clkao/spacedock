@@ -9,7 +9,7 @@ completed:
 verdict:
 worktree: .worktrees/spacedock-ensign-split-root-collaboration-remote-resume
 issue:
-mod-block: merge:pr-merge
+mod-block: 
 pr: #256
 ---
 
