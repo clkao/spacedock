@@ -18,12 +18,12 @@ func TestDiscoverWorkflowDirWalksUp(t *testing.T) {
 	if err := os.MkdirAll(deep, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	got, ok := discoverWorkflowDir(deep)
+	got, ok := DiscoverWorkflowDir(deep)
 	if !ok {
-		t.Fatalf("discoverWorkflowDir(%q) = ok false, want true", deep)
+		t.Fatalf("DiscoverWorkflowDir(%q) = ok false, want true", deep)
 	}
 	if realpathOf(got) != realpathOf(def) {
-		t.Fatalf("discoverWorkflowDir(%q) = %q, want %q", deep, got, def)
+		t.Fatalf("DiscoverWorkflowDir(%q) = %q, want %q", deep, got, def)
 	}
 }
 
@@ -35,8 +35,8 @@ func TestDiscoverWorkflowDirMiss(t *testing.T) {
 	if err := os.MkdirAll(deep, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := discoverWorkflowDir(deep); ok {
-		t.Fatalf("discoverWorkflowDir(%q) = ok true, want false (no commissioned README)", deep)
+	if _, ok := DiscoverWorkflowDir(deep); ok {
+		t.Fatalf("DiscoverWorkflowDir(%q) = ok true, want false (no commissioned README)", deep)
 	}
 }
 
@@ -52,12 +52,12 @@ func TestDiscoverWorkflowDirInnermostWins(t *testing.T) {
 	if err := os.MkdirAll(deep, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	got, ok := discoverWorkflowDir(deep)
+	got, ok := DiscoverWorkflowDir(deep)
 	if !ok {
-		t.Fatalf("discoverWorkflowDir(%q) = ok false, want true", deep)
+		t.Fatalf("DiscoverWorkflowDir(%q) = ok false, want true", deep)
 	}
 	if realpathOf(got) != realpathOf(inner) {
-		t.Fatalf("discoverWorkflowDir(%q) = %q, want innermost %q (first match wins)", deep, got, inner)
+		t.Fatalf("DiscoverWorkflowDir(%q) = %q, want innermost %q (first match wins)", deep, got, inner)
 	}
 }
 

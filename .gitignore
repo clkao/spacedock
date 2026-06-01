@@ -5,3 +5,8 @@ __pycache__/
 
 # goreleaser build output (binaries, tarballs, checksums, generated cask).
 dist/
+
+# Split-root state checkouts are linked worktrees on an orphan state branch, never
+# committed to the code branch (zero code-branch churn). A fresh clone re-creates
+# the checkout with `spacedock state init`.
+**/.spacedock-state/

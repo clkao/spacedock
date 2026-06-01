@@ -7,13 +7,13 @@ import (
 	"strings"
 )
 
-// discoverWorkflowDir walks up from startDir to the nearest ancestor whose
+// DiscoverWorkflowDir walks up from startDir to the nearest ancestor whose
 // README.md frontmatter declares a `commissioned-by: spacedock@` field, the
 // same predicate discoverWorkflows uses to recognize a workflow. The first
 // match on the way up wins — when workflows are nested, this resolves to the
 // innermost enclosing workflow. Returns (dir, true) on a match, ("", false) at
 // the filesystem root with no match.
-func discoverWorkflowDir(startDir string) (string, bool) {
+func DiscoverWorkflowDir(startDir string) (string, bool) {
 	d, err := filepath.Abs(startDir)
 	if err != nil {
 		d = startDir
@@ -49,13 +49,9 @@ func stateCheckoutParent(pointedDir string) (string, bool) {
 	for {
 		readme := filepath.Join(d, "README.md")
 		if isRegularFile(readme) {
-			stateValue := strings.TrimSpace(ParseFrontmatter(readme)["state"])
-			if stateValue != "" && !filepath.IsAbs(stateValue) {
-				cleaned := filepath.Clean(stateValue)
-				if cleaned != ".." && !strings.HasPrefix(cleaned, ".."+string(filepath.Separator)) {
-					if realpathOf(filepath.Join(d, cleaned)) == target {
-						return d, true
-					}
+			if mode, relPath, err := ClassifyState(ParseFrontmatter(readme)["state"]); err == nil && mode == StateSplitRoot {
+				if realpathOf(filepath.Join(d, relPath)) == target {
+					return d, true
 				}
 			}
 		}

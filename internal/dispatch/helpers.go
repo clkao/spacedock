@@ -123,11 +123,11 @@ func isFile(path string) bool {
 func splitRootStateCheckout(workflowDir string) string {
 	readmePath := filepath.Join(workflowDir, "README.md")
 	fm := status.ParseFrontmatter(readmePath)
-	state := strings.TrimSpace(fm["state"])
-	if state == "" {
+	mode, relPath, err := status.ClassifyState(fm["state"])
+	if err != nil || mode != status.StateSplitRoot {
 		return ""
 	}
-	return filepath.Join(workflowDir, state)
+	return filepath.Join(workflowDir, relPath)
 }
 
 // pyRelpath returns path relative to base the way os.path.relpath does for the

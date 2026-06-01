@@ -277,9 +277,41 @@ Do NOT include a Scoring Rubric section by default. Scoring uses a simple 0.0–
 **State backend (`state:` field).** Decide where the workflow's mutable entity state lives:
 
 - **Split-root** (`state: .spacedock-state` in the README frontmatter): use when the workflow is embedded in a code repo whose PRs you care about. The README (the living spec) stays on your code branch; the mutable entity state lives in a separate `.spacedock-state` checkout, so routine stage transitions never churn the code branch and never collide with a feature PR.
-- **Single-root** (omit `state:`): use for a standalone workflow that is not embedded in a code repo you ship from — the entities live beside the README in the same directory.
+- **Inline** (`state: $inline`, or omit `state:`): use for a standalone workflow that is not embedded in a code repo you ship from — the entities live beside the README in the same directory. Write `state: $inline` explicitly for a new inline workflow so the backend choice is self-documenting; an absent `state:` means the same thing (backward-compatible default).
 
-If you choose split-root, also set up the `.spacedock-state` checkout (and, for collaboration/resume, declare its remote).
+#### Journey 1 — Scaffold a split-root workflow (orphan-branch state, same repo)
+
+State lives on an **orphan branch in the same repo** (no second repo, no second remote): state commits land on the orphan branch and the code branch never sees them (zero churn). The state checkout is a **linked worktree** of the main repo at the gitignored `state:` path. To scaffold it, run this sequence after writing the README (substitute `{state_path}` = the `state:` value, e.g. `.spacedock-state`; `{state_branch}` = `spacedock-state/{workflow-dir-basename}`, e.g. `spacedock-state/dev` for `docs/dev`):
+
+1. Add the state path to the code branch's tracked `.gitignore` so state commits never churn the code branch:
+
+   ```bash
+   grep -qxF '{dir}/{state_path}/' {project_root}/.gitignore 2>/dev/null || echo '{dir}/{state_path}/' >> {project_root}/.gitignore
+   ```
+
+2. Birth the orphan branch in a **temporary detached worktree**, clearing the inherited tree before seeding (a `--orphan` checkout inherits the source branch's tree — you MUST clear it, or the state branch is polluted with code-branch files):
+
+   ```bash
+   git worktree add --detach /tmp/orphan-birth
+   git -C /tmp/orphan-birth checkout --orphan {state_branch}
+   git -C /tmp/orphan-birth rm -rf --cached .
+   # remove the inherited working-tree files (keep .git), then seed the first entity
+   git -C /tmp/orphan-birth commit -q -m "seed state"
+   git -C /tmp/orphan-birth push origin {state_branch}   # if origin exists
+   git worktree remove --force /tmp/orphan-birth
+   ```
+
+3. Check the orphan branch out at the gitignored state path as a linked worktree:
+
+   ```bash
+   git worktree add {dir}/{state_path} {state_branch}
+   ```
+
+The result: `spacedock status` renders the seeded entity from the state checkout, and the code branch `git status --porcelain` is empty (R1 — zero churn). On a fresh clone of this repo the state worktree is absent (orphan branch not checked out); the operator runs `spacedock state init` to fetch the orphan branch and re-add the linked worktree.
+
+#### Journey 2 — Scaffold an inline workflow
+
+Write `state: $inline` in the README frontmatter (or omit `state:`). Entities live beside the README on the same branch — no orphan branch, no worktree, no `.gitignore` entry.
 
 Use this template structure, filling in all `{variables}` from the design phase:
 

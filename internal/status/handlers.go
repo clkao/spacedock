@@ -411,11 +411,8 @@ func discoverWorkflows(root string) []string {
 					resultSet[resolved] = true
 					results = append(results, resolved)
 				}
-				if stateValue := strings.TrimSpace(fields["state"]); stateValue != "" {
-					if cleaned := filepath.Clean(stateValue); !filepath.IsAbs(stateValue) &&
-						cleaned != ".." && !strings.HasPrefix(cleaned, ".."+string(filepath.Separator)) {
-						prunedStateDirs[realpathOf(filepath.Join(dir, cleaned))] = true
-					}
+				if mode, relPath, err := ClassifyState(fields["state"]); err == nil && mode == StateSplitRoot {
+					prunedStateDirs[realpathOf(filepath.Join(dir, relPath))] = true
 				}
 			}
 		}

@@ -25,6 +25,7 @@ Setup
 Workflow
   status      [args]                 Show or update workflow state
   new         [--folder] SLUG        Create an entity from a stdin body (auto-discovers the workflow)
+  state       init                   Initialize a cloned split-root workflow's state checkout
   completion  bash|zsh               Print a bash or zsh completion script
   dispatch    build | show-stage-def Build worker dispatch artifacts
 
