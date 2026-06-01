@@ -69,6 +69,25 @@ func indentOf(line string) int {
 	return len(line) - len(strings.TrimLeft(line, " \t"))
 }
 
+// stripInlineComment removes a trailing ` # comment` from a value: a `#`
+// preceded by whitespace (or at the start of the value) begins a comment and is
+// dropped along with everything after it; the surviving text is right-trimmed.
+// A `#` NOT preceded by whitespace (e.g. an issue token like `#163`) is kept, so
+// values such as `consolidates #163` are preserved. The result is the same trim
+// the oracle applies, keeping the two parsers byte-aligned. Used for stage
+// numeric/bool/token fields, which never legitimately carry a literal ` #`.
+func stripInlineComment(val string) string {
+	for i := 0; i < len(val); i++ {
+		if val[i] != '#' {
+			continue
+		}
+		if i == 0 || isSpaceByte(val[i-1]) {
+			return strings.TrimRight(val[:i], " \t")
+		}
+	}
+	return val
+}
+
 // parseStagesBlock parses the stages: block from README frontmatter, returning
 // ordered stages with resolved defaults, or nil when there is no stages: block
 // or no states entries. Matches parse_stages_block.
@@ -129,7 +148,7 @@ func ParseStagesWithDefaults(path string) ([]Stage, map[string]string) {
 					}
 					if strings.Contains(dstripped, ":") {
 						k, v, _ := strings.Cut(dstripped, ":")
-						defaults[strings.TrimSpace(k)] = strings.TrimSpace(v)
+						defaults[strings.TrimSpace(k)] = stripInlineComment(strings.TrimSpace(v))
 					}
 					i++
 				}
@@ -148,12 +167,12 @@ func ParseStagesWithDefaults(path string) ([]Stage, map[string]string) {
 						break
 					}
 					if strings.HasPrefix(sstripped, "- name:") {
-						name := strings.TrimSpace(strings.TrimPrefix(sstripped, "- name:"))
+						name := stripInlineComment(strings.TrimSpace(strings.TrimPrefix(sstripped, "- name:")))
 						current = map[string]string{"name": name}
 						states = append(states, current)
 					} else if current != nil && strings.Contains(sstripped, ":") && !strings.HasPrefix(sstripped, "- ") {
 						k, v, _ := strings.Cut(sstripped, ":")
-						current[strings.TrimSpace(k)] = strings.TrimSpace(v)
+						current[strings.TrimSpace(k)] = stripInlineComment(strings.TrimSpace(v))
 					}
 					i++
 				}

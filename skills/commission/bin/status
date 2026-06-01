@@ -142,11 +142,8 @@ def parse_frontmatter(filepath):
                 if ':' in line:
                     key, _, val = line.partition(':')
                     key = key.strip()
-                    val = val.strip()
-                    if len(val) >= 2 and val[0] == val[-1] and val[0] in ('"', "'"):
-                        val = val[1:-1]
                     if not line[0].isspace():
-                        fields[key] = val
+                        fields[key] = parse_value(val)
     return fields
 
 
@@ -218,6 +215,67 @@ def parse_mod_metadata(filepath):
     }
 
 
+def strip_inline_comment(val):
+    """Remove a trailing ` # comment` from a value.
+
+    A `#` preceded by whitespace (or at the start of the value) begins a comment
+    and is dropped along with everything after it; the surviving text is
+    right-trimmed. A `#` NOT preceded by whitespace (e.g. an unspaced token like
+    `v1.0#163`) is kept. A space-preceded `#` IS a comment, so an unquoted
+    `consolidates #163` truncates to `consolidates` — to keep such a value the
+    writer quotes it (see quote_for_write).
+    """
+    for i, ch in enumerate(val):
+        if ch != '#':
+            continue
+        if i == 0 or val[i - 1].isspace():
+            return val[:i].rstrip()
+    return val
+
+
+def parse_value(raw):
+    """Resolve a frontmatter value: trim, then unwrap a quoted scalar (dropping
+    any trailing inline comment after the close quote) or strip an inline
+    comment from an unquoted scalar.
+
+    A quoted scalar protects an interior `#` (literal, not a comment); an
+    unquoted scalar drops a whitespace-preceded `#…` per the YAML rule. Mirrors
+    the Go parse_value.
+    """
+    val = raw.strip()
+    if val and val[0] in ('"', "'"):
+        q = val[0]
+        j = val.find(q, 1)
+        if j >= 0:
+            rest = val[j + 1:].lstrip(' \t')
+            if rest == '' or rest[0] == '#':
+                return val[1:j]
+        # Unterminated or trailing non-comment content: preserve the historical
+        # matched-surrounding-quotes behavior, no comment strip.
+        if len(val) >= 2 and val[0] == val[-1] and val[0] in ('"', "'"):
+            return val[1:-1]
+        return val
+    return strip_inline_comment(val)
+
+
+def quote_for_write(val):
+    """Wrap a value in quotes when it carries a space-then-`#` (` #`) so the
+    reader's inline-comment strip does not later truncate it — the writer half
+    of the option-C round-trip. A value already wrapped in matched surrounding
+    quotes, or one with no ` #`, is written verbatim (byte preservation). The
+    quote char avoids clashing with a quote the value already holds (the parser
+    does not unescape): prefer `"`, fall back to `'` when the value contains `"`
+    but not `'`. Mirrors the Go quote_for_write.
+    """
+    if ' #' not in val and '\t#' not in val:
+        return val
+    if len(val) >= 2 and val[0] == val[-1] and val[0] in ('"', "'"):
+        return val
+    if '"' in val and "'" not in val:
+        return "'" + val + "'"
+    return '"' + val + '"'
+
+
 def parse_stages_block(filepath):
     """Parse the stages block from README frontmatter."""
     lines = []
@@ -272,7 +330,7 @@ def parse_stages_block(filepath):
                         break
                     if ':' in dstripped:
                         k, _, v = dstripped.partition(':')
-                        defaults[k.strip()] = v.strip()
+                        defaults[k.strip()] = strip_inline_comment(v.strip())
                     i += 1
                 continue
             elif stripped == 'states:':
@@ -289,11 +347,11 @@ def parse_stages_block(filepath):
                         break
                     if sstripped.startswith('- name:'):
                         _, _, name = sstripped.partition('- name:')
-                        current_state = {'name': name.strip()}
+                        current_state = {'name': strip_inline_comment(name.strip())}
                         states.append(current_state)
                     elif current_state is not None and ':' in sstripped and not sstripped.startswith('- '):
                         k, _, v = sstripped.partition(':')
-                        current_state[k.strip()] = v.strip()
+                        current_state[k.strip()] = strip_inline_comment(v.strip())
                     i += 1
                 continue
         i += 1
@@ -376,7 +434,7 @@ def parse_stages_with_defaults(filepath):
                         break
                     if ':' in dstripped:
                         k, _, v = dstripped.partition(':')
-                        defaults[k.strip()] = v.strip()
+                        defaults[k.strip()] = strip_inline_comment(v.strip())
                     i += 1
                 continue
             i += 1
@@ -1559,19 +1617,96 @@ def update_frontmatter(filepath, updates):
             key, _, _ = line.partition(':')
             key_stripped = key.strip()
             if key_stripped in resolved:
-                lines[i] = f'{key_stripped}: {resolved[key_stripped]}'
+                lines[i] = f'{key_stripped}: {quote_for_write(resolved[key_stripped])}'
                 written.add(key_stripped)
 
     # Insert fields not already present in frontmatter before closing ---
     missing = [f for f in resolved if f not in written]
     for field in missing:
-        lines.insert(fm_end, f'{field}: {resolved[field]}')
+        lines.insert(fm_end, f'{field}: {quote_for_write(resolved[field])}')
         fm_end += 1
 
     with open(filepath, 'w') as f:
         f.write('\n'.join(lines))
 
     return resolved
+
+
+# The computed field name the #230 visibility surface exposes via --fields /
+# --where. It is NOT a frontmatter key: it is derived from the --next dispatch
+# analysis, so it is materialized only when explicitly named and is deliberately
+# excluded from --all-fields (which documents stored frontmatter keys).
+SUPPRESSED_BY_FIELD = 'next-suppressed-by'
+
+
+def compute_suppressed_by(entities, stages):
+    """Return {id(entity): reason} for why each entity is NOT dispatched by --next.
+
+    Mirrors the candidate loop in print_next_table exactly so the #230
+    visibility surface can never diverge from --next: a dispatched entity gets
+    '' (not suppressed). Reasons, in the loop's own precedence:
+    terminal | gate | worktree-set | concurrency-full. An entity whose status is
+    not a known stage, or that sits at the last stage with no successor, is not
+    attributable to one of the tracked suppression reasons and gets ''.
+    """
+    stage_by_name = {s['name']: s for s in (stages or [])}
+    stage_names = [s['name'] for s in (stages or [])]
+    active_counts = {}
+    for e in entities:
+        if e['worktree']:
+            st = e['status']
+            active_counts[st] = active_counts.get(st, 0) + 1
+
+    candidates = sorted(entities, key=sort_key_next)
+    next_stage_counts = dict(active_counts)
+    reasons = {}
+    for e in candidates:
+        status = e['status']
+        if status not in stage_by_name:
+            reasons[id(e)] = ''
+            continue
+        stage_idx = stage_names.index(status)
+        stage = stage_by_name[status]
+        if stage.get('terminal', False):
+            reasons[id(e)] = 'terminal'
+            continue
+        if stage.get('gate', False):
+            reasons[id(e)] = 'gate'
+            continue
+        if e['worktree']:
+            reasons[id(e)] = 'worktree-set'
+            continue
+        if stage_idx + 1 >= len(stage_names):
+            reasons[id(e)] = ''
+            continue
+        next_stage_name = stage_names[stage_idx + 1]
+        next_stage = stage_by_name[next_stage_name]
+        current_count = next_stage_counts.get(next_stage_name, 0)
+        if current_count >= next_stage['concurrency']:
+            reasons[id(e)] = 'concurrency-full'
+            continue
+        next_stage_counts[next_stage_name] = current_count + 1
+        reasons[id(e)] = ''
+    return reasons
+
+
+def materialize_suppressed_by(entities, stages, explicit_fields, where_filters):
+    """Write the computed next-suppressed-by reason into each entity ONLY when
+    the field is explicitly referenced by --fields or a --where clause.
+
+    Gating it keeps the value out of --all-fields and the default field set
+    (the entity dict is otherwise untouched), so the parity-pinned
+    frontmatter-keys surfaces stay byte-identical. The reason is computed from
+    the shared dispatch analysis over the read's entity set, so the surface
+    mirrors --next exactly.
+    """
+    referenced = SUPPRESSED_BY_FIELD in (explicit_fields or [])
+    referenced = referenced or any(f[0] == SUPPRESSED_BY_FIELD for f in (where_filters or []))
+    if not referenced:
+        return
+    reasons = compute_suppressed_by(entities, stages)
+    for e in entities:
+        e[SUPPRESSED_BY_FIELD] = reasons[id(e)]
 
 
 def apply_filters(entities, filters):
@@ -2376,6 +2511,24 @@ def main():
         stages = parse_stages_block(readme_path) if os.path.exists(readme_path) else None
         terminal_names = {s['name'] for s in (stages or []) if s.get('terminal')}
 
+        # Membership guard: a --set status=X must name a stage the workflow
+        # declares. This is distinct from validate_workflow_stage_names' format
+        # regex — it checks the *value* against stages.states[].name membership.
+        # When the workflow declares no stages block we cannot validate
+        # membership, so the guard is a no-op. A non-member value exits non-zero
+        # and leaves the frontmatter unchanged.
+        if stages:
+            stage_names = [s['name'] for s in stages]
+            stage_name_set = set(stage_names)
+            for field, value in updates:
+                if field == 'status' and value not in stage_name_set:
+                    print(
+                        f"Error: '{value}' is not a defined stage in workflow "
+                        f"{pipeline_dir} — known stages: [{', '.join(stage_names)}]",
+                        file=sys.stderr,
+                    )
+                    sys.exit(1)
+
         def is_terminal_update():
             """True when this --set applies any terminal field."""
             for field, value in updates:
@@ -2530,6 +2683,7 @@ def main():
 
     apply_effective_ids(all_entities, id_style, all_entities)
     apply_effective_ids(entities, id_style, all_entities)
+    materialize_suppressed_by(entities, stages, explicit_fields, where_filters)
     entities = apply_filters(entities, where_filters)
 
     if show_boot:

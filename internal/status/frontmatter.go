@@ -121,11 +121,33 @@ func parseFrontmatterContent(data []byte) map[string]string {
 		}
 		key, val, _ := strings.Cut(line, ":")
 		key = strings.TrimSpace(key)
-		val = strings.TrimSpace(val)
-		val = stripMatchedQuotes(val)
-		fields[key] = val
+		fields[key] = parseValue(val)
 	}
 	return fields
+}
+
+// parseValue resolves a frontmatter value: it trims surrounding whitespace,
+// then either unwraps a quoted scalar (dropping any trailing inline comment
+// after the close quote) or strips an inline comment from an unquoted scalar.
+// A quoted scalar protects an interior `#` (it is literal, not a comment); an
+// unquoted scalar drops a whitespace-preceded `#…` per the YAML rule (an
+// unspaced `v1.0#163`-style token is kept). Matches the oracle's parse_value.
+func parseValue(raw string) string {
+	val := strings.TrimSpace(raw)
+	if len(val) > 0 && (val[0] == '"' || val[0] == '\'') {
+		q := val[0]
+		if j := strings.IndexByte(val[1:], q); j >= 0 {
+			closeAt := j + 1
+			rest := strings.TrimLeft(val[closeAt+1:], " \t")
+			if rest == "" || rest[0] == '#' {
+				return val[1:closeAt]
+			}
+		}
+		// Unterminated or trailing non-comment content: preserve the historical
+		// matched-surrounding-quotes behavior, no comment strip.
+		return stripMatchedQuotes(val)
+	}
+	return stripInlineComment(val)
 }
 
 // stripMatchedQuotes removes a single pair of matched surrounding quotes from a

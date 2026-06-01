@@ -99,7 +99,7 @@ func updateFrontmatter(path string, updates []fieldUpdate) (*orderedMap, error) 
 			k, _, _ := strings.Cut(line, ":")
 			key := strings.TrimSpace(k)
 			if val, ok := resolved.get(key); ok {
-				lines[i] = key + ": " + val
+				lines[i] = key + ": " + quoteForWrite(val)
 				written[key] = true
 			}
 		}
@@ -111,7 +111,7 @@ func updateFrontmatter(path string, updates []fieldUpdate) (*orderedMap, error) 
 			continue
 		}
 		val, _ := resolved.get(key)
-		ins := key + ": " + val
+		ins := key + ": " + quoteForWrite(val)
 		lines = append(lines[:fmEnd], append([]string{ins}, lines[fmEnd:]...)...)
 		fmEnd++
 	}
@@ -120,6 +120,27 @@ func updateFrontmatter(path string, updates []fieldUpdate) (*orderedMap, error) 
 		return nil, err
 	}
 	return resolved, nil
+}
+
+// quoteForWrite wraps a value in quotes when it carries a space-then-`#` (` #`)
+// so the reader's inline-comment strip does not later truncate it — the writer
+// half of the option-C round-trip contract. A value already wrapped in matched
+// surrounding quotes, or one with no ` #`, is written verbatim (byte
+// preservation). The quote char is chosen to avoid clashing with a quote the
+// value already contains (the hand-rolled parser does not unescape): prefer `"`,
+// fall back to `'` when the value contains `"` but not `'`. Matches the oracle's
+// quote_for_write.
+func quoteForWrite(val string) string {
+	if !strings.Contains(val, " #") && !strings.Contains(val, "\t#") {
+		return val
+	}
+	if len(val) >= 2 && val[0] == val[len(val)-1] && (val[0] == '"' || val[0] == '\'') {
+		return val
+	}
+	if strings.Contains(val, "\"") && !strings.Contains(val, "'") {
+		return "'" + val + "'"
+	}
+	return "\"" + val + "\""
 }
 
 // atomicWrite writes data to a temp file in the same directory and renames it
@@ -152,10 +173,10 @@ func atomicWrite(path string, data []byte) error {
 // the move and printing `archived: {dest}`. Enforces the source-missing,
 // already-archived, mod-block, and merge-hook guards. Matches run_archive.
 // entityDir is the absolute entity root for I/O; definitionDir is the README root
-// used to resolve merge-hook mods (definitionDir/_mods/, plus entityDir/_mods/
-// during a split-root mod migration); spellingDir is the as-passed spelling used
-// for the printed dest (so a relative --workflow-dir renders a relative
-// `archived:` path, matching the oracle's literal os.path.join).
+// used to resolve merge-hook mods (definitionDir/_mods/); spellingDir is the
+// as-passed spelling used for the printed dest (so a relative --workflow-dir
+// renders a relative `archived:` path, matching the oracle's literal
+// os.path.join).
 func runArchive(definitionDir, entityDir, spellingDir, slug string, force, quiet, asJSON bool, stdout, stderr io.Writer) int {
 	flatPath := filepath.Join(entityDir, slug+".md")
 	folderRoot := filepath.Join(entityDir, slug)

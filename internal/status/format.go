@@ -149,6 +149,21 @@ type dispatchable struct {
 // computeDispatchable runs the --next dispatch rules and returns the ordered
 // dispatchable list. Matches the candidate loop in print_next_table.
 func computeDispatchable(entities []*entity, stages []Stage) []dispatchable {
+	disp, _ := dispatchAnalysis(entities, stages)
+	return disp
+}
+
+// dispatchAnalysis runs the --next candidate loop once and returns BOTH the
+// ordered dispatchable list and, for every entity, why it was NOT dispatched
+// (the #230 next-suppressed-by reason). The reason mirrors the loop's skip
+// rules exactly so the visibility surface can never diverge from --next: a
+// dispatched entity gets "" (it is not suppressed). Reasons, in the loop's
+// own precedence: terminal | gate | worktree-set | concurrency-full. An entity
+// whose status is not a known stage, or that sits at the last stage with no
+// successor, is not attributable to one of the tracked suppression reasons and
+// gets "". computeDispatchable and the surface share this one function so the
+// dispatch logic is never duplicated.
+func dispatchAnalysis(entities []*entity, stages []Stage) ([]dispatchable, map[*entity]string) {
 	stageByName := map[string]Stage{}
 	var stageNames []string
 	for _, s := range stages {
@@ -169,26 +184,36 @@ func computeDispatchable(entities []*entity, stages []Stage) []dispatchable {
 		nextCounts[k] = v
 	}
 
+	reasons := map[*entity]string{}
 	var out []dispatchable
 	for _, e := range candidates {
 		status := e.fields["status"]
 		stg, ok := stageByName[status]
 		if !ok {
+			reasons[e] = ""
 			continue
 		}
 		idx := indexOf(stageNames, status)
-		if stg.terminal || stg.gate {
+		if stg.terminal {
+			reasons[e] = "terminal"
+			continue
+		}
+		if stg.gate {
+			reasons[e] = "gate"
 			continue
 		}
 		if e.fields["worktree"] != "" {
+			reasons[e] = "worktree-set"
 			continue
 		}
 		if idx+1 >= len(stageNames) {
+			reasons[e] = ""
 			continue
 		}
 		nextName := stageNames[idx+1]
 		nextStage := stageByName[nextName]
 		if nextCounts[nextName] >= nextStage.concurrency {
+			reasons[e] = "concurrency-full"
 			continue
 		}
 		nextCounts[nextName]++
@@ -196,9 +221,46 @@ func computeDispatchable(entities []*entity, stages []Stage) []dispatchable {
 		if nextStage.Worktree {
 			nw = "yes"
 		}
+		reasons[e] = ""
 		out = append(out, dispatchable{e: e, next: nextName, nextWorktree: nw})
 	}
-	return out
+	return out, reasons
+}
+
+// suppressedByField is the computed field name the #230 visibility surface
+// exposes via --fields / --where. It is NOT a frontmatter key: it is derived
+// from the --next dispatch analysis, so it is materialized only when explicitly
+// named and is deliberately excluded from --all-fields (which documents stored
+// frontmatter keys).
+const suppressedByField = "next-suppressed-by"
+
+// materializeSuppressedBy writes the computed next-suppressed-by reason into
+// each entity's fields ONLY when the field is explicitly referenced by --fields
+// or a --where clause. Gating it keeps the value out of --all-fields and out of
+// the default field set (e.fields is otherwise untouched), so the parity-pinned
+// frontmatter-keys surfaces stay byte-identical. The reason is computed from the
+// shared dispatch analysis over the read's entity set, so the surface mirrors
+// --next exactly. Stages may be nil (no stages block) — then every entity gets
+// "" because nothing is dispatchable-or-suppressed without stage metadata.
+func materializeSuppressedBy(entities []*entity, stages []Stage, explicitFields []string, filters []whereFilter) {
+	referenced := false
+	for _, f := range explicitFields {
+		if f == suppressedByField {
+			referenced = true
+		}
+	}
+	for _, f := range filters {
+		if f.field == suppressedByField {
+			referenced = true
+		}
+	}
+	if !referenced {
+		return
+	}
+	_, reasons := dispatchAnalysis(entities, stages)
+	for _, e := range entities {
+		e.fields[suppressedByField] = reasons[e]
+	}
 }
 
 // printNextTable writes the --next table, optionally with extras. Matches
