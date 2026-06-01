@@ -113,8 +113,8 @@ func TestNativeBootMatchesOracle(t *testing.T) {
 	if oracleCode != 0 {
 		t.Fatalf("oracle --boot exit=%d", oracleCode)
 	}
-	normNative := sdB32Re.ReplaceAllString(normalize(nativeOut, root), "<ID>")
-	normOracle := sdB32Re.ReplaceAllString(normalize(oracleOut, root), "<ID>")
+	normNative := sdB32Re.ReplaceAllString(stripStateBackend(normalize(nativeOut, root)), "<ID>")
+	normOracle := sdB32Re.ReplaceAllString(stripStateBackend(normalize(oracleOut, root)), "<ID>")
 	if normNative != normOracle {
 		t.Fatalf("--boot parity mismatch\n--- native ---\n%s\n--- oracle ---\n%s", normNative, normOracle)
 	}

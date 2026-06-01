@@ -186,6 +186,14 @@ func bootJSON(d *bootData) *jsonObj {
 	}
 	out.setValue("team_state", team)
 
+	// State backend keys, appended AFTER team_state so the FO's key-order parse of
+	// every prior key is preserved. entity_dir_present is the string "true"/"false"
+	// matching team_state.present's string-bool convention.
+	out.set("state_backend", d.stateBackend)
+	out.set("definition_dir", d.definitionDir)
+	out.set("entity_dir", d.entityDir)
+	out.set("entity_dir_present", strconv.FormatBool(d.entityDirPresent))
+
 	return out
 }
 
