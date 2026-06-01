@@ -99,6 +99,47 @@ Two assertions:
 
 Verified the field list against the actual `parse_stages_block` code: five per-state type-cast fields plus two defaults, all matching the issue reporter's list (with one consistency-pass addition for the optional pass-through fields). Pinned the test host to the existing `tests/test_status_script.py` rather than creating a new file (existing module already builds the script and exercises its parser, so it's the right shape). Marked PyYAML migration and quoted-string handling as explicitly out of scope per the issue's own framing.
 
+## Stage Report: implementation
+
+- DONE: `_strip_inline_comment` helper added at module scope in `skills/commission/bin/status` and applied at the verified call sites in `parse_stages_block` (the seven required type-cast sites + the four consistency-pass pass-through fields named in the entity body's Verified field list table). AC-1 / AC-2 / AC-4 satisfied.
+  Helper added at `skills/commission/bin/status:188-190`. Applied to: `defaults['worktree']` (line 276), `defaults['concurrency']` (line 277), `state['worktree']` (line 283), `state['concurrency']` (line 284), `state['gate']` (line 285), `state['terminal']` (line 286), `state['initial']` (line 287), and the four pass-through fields `feedback-to`/`agent`/`fresh`/`model` (line 291). Diff scope: only `skills/commission/bin/status`. Commit `0516539b`.
+- DONE: New pytest test method `test_parse_stages_strips_inline_comments` added to the existing `tests/test_status_script.py` TestCase host. Fixture is an in-test README written to `tempfile.TemporaryDirectory` per the entity body's Test plan; assertions cover both no-crash AND correct typed values for every field with an inline comment.
+  Test added to `TestBootOption` (the most thematically aligned host — bug surfaces under `--boot`). Loads the built script via `SourceFileLoader` (script has no `.py` extension, so `spec_from_file_location` returns None — needed the explicit-loader form), toggles `sys.dont_write_bytecode` around the import to avoid leaking `__pycache__` into the per-class temp dir, and asserts `concurrency == 4`, `worktree is False`, `gate is True`, `terminal is False`, `initial is True` on the parsed `backlog` stage. Verified the assertion catches the original bug by neutering the helper in a one-off probe and confirming `ValueError: invalid literal for int() with base 10: '2  # team-debate mode'` reproduces. Commit `1984409d`.
+- DONE: Local verification: the new test passes AND `make test-static` is green (AC-3). Captain prefers local-only verification — do not defer to CI.
+  `unset CLAUDECODE && uv run pytest tests/test_status_script.py::TestBootOption::test_parse_stages_strips_inline_comments -v` → 1 passed. `make test-static` → 535 passed, 26 deselected, 15 subtests passed in 26.29s.
+
+### Summary
+
+Two commits on `spacedock-ensign/status-parser-strip-inline-yaml-comments`: `0516539b` adds the `_strip_inline_comment` helper at module scope and applies it to all seven type-cast sites plus the four pass-through fields per the verified table; `1984409d` adds `test_parse_stages_strips_inline_comments` to `TestBootOption` in `tests/test_status_script.py`. Test loads the script via explicit `SourceFileLoader` (script has no `.py` suffix so the default `spec_from_file_location` path returns None) and disables bytecode writes to keep the host class's temp dir clean. New test passes; full `make test-static` run green at 535/535.
+
+## Stage Report: validation
+
+- DONE: Reproduce every AC1..AC4 `Verified by:` from this worktree (do not trust the implementation report). Cite the actual matched output for each. Confirm: AC1 (no-crash + new test passes), AC2 (typed values correct), AC3 (`make test-static` green), AC4 (diff scope contained to `skills/commission/bin/status` + `tests/test_status_script.py` only).
+  AC1 + AC2: `unset CLAUDECODE && uv run pytest tests/test_status_script.py::TestBootOption::test_parse_stages_strips_inline_comments -v` → `tests/test_status_script.py::TestBootOption::test_parse_stages_strips_inline_comments PASSED [100%]` / `1 passed in 0.02s`. Test asserts both no-crash (AC1) and the typed-value equalities (AC2: `concurrency == 4`, `worktree is False`, `gate is True`, `terminal is False`, `initial is True`).
+  AC3: `make test-static` → `535 passed, 26 deselected, 15 subtests passed in 26.27s`. Green, matches implementation report.
+  AC4: `git diff main..HEAD --stat` → three files: `docs/plans/status-parser-strip-inline-yaml-comments.md` (entity / stage reports — expected), `skills/commission/bin/status` (+21/-9 — helper + call sites), `tests/test_status_script.py` (+54 — new test method). No other parser code paths touched. Scope contained.
+- DONE: Spot-check the helper application against the Verified field list table — confirm the helper is actually called at every site the table enumerates (seven type-cast sites + four pass-through fields). Read `skills/commission/bin/status` around lines 270-295 and verify each call site visually.
+  `grep -nE '_strip_inline_comment\(' skills/commission/bin/status` → 9 matches. Definition at line 188; `defaults['worktree']` line 276; `defaults['concurrency']` line 277; `state['worktree']` line 283; `state['concurrency']` line 284; `state['gate']` line 285; `state['terminal']` line 286; `state['initial']` line 287; pass-through loop at line 291 covers `feedback-to`/`agent`/`fresh`/`model`. All seven type-cast sites and all four pass-through fields from the entity body's Verified field list table are present. Visual read of lines 186-295 confirms the wrapper is applied before every `.lower()` and `int(...)` call on values derived from the parsed YAML map.
+- DONE: PASSED/REJECTED recommendation grounded in reproduced evidence.
+  **PASSED.** All four ACs verified locally with cited evidence. Helper application matches the entity body's enumerated table exactly. Diff scope is contained. Full static suite green. No issues found.
+
+### Summary
+
+Validation re-ran every `Verified by:` clause from this worktree: the new pytest test passes (AC1 + AC2 with concrete typed-value assertions), `make test-static` reports 535 passed (AC3), and `git diff --stat` shows the diff is contained to `skills/commission/bin/status` and `tests/test_status_script.py` plus the expected entity-doc append (AC4). Spot-checked the helper application against the entity body's Verified field list table via `grep` plus a visual read of `skills/commission/bin/status:186-295` — all seven type-cast sites and all four pass-through fields are wrapped. Recommendation: **PASSED**.
+
+## Stage Report: implementation (cycle 2 — YAML spec correctness)
+
+- DONE: Replace `_strip_inline_comment` body with a whitespace-anchored regex per YAML 1.2.2 §6.6: `re.sub(r'\s+#.*$', '', value).rstrip()`. Add the `import re` if not already present at module scope. The helper must preserve `#` characters that are NOT preceded by whitespace (e.g., `github#23`, `opus#beta`, `"#160"`).
+  Helper at `skills/commission/bin/status:188-198` now uses `re.sub(r'\s+#.*$', '', value).rstrip()`. `import re` already present at module scope (line 90), no new import needed. Docstring documents YAML 1.2.2 §6.6 behavior plus the known `pr: #44` corner case explicitly accepted as out of scope. Commit `9097bf9b`.
+- DONE: Extend `tests/test_status_script.py::TestBootOption::test_parse_stages_strips_inline_comments` (or add a new test method `test_parse_stages_preserves_hash_in_values`) with negative-case fixtures: a stage README whose values include `model: opus#beta`, `agent: prefix#hash`, and `feedback-to: "#161"`. Assert that after parsing, those values are preserved verbatim (the helper does NOT strip the `#` because it's not preceded by whitespace). Keep the existing positive-case test (real inline comment is still stripped).
+  Added new method `test_parse_stages_preserves_hash_in_values` at `tests/test_status_script.py:1860-1915`. Asserts `model == 'opus#beta'`, `agent == 'prefix#hash'`, `feedback-to == '"#161"'` (parser keeps quotes literally per existing scope). Existing `test_parse_stages_strips_inline_comments` retained unchanged — both positive and negative cases now covered. Commit `f4b27acf`.
+- DONE: Local verification: targeted test run plus `make test-static`. Captain prefers local-only verification — do not defer to CI. Push branch after commits land so PR #167 auto-updates.
+  `unset CLAUDECODE && uv run pytest tests/test_status_script.py::TestBootOption -v` → 23 passed including both `test_parse_stages_strips_inline_comments` and `test_parse_stages_preserves_hash_in_values`. `make test-static` → `536 passed, 26 deselected, 15 subtests passed in 26.30s` (was 535 pre-cycle, +1 for the new test). Branch push pending after this report write.
+
+### Summary
+
+Two commits on `spacedock-ensign/status-parser-strip-inline-yaml-comments`: `9097bf9b` swaps the naive `split('#', 1)[0]` helper for a whitespace-anchored `re.sub(r'\s+#.*$', '', value).rstrip()` per YAML 1.2.2 §6.6, with docstring noting the explicitly-accepted `pr: #44` gap; `f4b27acf` adds `test_parse_stages_preserves_hash_in_values` with negative-case fixtures (`model: opus#beta`, `agent: prefix#hash`, `feedback-to: "#161"`) that lock in the spec-correct behavior. Existing positive-case test unchanged. Targeted run green, full `make test-static` green at 536/536 (+1 from baseline).
+
 ### Feedback Cycles
 
 **Cycle 1 — captain-flagged spec-correctness gap, post-PR (2026-04-29 ~15:20 UTC).**
@@ -106,5 +147,7 @@ Verified the field list against the actual `parse_stages_block` code: five per-s
 PR #167 opened with the helper implemented as `value.split('#', 1)[0].strip()` per the issue reporter's pseudo-fix. Captain caught that this is naive: YAML 1.2.2 §6.6 specifies `#` is a comment marker only when preceded by whitespace (or at start of line) AND not inside a quoted scalar. The naive split mangles legitimate values like `github#23`, `opus#beta`, and `"#160"` (the repo's own `pr:`/`issue:` field convention).
 
 Fix: swap the helper to a whitespace-anchored regex `re.sub(r'\s+#.*$', '', value).rstrip()` and add negative tests covering `prefix#hash`, `model: opus#beta`, and quoted `"#160"` to lock the spec-correct behavior in. Same branch (`spacedock-ensign/status-parser-strip-inline-yaml-comments`); PR #167 auto-updates with new commits.
+
+**Cycle 1 resolved (2026-04-29 ~15:30 UTC).** Cycle-2 implementation landed three commits (`9097bf9b` whitespace-anchored regex, `f4b27acf` negative-case fixtures, `dcda005c` cycle-2 stage report). Targeted test run green, `make test-static` 536/536. Branch pushed; PR #167 picks up new commits.
 
 Out of scope: the `pr: #44` corner case (unquoted value starting with `#`). The hand-rolled parser strips leading whitespace before yielding the value, so the helper sees no whitespace marker. Fixing this perfectly requires source-text context. None of the in-scope fields naturally start with `#`, so we accept this gap rather than thread source-line context through.

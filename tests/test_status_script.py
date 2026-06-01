@@ -1895,6 +1895,112 @@ class TestBootOption(unittest.TestCase):
             self.assertIn('MERGED', good_line)
             self.assertIn('ERROR', bad_line)
 
+    def test_parse_stages_strips_inline_comments(self):
+        """parse_stages_block tolerates inline ` # comment` on every type-cast field.
+
+        Regression for the --boot ValueError reported in #163: a stage frontmatter
+        like `concurrency: 2  # team-debate mode` previously crashed the int() cast.
+        """
+        import importlib.util
+        import sys
+        from importlib.machinery import SourceFileLoader
+        loader = SourceFileLoader('status_script', self.script_path)
+        spec = importlib.util.spec_from_loader('status_script', loader)
+        status_module = importlib.util.module_from_spec(spec)
+        prior = sys.dont_write_bytecode
+        sys.dont_write_bytecode = True
+        try:
+            loader.exec_module(status_module)
+        finally:
+            sys.dont_write_bytecode = prior
+
+        readme = textwrap.dedent("""\
+            ---
+            entity-type: task
+            stages:
+              defaults:
+                worktree: false  # default off
+                concurrency: 2  # team-debate mode
+              states:
+                - name: backlog
+                  initial: true  # boot here
+                  gate: true  # captain-approved
+                  terminal: false  # not a sink
+                  worktree: false  # parked
+                  concurrency: 4  # high-fanout
+                - name: done
+                  terminal: true
+            ---
+
+            # Test
+            """)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            readme_path = os.path.join(tmpdir, 'README.md')
+            with open(readme_path, 'w') as f:
+                f.write(readme)
+
+            stages = status_module.parse_stages_block(readme_path)
+
+        self.assertIsNotNone(stages)
+        backlog = next(s for s in stages if s['name'] == 'backlog')
+        self.assertEqual(backlog['concurrency'], 4)
+        self.assertIs(backlog['worktree'], False)
+        self.assertIs(backlog['gate'], True)
+        self.assertIs(backlog['terminal'], False)
+        self.assertIs(backlog['initial'], True)
+
+    def test_parse_stages_preserves_hash_in_values(self):
+        """Values containing `#` not preceded by whitespace are preserved verbatim.
+
+        Per YAML 1.2.2 §6.6, `#` is a comment marker only when preceded by
+        whitespace. Identifiers like `github#23`, model tags like `opus#beta`,
+        and quoted scalars like `"#161"` must NOT be truncated by the helper.
+        """
+        import importlib.util
+        import sys
+        from importlib.machinery import SourceFileLoader
+        loader = SourceFileLoader('status_script', self.script_path)
+        spec = importlib.util.spec_from_loader('status_script', loader)
+        status_module = importlib.util.module_from_spec(spec)
+        prior = sys.dont_write_bytecode
+        sys.dont_write_bytecode = True
+        try:
+            loader.exec_module(status_module)
+        finally:
+            sys.dont_write_bytecode = prior
+
+        readme = textwrap.dedent("""\
+            ---
+            entity-type: task
+            stages:
+              defaults:
+                worktree: false
+                concurrency: 2
+              states:
+                - name: backlog
+                  initial: true
+                  model: opus#beta
+                  agent: prefix#hash
+                  feedback-to: "#161"
+                - name: done
+                  terminal: true
+            ---
+
+            # Test
+            """)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            readme_path = os.path.join(tmpdir, 'README.md')
+            with open(readme_path, 'w') as f:
+                f.write(readme)
+
+            stages = status_module.parse_stages_block(readme_path)
+
+        self.assertIsNotNone(stages)
+        backlog = next(s for s in stages if s['name'] == 'backlog')
+        self.assertEqual(backlog['model'], 'opus#beta')
+        self.assertEqual(backlog['agent'], 'prefix#hash')
+        self.assertEqual(backlog['feedback-to'], '"#161"')
+
 
 class TestSetOption(unittest.TestCase):
     """Test --set field update functionality."""

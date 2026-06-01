@@ -218,6 +218,18 @@ def parse_mod_metadata(filepath):
     }
 
 
+def _strip_inline_comment(value):
+    """Strip a YAML-style inline ` # comment` from a scalar string value.
+
+    Per YAML 1.2.2 §6.6, `#` opens a comment only when preceded by whitespace,
+    so values like `github#23`, `opus#beta`, or `"#160"` retain their `#`.
+    Known limitation: an unquoted value that itself begins with `#` (e.g.
+    `pr: #44`) cannot be distinguished here because the caller has already
+    stripped leading whitespace; no in-scope field naturally starts with `#`.
+    """
+    return re.sub(r'\s+#.*$', '', value).rstrip()
+
+
 def parse_stages_block(filepath):
     """Parse the stages block from README frontmatter."""
     lines = []
@@ -301,22 +313,22 @@ def parse_stages_block(filepath):
     if not states:
         return None
 
-    default_worktree = defaults.get('worktree', 'false').lower() == 'true'
-    default_concurrency = int(defaults.get('concurrency', '2'))
+    default_worktree = _strip_inline_comment(defaults.get('worktree', 'false')).lower() == 'true'
+    default_concurrency = int(_strip_inline_comment(defaults.get('concurrency', '2')))
 
     result = []
     for state in states:
         stage = {
             'name': state['name'],
-            'worktree': state.get('worktree', str(default_worktree)).lower() == 'true',
-            'concurrency': int(state.get('concurrency', str(default_concurrency))),
-            'gate': state.get('gate', 'false').lower() == 'true',
-            'terminal': state.get('terminal', 'false').lower() == 'true',
-            'initial': state.get('initial', 'false').lower() == 'true',
+            'worktree': _strip_inline_comment(state.get('worktree', str(default_worktree))).lower() == 'true',
+            'concurrency': int(_strip_inline_comment(state.get('concurrency', str(default_concurrency)))),
+            'gate': _strip_inline_comment(state.get('gate', 'false')).lower() == 'true',
+            'terminal': _strip_inline_comment(state.get('terminal', 'false')).lower() == 'true',
+            'initial': _strip_inline_comment(state.get('initial', 'false')).lower() == 'true',
         }
         for optional_field in ('feedback-to', 'agent', 'fresh', 'model'):
             if optional_field in state:
-                stage[optional_field] = state[optional_field]
+                stage[optional_field] = _strip_inline_comment(state[optional_field])
         result.append(stage)
 
     return result
