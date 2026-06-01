@@ -920,7 +920,7 @@ def print_status_table(entities, stages, extra_fields=None):
     print(row_fmt % ('ID', 'SLUG', 'STATUS', 'TITLE', 'SCORE', 'SOURCE', *header_extras))
     print(row_fmt % ('--', '----', '------', '-----', '-----', '------', *sep_extras))
     for e in sorted_entities:
-        extra_cells = [format_extra_cell(e.get(name, '')) for name in extras]
+        extra_cells = [format_column_cell(name, e.get(name, '')) for name in extras]
         print(row_fmt % (
             e['id'], e['slug'], e['status'], e['title'], e['score'], e['source'],
             *extra_cells,
@@ -983,7 +983,7 @@ def print_next_table(entities, stages, extra_fields=None):
     print(row_fmt % ('ID', 'SLUG', 'CURRENT', 'NEXT', 'WORKTREE', *header_extras))
     print(row_fmt % ('--', '----', '-------', '----', '--------', *sep_extras))
     for e in dispatchable:
-        extra_cells = [format_extra_cell(e.get(name, '')) for name in extras]
+        extra_cells = [format_column_cell(name, e.get(name, '')) for name in extras]
         print(row_fmt % (
             e['id'], e['slug'], e['status'], e['next'], e['next_worktree'],
             *extra_cells,
@@ -1006,6 +1006,28 @@ def scan_mods(workflow_dir):
                     if point:
                         hooks.setdefault(point, []).append(mod_name)
     return hooks
+
+
+def resolve_merge_policy(workflow_dir):
+    """Read the README's top-level `merge:` key and return 'pr' or 'local'.
+
+    Absent or empty defaults to 'pr' — byte-identical to a workflow that never
+    declared the key. An unknown value raises ValueError rather than silently
+    coercing to 'pr', so a typo (`merge: locl`) fails fast instead of silently
+    demanding a PR forever. Under 'local' the terminal-transition guard exempts
+    the pr-requirement of the merge-hook invariant; it never relaxes the ceremony
+    structure (the mod-block guards are policy-independent).
+    """
+    readme_path = os.path.join(workflow_dir, 'README.md')
+    value = parse_frontmatter(readme_path).get('merge', '').strip()
+    if value in ('', 'pr'):
+        return 'pr'
+    if value == 'local':
+        return 'local'
+    raise ValueError(
+        f"README merge: must be 'local' or 'pr' (or absent for the default "
+        f"'pr'), not {value!r}"
+    )
 
 
 def compute_next_sequential_id(active_entities, archive_dir):
@@ -1514,6 +1536,29 @@ def resolve_extra_fields(entities, explicit_fields, all_fields_flag, default_fie
                 seen.add(key)
         return sorted(seen)
     return []
+
+
+LOCAL_MERGE_SENTINEL_PREFIX = 'local-merge:'
+
+
+def format_pr_cell(value, width=20):
+    """Render the pr column: a local-merge sentinel (``local-merge:{short-sha}``)
+    shows as ``{short-sha} (local)``, distinguishing the no-PR fallback from a
+    real PR reference; any other value renders unchanged. Truncation is applied
+    after the transform via format_extra_cell."""
+    value = '' if value is None else str(value)
+    if value.startswith(LOCAL_MERGE_SENTINEL_PREFIX):
+        value = value[len(LOCAL_MERGE_SENTINEL_PREFIX):] + ' (local)'
+    return format_extra_cell(value, width)
+
+
+def format_column_cell(name, value, width=20):
+    """Render an extra-column cell by field name, routing the pr field through
+    the local-merge-sentinel transform and every other field through the plain
+    extra-cell formatter."""
+    if name == 'pr':
+        return format_pr_cell(value, width)
+    return format_extra_cell(value, width)
 
 
 def format_extra_cell(value, width=20):
@@ -2046,7 +2091,15 @@ def run_archive(pipeline_dir, slug, force=False):
     # Merge-hook invariant: archival is a terminal action. When the workflow
     # registers a merge hook, refuse archival unless the hook has run (pr set),
     # the hook is in flight (mod-block set, already handled above), or --force.
-    if not force and not mod_block and not pr:
+    # Under `merge: local` the pr-requirement is exempted — the workflow declared
+    # it merges locally, so an empty pr is expected at archival; the mod-block
+    # guard above (policy-independent) still catches an in-flight ceremony.
+    try:
+        merge_policy = resolve_merge_policy(pipeline_dir)
+    except ValueError as e:
+        print('Error: ' + str(e), file=sys.stderr)
+        sys.exit(1)
+    if not force and merge_policy != 'local' and not mod_block and not pr:
         merge_hooks = scan_mods(pipeline_dir).get('merge', [])
         if merge_hooks:
             hook_list = ', '.join(merge_hooks)
@@ -2580,9 +2633,19 @@ def main():
         # terminal transition must happen *after* that hook has run. We detect
         # hook completion by requiring a non-empty pr, a set mod-block (hook
         # in flight), or --force. If none of those hold, the FO is trying to
-        # skip the hook entirely — refuse so the hook cannot be bypassed.
-        if (not force and is_terminal_update() and not mod_block
-                and not post_update_pr and post_update_verdict != 'rejected'):
+        # skip the hook entirely — refuse so the hook cannot be bypassed. Under
+        # `merge: local` the workflow has declared it merges locally, so the
+        # pr-requirement is exempted; this relaxes the guard CHECK only — the
+        # mod-block-pending and combined-clear guards above are policy-
+        # independent, so the mandatory set->invoke->clear ceremony is unaffected.
+        try:
+            merge_policy = resolve_merge_policy(pipeline_dir)
+        except ValueError as e:
+            print('Error: ' + str(e), file=sys.stderr)
+            sys.exit(1)
+        if (not force and merge_policy != 'local' and is_terminal_update()
+                and not mod_block and not post_update_pr
+                and post_update_verdict != 'rejected'):
             merge_hooks = scan_mods(pipeline_dir).get('merge', [])
             if merge_hooks:
                 hook_list = ', '.join(merge_hooks)

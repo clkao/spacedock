@@ -233,6 +233,22 @@ When an entity reaches its terminal stage:
 8. Archive the entity into `{workflow_dir}/_archive/` with `spacedock status --workflow-dir {workflow_dir} --archive {slug}`.
 9. Remove the worktree (`git worktree remove {path}`) and delete the local branch (`git branch -d {branch}`). Do NOT delete the remote branch while a PR is still pending — the PR reviewer needs it on the remote. Remote-branch cleanup belongs to the PR merge, not the FO.
 
+### Ship-Local Ceremony
+
+When the merge boundary has no PR host — the README declares `merge: local`, or the pr-merge fallback applies (no `gh`, push failed, captain chose local) — the FO runs ONE fixed ceremony per entity instead of re-deriving the steps. The README's top-level `merge:` key (read at boot, default `pr`) selects whether this ceremony or the PR path applies. The happy path uses NO `--force`:
+
+1. Set the merge mod-block before invoking the hook: `spacedock status --workflow-dir {workflow_dir} --set {slug} mod-block=merge:{mod_name}` (commit path-scoped).
+2. Invoke the merge hook, which performs the local `--no-ff` merge of `{branch}` onto `next`.
+3. Record the merge truthfully so the terminal guard is satisfied without `--force`:
+   - If the README declares `merge: local`, the policy exempts the pr-requirement — skip to step 4.
+   - Otherwise set the post-merge sentinel `spacedock status --workflow-dir {workflow_dir} --set {slug} pr=local-merge:{short-sha}` where `{short-sha}` is the merge commit that now exists on `next` (set it ONLY after the merge has landed; commit path-scoped). The status table renders it as `{short-sha} (local)`.
+4. Clear the mod-block in its own standalone `--set`: `spacedock status --workflow-dir {workflow_dir} --set {slug} mod-block=` (commit path-scoped). The clear MUST be separate from terminalization — the guard refuses combining `mod-block=` with terminal fields.
+5. Terminalize: `spacedock status --workflow-dir {workflow_dir} --set {slug} completed verdict={verdict} worktree=`.
+6. Archive: `spacedock status --workflow-dir {workflow_dir} --archive {slug}`.
+7. Remove the worktree and delete the local branch as in Merge-and-Cleanup step 9.
+
+The set→invoke→clear sequence (steps 1, 2, 4) stays MANDATORY when a merge hook is registered, regardless of `merge: local`. The policy relaxes only the guard's pr-requirement; it does not authorize skipping the hook or terminalizing without having merged. `--force` is never part of this ceremony's happy path — if the guard refuses, a step was skipped, not a flag forgotten.
+
 ### Worktree removal safety
 
 Use `git worktree remove {path}` (no `--force`). The default
@@ -317,7 +333,7 @@ Merge hooks can create blocking conditions (e.g., captain approval before pushin
 - **Set** by the FO before invoking a merge hook: `mod-block=merge:{mod_name}`
 - **Cleared** by the FO after the hook's blocking action completes or the captain force-overrides. The clear runs in its own `--set` call — `status --set` refuses to clear `mod-block` and apply terminal fields (`status={terminal}`, `completed`, `verdict`, `worktree=`) in the same command unless `--force` is passed.
 - **Guarded** by `status --set`, which refuses terminal transitions (status to a terminal stage, completed, verdict, worktree clear) while `mod-block` is non-empty unless `--force` is passed.
-- **Enforced at the mechanism level** — `status --set` and `status --archive` refuse terminal transitions and archival when the workflow has registered merge hooks (`_mods/*.md` with `## Hook: merge`) AND `pr` is empty AND `mod-block` is empty, regardless of whether the FO set `mod-block` first. In that state the hook has provably not run, so terminal advancement is rejected with an error naming the hook. `--force` bypasses this check. This catches the FO forgetting to set `mod-block`.
+- **Enforced at the mechanism level** — `status --set` and `status --archive` refuse terminal transitions and archival when the workflow has registered merge hooks (`_mods/*.md` with `## Hook: merge`) AND `pr` is empty AND `mod-block` is empty, regardless of whether the FO set `mod-block` first. In that state the hook has provably not run, so terminal advancement is rejected with an error naming the hook. `--force` bypasses this check. This catches the FO forgetting to set `mod-block`. When the README declares `merge: local`, this check exempts the pr-requirement (the workflow merges locally, so an empty `pr` is expected) — but only the pr-requirement: the mod-block-pending and combined-clear refusals above are policy-independent, so the set→invoke→clear ceremony stays mandatory. See the Ship-Local Ceremony under Merge and Cleanup.
 - **Survives session resume** — the FO reads `mod-block` from entity frontmatter on boot and resumes the pending action.
 
 ## Standing Teammates

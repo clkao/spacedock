@@ -131,7 +131,7 @@ func printStatusTable(w io.Writer, entities []*entity, stages []Stage, extras []
 	for _, e := range sorted {
 		cells := make([]string, len(extras))
 		for i, name := range extras {
-			cells[i] = formatExtraCell(e.fields[name])
+			cells[i] = formatColumnCell(name, e.fields[name])
 		}
 		fmt.Fprintln(w, base(e.fields["id"], e.fields["slug"], e.fields["status"],
 			e.fields["title"], e.fields["score"], e.fields["source"])+" "+joinExtras(cells))
@@ -230,14 +230,15 @@ func dispatchAnalysis(entities []*entity, stages []Stage) ([]dispatchable, map[*
 // suppressedByField is the computed field name the #230 visibility surface
 // exposes via --fields / --where. It is NOT a frontmatter key: it is derived
 // from the --next dispatch analysis, so it is materialized only when explicitly
-// named and is deliberately excluded from --all-fields (which documents stored
-// frontmatter keys).
+// named. --all-fields alone does not surface it (it is not a stored key), but
+// once it is materialized because the same invocation also named it via --fields
+// or --where, --all-fields includes it like any other present field.
 const suppressedByField = "next-suppressed-by"
 
 // materializeSuppressedBy writes the computed next-suppressed-by reason into
 // each entity's fields ONLY when the field is explicitly referenced by --fields
-// or a --where clause. Gating it keeps the value out of --all-fields and out of
-// the default field set (e.fields is otherwise untouched), so the parity-pinned
+// or a --where clause. When it is not referenced, e.fields is untouched, so the
+// value stays out of --all-fields and the default field set and the parity-pinned
 // frontmatter-keys surfaces stay byte-identical. The reason is computed from the
 // shared dispatch analysis over the read's entity set, so the surface mirrors
 // --next exactly. Stages may be nil (no stages block) — then every entity gets
@@ -297,7 +298,7 @@ func printNextTable(w io.Writer, entities []*entity, stages []Stage, extras []st
 	for _, d := range disp {
 		cells := make([]string, len(extras))
 		for i, name := range extras {
-			cells[i] = formatExtraCell(d.e.fields[name])
+			cells[i] = formatColumnCell(name, d.e.fields[name])
 		}
 		fmt.Fprintln(w, base(d.e.fields["id"], d.e.fields["slug"], d.e.fields["status"], d.next, d.nextWorktree)+" "+joinExtras(cells))
 	}
@@ -341,6 +342,33 @@ func dashSeps(headers []string) []string {
 		out[i] = strings.Repeat("-", n)
 	}
 	return out
+}
+
+// localMergeSentinelPrefix is the pr-field prefix the no-PR fallback writes
+// (`pr=local-merge:{short-sha}`) to honestly record that a local merge — not a
+// remote PR — shipped the entity. The table renders such a value distinctly so a
+// reader can tell a local merge from a real PR reference.
+const localMergeSentinelPrefix = "local-merge:"
+
+// formatPRCell renders the pr column: a local-merge sentinel
+// (`local-merge:{short-sha}`) shows as `{short-sha} (local)`, distinguishing the
+// no-PR fallback from a real PR reference; any other value renders unchanged.
+// Truncation is applied after the transform via formatExtraCell.
+func formatPRCell(value string) string {
+	if sha := strings.TrimPrefix(value, localMergeSentinelPrefix); sha != value {
+		value = sha + " (local)"
+	}
+	return formatExtraCell(value)
+}
+
+// formatColumnCell renders an extra-column cell by field name, routing the pr
+// field through the local-merge-sentinel transform and every other field through
+// the plain extra-cell formatter.
+func formatColumnCell(name, value string) string {
+	if name == "pr" {
+		return formatPRCell(value)
+	}
+	return formatExtraCell(value)
 }
 
 // formatExtraCell renders an extra-column cell: blank for empty, truncate to 20
