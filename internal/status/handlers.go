@@ -149,7 +149,18 @@ func runSet(roots roots, set *setUpdate, args []string, whereFilters []whereFilt
 		}
 	}
 
-	if !force && isTerminalUpdate() && modBlock == "" && postUpdatePR == "" && postUpdateVerdict != "rejected" {
+	// Merge-hook invariant: when the workflow registers a merge hook, refuse a
+	// terminal transition that has skipped it (empty pr AND empty mod-block).
+	// Under `merge: local` the workflow has declared it merges locally, so the
+	// pr-requirement is exempted — a cleared mod-block stands as proof the
+	// ceremony ran. This relaxes the guard CHECK only; the mod-block-pending and
+	// combined-clear-with-terminal guards above are policy-independent, so the
+	// mandatory set->invoke->clear ceremony structure is unaffected.
+	policy, perr := resolveMergePolicy(roots.definitionDir)
+	if perr != nil {
+		return errExit(stderr, perr.Error())
+	}
+	if !force && policy != mergeLocal && isTerminalUpdate() && modBlock == "" && postUpdatePR == "" && postUpdateVerdict != "rejected" {
 		mergeHooks := scanMods(roots.definitionDir)["merge"]
 		if len(mergeHooks) > 0 {
 			return errExit(stderr, fmt.Sprintf(

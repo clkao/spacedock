@@ -216,8 +216,16 @@ func runArchive(definitionDir, entityDir, spellingDir, slug string, force, quiet
 	}
 
 	// Merge-hook invariant: archival is terminal. Refuse unless the hook ran
-	// (pr set), is in flight (mod-block set, handled above), or --force.
-	if !force && modBlock == "" && pr == "" {
+	// (pr set), is in flight (mod-block set, handled above), or --force. Under
+	// `merge: local` the pr-requirement is exempted — the workflow declared it
+	// merges locally, so an empty pr is expected at archival; the mod-block guard
+	// above (policy-independent) still catches an in-flight ceremony.
+	policy, perr := resolveMergePolicy(definitionDir)
+	if perr != nil {
+		fmt.Fprintf(stderr, "Error: %s\n", perr)
+		return 1
+	}
+	if !force && policy != mergeLocal && modBlock == "" && pr == "" {
 		mergeHooks := scanMods(definitionDir)["merge"]
 		if len(mergeHooks) > 0 {
 			fmt.Fprintf(stderr,

@@ -67,6 +67,37 @@ func resolveRoots(workflowDir, baseDir string) (roots, error) {
 	return r, nil
 }
 
+// mergePolicy is a workflow's declared merge policy, read from the README's
+// top-level `merge:` key. It tells the terminal-transition guard whether a PR is
+// expected at the merge boundary (mergePR) or the workflow merges locally
+// (mergeLocal). Under mergeLocal the guard exempts the pr-requirement of the
+// merge-hook invariant; it never relaxes the ceremony structure.
+type mergePolicy int
+
+const (
+	mergePR mergePolicy = iota
+	mergeLocal
+)
+
+// resolveMergePolicy reads the README's top-level `merge:` key and returns the
+// declared policy. An absent or empty key defaults to mergePR — byte-identical to
+// a workflow that never declared the key. An unknown value is rejected loudly
+// rather than silently coerced to mergePR, so a typo (`merge: locl`) fails fast
+// instead of silently demanding a PR forever. Matches the oracle's
+// resolve_merge_policy.
+func resolveMergePolicy(definitionDir string) (mergePolicy, error) {
+	value := strings.TrimSpace(ParseFrontmatter(filepath.Join(definitionDir, "README.md"))["merge"])
+	switch value {
+	case "", "pr":
+		return mergePR, nil
+	case "local":
+		return mergeLocal, nil
+	default:
+		// Single-quote the bad value to match the oracle's {value!r} repr.
+		return mergePR, fmt.Errorf("README merge: must be 'local' or 'pr' (or absent for the default 'pr'), not '%s'", value)
+	}
+}
+
 // spellingOr returns the as-passed spelling when non-empty, else the absolute
 // fallback, so a state-checkout dest still renders coherently when the workflow
 // dir was derived from baseDir rather than passed explicitly.
