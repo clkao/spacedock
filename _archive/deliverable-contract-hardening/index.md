@@ -6,6 +6,7 @@ source: sprint — FO/captain (deliverable-principles + TDD/template study)
 score: "0.34"
 worktree:
 started: 2026-05-30T22:25:57Z
+archived: 2026-06-01T02:35:28Z
 ---
 
 > **SUPERSEDED 2026-06-01 — decomposed into three focused tasks** (captain + staff review found this
