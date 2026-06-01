@@ -1,7 +1,7 @@
 ---
 id: 0xcqyh24hr5xnek3kfp8makg
 title: Architecture-review cleanups — share pyJoin, fix parity-test skip-vs-fail, drop dead code
-status: implementation
+status: validation
 source: sprint — architecture review (must-fix #2/#3 + now-safe nice-to-haves)
 score: "0.28"
 worktree: .worktrees/spacedock-ensign-architecture-review-cleanups
