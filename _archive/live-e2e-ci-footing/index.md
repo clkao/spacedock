@@ -9,6 +9,7 @@ completed: 2026-05-31T23:52:43Z
 verdict: PASSED
 worktree: 
 issue:
+archived: 2026-05-31T23:52:43Z
 ---
 
 The repo `spacedock-dev/spacedock` already has three GitHub **Environments with required-reviewer
