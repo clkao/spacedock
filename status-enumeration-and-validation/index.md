@@ -253,3 +253,22 @@ Landed three of the four ACs and the fold-in, all parity-paired Go+oracle where 
 ### Summary
 
 AC-1 (#230) landed this cycle exactly to the ratified shape: an additive, parity-paired next-suppressed-by surface over the existing --fields/--where machinery, gated out of --all-fields, with --next semantics untouched (dispatchAnalysis is shared so the reason can't drift from dispatch). The advance-after-report enforcement was correctly left as a separate prose-contract follow-up per the ruling and recorded as a documented-behavior note. internal/status fully green (285). Three of four ACs + AC-4's stage-field half + the fold-in are now complete and committed. The ONLY remaining work is AC-4's generic entity-value strip (captain chose option C: blanket + auto-quote-on-write), which team-lead explicitly instructed me to hold until the existing-entity migration disposition is finalized. I am holding as directed, not blocked on my own analysis.
+
+## Stage Report: implementation (cycle 3)
+
+All four ACs are now complete. This cycle clears the previously-held AC-4(ii).
+
+- DONE: AC-1 (#230) additive next-suppressed-by visibility surface
+  Cycle 2 (commit 21838fa7). next-suppressed-by ∈ {""|worktree-set|concurrency-full|gate|terminal} via --fields/--where, gated out of --all-fields, --next unchanged (shared dispatchAnalysis), oracle-mirrored. Test next_suppressed_by_test.go distinguishes all three reasons + "" dispatchable, native-vs-oracle. Documented-by-design note in body. AC-1(b) advance-after-report left to FO/ensign prose follow-up per ruling (not touched).
+- DONE: AC-2 (#207) enumeration-scope-by-placement rule declared + parity-pinned
+  Cycle 1 (commit 614d9156). Go already mirrored the oracle; placement decides scope. Characterization test enum_scope_test.go (native-vs-oracle, both placements) + README prose.
+- DONE: AC-3 (#189) --set status= membership check, parity-paired Go+oracle
+  Cycle 1 (commit 91481106). Non-member exits 1 with actionable known-stages list, frontmatter unchanged; member accepted. Differential test set_stage_membership_test.go.
+- DONE: AC-4 (#163) inline-comment strip — BOTH halves now landed, parity-paired Go+oracle
+  Stage numeric/bool fields: cycle 1 (commit 04c1e950), stripInlineComment in both parse paths, --next dispatch differential. Generic entity values (part ii, option C, cycle 3 commit 89af53b9): parse_value strips an inline comment from ALL values (whitespace-preceded # = comment; unspaced token kept) and protects an interior # inside a quoted scalar; quote_for_write quotes a written value containing ` #` so it round-trips (no re-truncate on --set); values without ` #` byte-preserved. Mirrored in the oracle. Differential round-trip test comment_roundtrip_parity_test.go: a #-bearing --set value is written quoted and reads back whole, byte-identical launcher-vs-oracle. Existing UNQUOTED #-bearing values truncate on read — accepted option-C behavior; NO migration/back-compat in the binary (the one-off repo state migration is the FO's job per team-lead, NOT touched here).
+- DONE: FOLD-IN — stale runArchive doc-comment trimmed
+  Cycle 1 (commit 614d9156).
+
+### Summary
+
+All four consolidated issues are resolved and parity-paired Go+oracle where the surface is parity-pinned. internal/status fully green (295 tests); native-vs-oracle default and --all-fields reads byte-identical; the only full-run cli failure remains the pre-existing env-only TestCodexResolveManifestAgainstInstalledHost the dispatch flagged as not-a-regression. AC-4(ii) shipped per the captain's ratified option C: blanket reader-strip + writer-quote + accept-truncation of legacy unquoted #-bearing values, with the live state-checkout quote-migration explicitly left to the FO (not done here, state checkout untouched except this report). Five code commits on branch spacedock-ensign/status-enumeration-and-validation: 91481106, 614d9156, 04c1e950, 21838fa7, 89af53b9. Expecting the detached adversarial audit at validation (internal/status read/scheduling + parity + merge-guard-adjacent surface).
