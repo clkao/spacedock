@@ -9,7 +9,7 @@ verdict:
 score: "0.30"
 worktree: .worktrees/spacedock-ensign-live-e2e-pr-trigger-ergonomics
 issue:
-mod-block: merge:pr-merge
+mod-block: 
 pr: #245
 ---
 
