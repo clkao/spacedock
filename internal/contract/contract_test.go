@@ -78,7 +78,7 @@ func TestCompare(t *testing.T) {
 		{"too-old-plugin-at-hi", 2, ">=1,<2", TooOldPlugin, "too-old-plugin"},
 		{"too-old-plugin-above-hi", 5, ">=1,<2", TooOldPlugin, "too-old-plugin"},
 		{"malformed", 1, ">=1", MalformedRange, "malformed contract range"},
-		{"malformed-empty", 1, "", MalformedRange, "malformed contract range"},
+		{"predates-contract-empty", 1, "", PluginPredatesContract, "spacedock init --host claude"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -118,6 +118,48 @@ func TestCompareMessageShape(t *testing.T) {
 		if !strings.Contains(res.Message, "Run `spacedock doctor`") {
 			t.Errorf("Compare(%d,%q) message missing doctor pointer: %q", c.contract, c.raw, res.Message)
 		}
+	}
+}
+
+// TestPluginPredatesContractRemedy locks the new verdict for an absent/empty
+// requires-contract: it names the `spacedock init --host <host>` one-liner,
+// reflects the dev branch (@next) when set, and OMITS the `plugin update`
+// fallback that reusing too-old-plugin would drag in (that fallback no-ops on a
+// stale install). A whitespace-only value routes here too; a non-empty
+// unparseable value still reads as a packaging bug.
+func TestPluginPredatesContractRemedy(t *testing.T) {
+	for _, raw := range []string{"", "   "} {
+		res := Compare(1, raw, "claude", "next")
+		if res.Verdict != PluginPredatesContract {
+			t.Fatalf("Compare(1,%q) verdict = %v, want plugin-predates-contract", raw, res.Verdict)
+		}
+		if !strings.Contains(res.Message, "spacedock init --host claude") {
+			t.Errorf("predates-contract remedy missing init one-liner: %q", res.Message)
+		}
+		if !strings.Contains(res.Message, "@next") {
+			t.Errorf("predates-contract remedy missing @next branch: %q", res.Message)
+		}
+		if strings.Contains(res.Message, "plugin update") {
+			t.Errorf("predates-contract remedy must omit the no-op `plugin update` fallback: %q", res.Message)
+		}
+	}
+
+	// With no dev branch, the remedy is the clean release one-liner (no @suffix).
+	plain := Compare(1, "", "claude", "")
+	if strings.Contains(plain.Message, "@next") {
+		t.Errorf("predates-contract remedy with no branch should omit @next: %q", plain.Message)
+	}
+	if !strings.Contains(plain.Message, "spacedock init --host claude") {
+		t.Errorf("predates-contract remedy with no branch missing init one-liner: %q", plain.Message)
+	}
+
+	// A non-empty unparseable value is still a packaging bug, not predates-contract.
+	bug := Compare(1, ">=1", "claude", "next")
+	if bug.Verdict != MalformedRange {
+		t.Fatalf("Compare(1,%q) verdict = %v, want malformed-range", ">=1", bug.Verdict)
+	}
+	if !strings.Contains(bug.Message, "This is a packaging bug") {
+		t.Errorf("non-empty malformed should keep the packaging-bug message: %q", bug.Message)
 	}
 }
 

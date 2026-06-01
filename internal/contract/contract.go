@@ -37,6 +37,12 @@ const (
 	// host. Distinct, non-fatal-by-default; reported rather than asserting
 	// compatibility.
 	NoPluginFound
+	// PluginPredatesContract means the manifest has no requires-contract field at
+	// all: the installed plugin predates the contract mechanism. Kin to
+	// too-old-plugin, but with no range to name; remedy reinstalls via
+	// `spacedock init` and omits the `plugin update` fallback (which no-ops on a
+	// stale install).
+	PluginPredatesContract
 )
 
 // String renders the verdict's stable kebab-case token (the oracle string AC-1
@@ -53,6 +59,8 @@ func (v Verdict) String() string {
 		return "malformed-range"
 	case NoPluginFound:
 		return "no-plugin-found"
+	case PluginPredatesContract:
+		return "plugin-predates-contract"
 	default:
 		return "unknown"
 	}
@@ -110,6 +118,12 @@ func Compare(c int, raw, host, branch string) Result {
 // compareWithManifest is Compare with an optional manifest path woven into the
 // malformed-range message so a packaging bug names the offending file.
 func compareWithManifest(c int, raw, host, branch, manifestPath string) Result {
+	if strings.TrimSpace(raw) == "" {
+		return Result{
+			Verdict: PluginPredatesContract,
+			Message: pluginPredatesContractRemedy(host, branch),
+		}
+	}
 	lo, hi, err := ParseRange(raw)
 	if err != nil {
 		loc := manifestPath
@@ -168,6 +182,24 @@ func tooOldPluginRemedy(c int, rangeStr, host string) string {
 		"too-old-plugin: your installed plugin (needs %s) predates this binary (contract %d). "+
 			"Update it: spacedock init --host %s (or '%s plugin update spacedock').",
 		rangeStr, c, host, host)
+}
+
+// pluginPredatesContractRemedy is the pinned remedy for an installed plugin that
+// predates the contract mechanism (no requires-contract field). It names the
+// `spacedock init` one-liner — never raw `<host> plugin` commands — and omits the
+// `plugin update` fallback, which no-ops on a stale already-installed plugin. The
+// host is parameterized; the optional pre-release branch suffixes the reinstall
+// source so a dev install reflects the branch (the default release path omits it).
+func pluginPredatesContractRemedy(host, branch string) string {
+	source := "spacedock-dev/spacedock"
+	if branch != "" {
+		source += "@" + branch
+	}
+	return fmt.Sprintf(
+		"plugin-predates-contract: your installed Spacedock plugin is out of date "+
+			"(predates this binary's contract). Upgrade it: spacedock init --host %s "+
+			"(reinstalls from %s).",
+		host, source)
 }
 
 // noPluginMessage is the pinned no-plugin-found report for a host. Not a

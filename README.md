@@ -41,6 +41,17 @@ go build -o spacedock ./cmd/spacedock
 `--plugin-dir` loads the repo's own vendored `spacedock:first-officer` /
 `spacedock:ensign` skills and relaxes the contract gate.
 
+**Upgrade a stale plugin** — when `spacedock doctor` reports your installed
+plugin is out of date (predates this binary's contract), reinstall it:
+
+```bash
+spacedock init --host claude
+```
+
+`spacedock init` reinstalls from `spacedock-dev/spacedock@next`, replacing a
+stale already-installed plugin (it uninstalls before installing, since a plain
+`plugin install` no-ops when the plugin is already present).
+
 [safehouse](https://agent-safehouse.dev) is a separate runtime dependency for
 sandboxed launches — not installed by either lane. A `.safehouse` profile in the
 working directory (or the `--safehouse` / `--safehouse-<key>=…` flags) wraps the

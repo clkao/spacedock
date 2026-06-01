@@ -5,6 +5,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"reflect"
 	"testing"
 )
 
@@ -45,5 +46,31 @@ func TestMarketplaceAddArgvCarriesRef(t *testing.T) {
 	}
 	if got := marketplaceAddArg("spacedock-dev/spacedock", ""); got != "spacedock-dev/spacedock" {
 		t.Errorf("marketplaceAddArg without branch = %q, want bare source", got)
+	}
+}
+
+// TestInstallArgvSequence locks AC-2: execHost.Install issues the 3-command
+// upgrade shape — marketplace add (with the @ref pin), then `plugin uninstall
+// spacedock@spacedock`, then `plugin install spacedock@spacedock`, in that order.
+// The uninstall step is what moves a stale already-installed plugin off (plain
+// install no-ops on it); uninstall is itself a no-op on a fresh box. With an
+// empty branch the marketplace arg is the bare source.
+func TestInstallArgvSequence(t *testing.T) {
+	wantWithBranch := [][]string{
+		{"plugin", "marketplace", "add", "spacedock-dev/spacedock@next"},
+		{"plugin", "uninstall", "spacedock@spacedock"},
+		{"plugin", "install", "spacedock@spacedock"},
+	}
+	if got := installArgvSequence("spacedock-dev/spacedock", "next"); !reflect.DeepEqual(got, wantWithBranch) {
+		t.Errorf("installArgvSequence(branch=next) = %v, want %v", got, wantWithBranch)
+	}
+
+	wantBareSource := [][]string{
+		{"plugin", "marketplace", "add", "spacedock-dev/spacedock"},
+		{"plugin", "uninstall", "spacedock@spacedock"},
+		{"plugin", "install", "spacedock@spacedock"},
+	}
+	if got := installArgvSequence("spacedock-dev/spacedock", ""); !reflect.DeepEqual(got, wantBareSource) {
+		t.Errorf("installArgvSequence(no branch) = %v, want %v", got, wantBareSource)
 	}
 }
