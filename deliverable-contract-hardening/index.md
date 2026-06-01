@@ -8,6 +8,14 @@ worktree:
 started: 2026-05-30T22:25:57Z
 ---
 
+> **SUPERSEDED 2026-06-01 — decomposed into three focused tasks** (captain + staff review found this
+> entity too broad and the guard design needing rework). This entity is now the **design parent /
+> reference only** (its ideation design, the 172-AC self-reference classifier spike, and the staff
+> review remain the source material). The work ships as:
+> - **A — `require-external-proof-guard`** (id `2adcrvj56b5camy1v70c4ncc`): the code guard in `internal/status` (carries staff fixes M1–M4).
+> - **B — `ship-working-principles-in-contract`** (id `segh9j67xb7hv1qxgqzxe90g`): the shipped-instruction prose (principles + FO posture + test-first), coordinated with zs.
+> - **C — `no-hidden-machine-dependencies`** (id `5tsqmdd3vtj1s8d8gmf50efj`): the portability test, scoped to `skills/` (staff fix M5).
+
 ## Problem
 
 Encode the hard-won deliverable principles into the SHIPPED spacedock contract so future dev work cannot drift into the doc-only / grep-proof antipatterns, and so the discipline travels with the published plugin rather than depending on any one user's environment. Design inputs (both in `docs/dev/_proposals/`): `encoding-deliverable-principles.md` (the four principles + the code guard, with exact before/after wording) and `tdd-and-template-adoption.md` (template comparison + ergonomics) — **with that study's "rely on global CLAUDE.md" TDD conclusion SUPERSEDED** (see AC-3 / Notes).
