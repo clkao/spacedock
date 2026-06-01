@@ -1,11 +1,11 @@
 ---
 id: jxg4re5argq10x5y87sjbzkz
 title: pr-merge mod audit-link must reference the orphan state-branch, not the code SHA
-status: ideation
+status: done
 source: captain (2026-06-01) — pr-mod audit link 404s; entity lives on the orphan branch, not the code commit
 started: 2026-06-01T04:46:05Z
-completed:
-verdict:
+completed: 2026-06-01T14:43:16Z
+verdict: PASSED
 score: 0.34
 worktree:
 issue:
