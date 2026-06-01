@@ -1,13 +1,13 @@
 ---
 id: q12h3wny9k4ceq5xq4rnzn1t
 title: live-e2e PR trigger ergonomics — drop the label gate, rely on the environment-approval gate (or auto-label)
-status: ideation
+status: implementation
 source: CL (2026-05-31) — "labeling pr requiring e2e live on creation, otherwise they don't trigger… or mimic old main's ci-setting where they're always pending and we explicitly approve env"
 started: 2026-06-01T05:04:22Z
 completed:
 verdict:
 score: "0.30"
-worktree:
+worktree: .worktrees/spacedock-ensign-live-e2e-pr-trigger-ergonomics
 issue:
 ---
 
