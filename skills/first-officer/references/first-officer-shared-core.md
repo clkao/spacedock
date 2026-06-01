@@ -123,6 +123,14 @@ When a worker completes:
 2. Review it against the checklist. Every dispatched item must be represented as DONE, SKIPPED, or FAILED.
 3. If items are missing, send the worker back once to repair the report.
 4. Check whether the completed stage is gated.
+5. **Validate stage output exists (pre-transition gate).** For every non-initial, non-terminal stage that has a `skill:` property in the README stage definition, grep the entity file for `## {Stage_Name} Output` (where `Stage_Name` is the stage name with first letter capitalized — e.g., `## Sharp Output`, `## Plan Output`, `## Execute Output`). This follows the entity-body-schema convention: each stage writes up to 3 blocks (`Output`, `Report`, `UAT`) with headers `## {Stage} {Block}`.
+
+   - **If the output section is missing or empty** (header absent, or header present but no content before the next `##`):
+     - Do NOT advance the entity. Keep status at the completed stage.
+     - Emit captain-visible diagnostic: `"⚠️ {slug}: {stage} worker completed but ## {Stage_Name} Output is missing from entity file. Stage Report exists but output was not written. Blocking advancement — re-dispatch or escalate."`
+     - Re-dispatch the worker once (same stage, same entity) with instruction: `"Your ## {Stage_Name} Output section is missing from the entity file. Re-read your skill and write the required output sections before sending completion."` If the re-dispatch also fails to produce the output section → escalate to captain and halt.
+   - **If the output section exists and has content** → proceed normally.
+   - **Skip this check** for stages without `skill:` (e.g., `draft`, `done`) — these have no agent-produced output.
 
 The checklist review produces an explicit count summary:
 - `{N} done, {N} skipped, {N} failed`
