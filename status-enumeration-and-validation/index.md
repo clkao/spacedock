@@ -9,7 +9,7 @@ verdict:
 score: "0.28"
 worktree: .worktrees/spacedock-ensign-status-enumeration-and-validation
 issue:
-mod-block: merge:pr-merge
+mod-block: 
 pr: #254
 ---
 
