@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -81,6 +82,24 @@ func runNative(stdin string, args ...string) runResult {
 // non-fetch bytes can be byte-compared after carving out the one rewritten line.
 func rewriteOracleFetch(s string) string {
 	return strings.ReplaceAll(s, oracleFetchPrefix, nativeFetchPrefix)
+}
+
+// stateCommitGuidanceLine matches the split-root state-commit guidance sentence
+// (a single line ending in "after a short wait.\n"). The native emitter and the
+// Python oracle diverge here intentionally — the same documented divergence as
+// the fetch line: the oracle ships the gated literal-brace block (and emits
+// nothing at all for non-worktree split-root stages), while the native emitter
+// substitutes resolved absolute paths on both branches. The body-parity compare
+// strips this block from BOTH sides so the unchanged bytes still byte-match; the
+// diverged content is covered by build_statecommit_test.go instead.
+var stateCommitGuidanceLine = regexp.MustCompile(`This workflow is split-root: [^\n]*? after a short wait\.\n`)
+
+// stripStateCommitGuidance removes the diverged state-commit guidance line and
+// collapses the blank-line artifact left where it was removed, so a body with
+// the block and a body without it normalize to the same bytes.
+func stripStateCommitGuidance(s string) string {
+	s = stateCommitGuidanceLine.ReplaceAllString(s, "")
+	return regexp.MustCompile(`\n{3,}`).ReplaceAllString(s, "\n\n")
 }
 
 // assertParity compares the native run against the oracle run on all three

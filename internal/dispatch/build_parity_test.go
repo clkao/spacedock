@@ -139,9 +139,11 @@ func TestBuildParityCrossProduct(t *testing.T) {
 			nativeBody := readDispatchBody(t, dispatchFilePathFromStdout(t, native.stdout))
 
 			assertParity(t, tc.name, native, oracle)
-			if nativeBody != rewriteOracleFetch(oracleBody) {
+			wantBody := stripStateCommitGuidance(rewriteOracleFetch(oracleBody))
+			gotBody := stripStateCommitGuidance(nativeBody)
+			if gotBody != wantBody {
 				t.Errorf("%s: dispatch body mismatch\n--- native ---\n%s\n--- oracle(rewritten) ---\n%s",
-					tc.name, nativeBody, rewriteOracleFetch(oracleBody))
+					tc.name, gotBody, wantBody)
 			}
 		})
 	}
